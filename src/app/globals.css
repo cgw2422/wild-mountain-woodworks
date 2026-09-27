@@ -1,0 +1,294 @@
+@import "tailwindcss";
+
+/*
+ * Wild Mountain Woodworks — design tokens
+ *
+ * Palette
+ *   charcoal  Mountain Charcoal — primary text, navigation, footer, buttons
+ *   ivory     Warm Ivory — primary page background
+ *   stone     Warm neutral — secondary backgrounds, borders
+ *   walnut    Deep wood brown — used sparingly
+ *   bronze    Muted bronze — restrained accent (rules, eyebrows, focus)
+ *
+ * Contrast: charcoal on ivory ≈ 15:1, muted text (#5C574F) on ivory ≈ 6.6:1,
+ * bronze-text (#7A5C36) on ivory ≈ 5.6:1, ivory on charcoal ≈ 15:1.
+ */
+@theme {
+  --color-charcoal: #1f1e1c;
+  --color-charcoal-soft: #2b2926;
+  --color-charcoal-muted: #3a3733;
+  --color-ivory: #f7f3ec;
+  --color-ivory-deep: #efe9df;
+  --color-paper: #fbf9f5;
+  --color-stone: #e3dbce;
+  --color-stone-light: #ece6dc;
+  --color-stone-dark: #b8ad9c;
+  --color-walnut: #5a3e2b;
+  --color-walnut-light: #7a5a42;
+  --color-bronze: #9a7b4f;
+  --color-bronze-text: #7a5c36;
+  --color-bronze-light: #c3a67a;
+  --color-muted: #5c574f;
+  --color-muted-light: #b9b1a4;
+  --color-error: #9b2c1f;
+  --color-success: #3f5f3a;
+
+  --font-display: var(--font-cormorant), "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-manrope), "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --text-eyebrow: 0.72rem;
+  --text-eyebrow--letter-spacing: 0.22em;
+  --text-eyebrow--line-height: 1.4;
+
+  --tracking-wordmark: 0.14em;
+  --tracking-button: 0.16em;
+
+  --ease-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  --animate-reveal: reveal 0.9s var(--ease-soft) both;
+  @keyframes reveal {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  --animate-fade: fade 0.6s var(--ease-soft) both;
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background: var(--color-ivory);
+    color: var(--color-charcoal);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background: var(--color-stone);
+    color: var(--color-charcoal);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-bronze-text);
+    outline-offset: 3px;
+  }
+  /* Dark sections keep a visible focus ring */
+  .on-dark :focus-visible {
+    outline-color: var(--color-bronze-light);
+  }
+  button,
+  [role="button"],
+  summary {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  img {
+    -webkit-user-drag: none;
+  }
+}
+
+@layer components {
+  .font-display {
+    font-family: var(--font-display);
+    font-feature-settings: "liga", "kern";
+  }
+  .eyebrow {
+    font-family: var(--font-sans);
+    font-size: var(--text-eyebrow);
+    letter-spacing: var(--text-eyebrow--letter-spacing);
+    line-height: var(--text-eyebrow--line-height);
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  /* Display headings: editorial serif with tight leading. */
+  .display-xl {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(2.6rem, 6.2vw, 5.4rem);
+    line-height: 1.02;
+    letter-spacing: -0.01em;
+  }
+  .display-lg {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(2.2rem, 4.4vw, 3.9rem);
+    line-height: 1.06;
+    letter-spacing: -0.005em;
+  }
+  .display-md {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(1.8rem, 3vw, 2.6rem);
+    line-height: 1.12;
+  }
+  .display-sm {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(1.45rem, 2vw, 1.8rem);
+    line-height: 1.2;
+  }
+  .lede {
+    font-size: clamp(1.02rem, 1.25vw, 1.15rem);
+    line-height: 1.75;
+  }
+
+  /* Animated underline for text links. */
+  .link-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0% 1px;
+    background-position: 0 100%;
+    background-repeat: no-repeat;
+    transition: background-size 0.45s var(--ease-soft);
+    padding-bottom: 2px;
+  }
+  .link-underline:hover,
+  .link-underline:focus-visible,
+  .link-underline[aria-current="page"] {
+    background-size: 100% 1px;
+  }
+  .link-quiet {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 100% 1px;
+    background-position: 0 100%;
+    background-repeat: no-repeat;
+    padding-bottom: 2px;
+    transition: opacity 0.2s;
+  }
+  .link-quiet:hover {
+    opacity: 0.7;
+  }
+
+  /* Long-form content (policy pages, product descriptions). */
+  .prose-wm {
+    font-size: 1.02rem;
+    line-height: 1.8;
+    color: var(--color-charcoal-muted);
+  }
+  .prose-wm > * + * {
+    margin-top: 1.1em;
+  }
+  .prose-wm h2 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 1.9rem;
+    line-height: 1.2;
+    color: var(--color-charcoal);
+    margin-top: 2.2em;
+  }
+  .prose-wm h3 {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--color-charcoal);
+    margin-top: 1.8em;
+  }
+  .prose-wm h2 + *,
+  .prose-wm h3 + * {
+    margin-top: 0.6em;
+  }
+  .prose-wm a {
+    color: var(--color-charcoal);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+  .prose-wm strong {
+    color: var(--color-charcoal);
+    font-weight: 600;
+  }
+  .prose-wm ul,
+  .prose-wm ol {
+    padding-left: 1.2em;
+  }
+  .prose-wm ul {
+    list-style: none;
+  }
+  .prose-wm ul > li {
+    position: relative;
+  }
+  .prose-wm ul > li::before {
+    content: "";
+    position: absolute;
+    left: -1.1em;
+    top: 0.85em;
+    width: 0.45em;
+    height: 1px;
+    background: var(--color-bronze);
+  }
+  .prose-wm ol {
+    list-style: decimal;
+  }
+  .prose-wm li + li {
+    margin-top: 0.4em;
+  }
+  .prose-wm blockquote {
+    border-left: 1px solid var(--color-bronze);
+    padding-left: 1.2em;
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    line-height: 1.5;
+    color: var(--color-charcoal);
+  }
+  .prose-wm hr {
+    border: 0;
+    border-top: 1px solid var(--color-stone);
+    margin: 2.4em 0;
+  }
+  .prose-wm table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+  }
+  .prose-wm th,
+  .prose-wm td {
+    text-align: left;
+    padding: 0.6em 0.8em 0.6em 0;
+    border-bottom: 1px solid var(--color-stone);
+  }
+  .prose-on-dark {
+    color: rgb(247 243 236 / 0.82);
+  }
+  .prose-on-dark h2,
+  .prose-on-dark h3,
+  .prose-on-dark strong,
+  .prose-on-dark a {
+    color: var(--color-ivory);
+  }
+
+  /* Image hover: slow, subtle zoom. */
+  .zoom-on-hover img {
+    transition: transform 1.2s var(--ease-soft);
+  }
+  .group:hover .zoom-on-hover img,
+  .zoom-on-hover:hover img {
+    transform: scale(1.035);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
