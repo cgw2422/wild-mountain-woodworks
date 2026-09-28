@@ -111,7 +111,7 @@ export default async function HomePage() {
                 subheading={categoriesSection.subheading}
                 className="[&_h2]:scroll-mt-24"
                 action={
-                  <Link href="/furniture" className="inline-flex items-center gap-3 text-[0.74rem] font-semibold uppercase tracking-[0.16em]">
+                  <Link href="/furniture" className="inline-flex min-h-11 items-center gap-3 text-[0.74rem] font-semibold uppercase tracking-[0.16em]">
                     <span className="link-underline">Shop all furniture</span>
                     <Arrow />
                   </Link>
@@ -121,7 +121,7 @@ export default async function HomePage() {
             <h2 id="categories-heading" className="sr-only">
               {categoriesSection.heading || "Categories"}
             </h2>
-            <ul className="-mx-5 mt-14 flex snap-x snap-mandatory gap-4 overflow-x-auto px-5 pb-4 sm:mx-0 sm:grid sm:grid-cols-2 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-5 lg:gap-5">
+            <ul className="-mx-5 mt-14 flex snap-x snap-mandatory scroll-px-5 gap-4 overflow-x-auto px-5 pb-4 sm:mx-0 sm:grid sm:grid-cols-2 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-5 lg:gap-5">
               {catalog.categories.map((c, i) => (
                 <li key={c.id} className="w-[72%] shrink-0 snap-start sm:w-auto">
                   <Reveal delay={i * 70}>
@@ -312,7 +312,11 @@ export default async function HomePage() {
 function HeroText({ hero, light }: { hero: ReturnType<Awaited<ReturnType<typeof getPageContent>>["section"]>; light?: boolean }) {
   return (
     <div className="max-w-3xl animate-reveal">
-      {hero.eyebrow ? <Eyebrow light={light} className="mb-6">{hero.eyebrow}</Eyebrow> : null}
+      {hero.eyebrow ? (
+        <Eyebrow light={light} className={light ? "mb-6 text-ivory/90 [&>span:first-child]:bg-ivory/70" : "mb-6"}>
+          {hero.eyebrow}
+        </Eyebrow>
+      ) : null}
       <h1 id="hero-heading" className={light ? "display-xl text-ivory" : "display-xl"}>
         {hero.heading || "Wild Mountain Woodworks"}
       </h1>

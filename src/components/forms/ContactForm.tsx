@@ -2,12 +2,14 @@
 
 import { useEffect, useRef } from "react";
 import { submitContactMessage } from "@/app/(site)/actions";
-import { CONTACT_REASONS } from "@/lib/validation/forms";
-import { usePublicForm } from "./usePublicForm";
+import { CONTACT_REASONS, contactSchema } from "@/lib/validation/forms";
+import { clientValidator, usePublicForm } from "./usePublicForm";
+
+const FORM_OPTS = { validate: clientValidator(contactSchema) };
 import { AntiSpamFields, FormErrorSummary, SelectField, SubmitButton, TextAreaField, TextField } from "./fields";
 
 export function ContactForm({ defaultReason }: { defaultReason?: string }) {
-  const { state, pending, onSubmit, formRef, fieldErrors } = usePublicForm(submitContactMessage);
+  const { state, pending, onSubmit, formRef, fieldErrors } = usePublicForm(submitContactMessage, FORM_OPTS);
   const successRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (state.status === "success") successRef.current?.focus();

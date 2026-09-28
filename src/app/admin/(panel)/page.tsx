@@ -139,7 +139,7 @@ export default async function DashboardPage() {
               title="Recent quote requests"
               className="min-w-0"
               actions={
-                <Link href="/admin/quotes" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 hover:underline">
+                <Link href="/admin/quotes" className="inline-block py-1 text-sm font-medium text-neutral-600 hover:text-neutral-900 hover:underline">
                   View all
                 </Link>
               }
@@ -177,7 +177,7 @@ export default async function DashboardPage() {
               title="Recent custom requests"
               className="min-w-0"
               actions={
-                <Link href="/admin/custom-requests" className="text-sm font-medium text-neutral-600 hover:text-neutral-900 hover:underline">
+                <Link href="/admin/custom-requests" className="inline-block py-1 text-sm font-medium text-neutral-600 hover:text-neutral-900 hover:underline">
                   View all
                 </Link>
               }

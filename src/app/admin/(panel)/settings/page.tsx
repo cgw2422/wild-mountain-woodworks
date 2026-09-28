@@ -70,7 +70,7 @@ export default async function SettingsPage() {
           ...(admin.role === "OWNER" ? [["admins", "Admin users"]] : []),
           ["system", "System status"],
         ].map(([id, label]) => (
-          <a key={id} href={`#${id}`} className="text-neutral-700 underline hover:text-neutral-900">
+          <a key={id} href={`#${id}`} className="inline-block py-1 text-neutral-700 underline hover:text-neutral-900">
             {label}
           </a>
         ))}

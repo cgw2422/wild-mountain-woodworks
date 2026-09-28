@@ -88,7 +88,7 @@ export default async function EditPage({ params }: Props) {
               </a>
             ) : null}
             {def.sections.map((s) => (
-              <a key={s.key} href={`#section-${s.key}`} className="text-neutral-700 underline hover:text-neutral-900">
+              <a key={s.key} href={`#section-${s.key}`} className="inline-block py-1 text-neutral-700 underline hover:text-neutral-900">
                 {s.label}
               </a>
             ))}

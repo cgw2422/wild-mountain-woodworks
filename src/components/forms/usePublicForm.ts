@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, useTransition } from "react";
-import type { FormState } from "@/lib/validation/forms";
+import { fieldErrorsFrom, formDataToObject, type FormState } from "@/lib/validation/forms";
 
 /**
  * Submits a public form to a server action without resetting the user's
@@ -62,4 +62,12 @@ export function usePublicForm(
 
   const fieldErrors = state.status === "error" ? (state.fieldErrors ?? {}) : {};
   return { state, setState, pending, onSubmit, formRef, fieldErrors };
+}
+
+/** Client-side convenience validation using the same schema the server enforces. */
+export function clientValidator(schema: { safeParse: (v: unknown) => { success: true } | { success: false; error: import("zod").ZodError } }) {
+  return (fd: FormData) => {
+    const res = schema.safeParse(formDataToObject(fd));
+    return res.success ? null : fieldErrorsFrom(res.error);
+  };
 }

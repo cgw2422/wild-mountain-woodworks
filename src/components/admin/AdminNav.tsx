@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { Logo } from "@/components/brand/Logo";
 
@@ -49,7 +49,12 @@ const GROUPS: Array<{ label: string; items: Array<{ href: string; label: string;
 export function AdminNav({ counts, userName, logout }: { counts: NavCounts; userName: string; logout: () => Promise<void> }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  useEffect(() => setOpen(false), [pathname]);
+  // Close the mobile menu on navigation (state reset during render).
+  const [lastPath, setLastPath] = useState(pathname);
+  if (pathname !== lastPath) {
+    setLastPath(pathname);
+    setOpen(false);
+  }
 
   const isActive = (href: string) => (href === "/admin" ? pathname === "/admin" : pathname === href || pathname.startsWith(href + "/"));
 
@@ -108,7 +113,7 @@ export function AdminNav({ counts, userName, logout }: { counts: NavCounts; user
     <>
       {/* Mobile top bar */}
       <div className="sticky top-0 z-30 flex h-14 items-center justify-between bg-charcoal px-4 lg:hidden">
-        <Link href="/admin" className="text-ivory" aria-label="Admin dashboard">
+        <Link href="/admin" className="py-3 text-ivory" aria-label="Admin dashboard">
           <Logo variant="horizontal" className="h-4 w-auto" title="" />
         </Link>
         <button

@@ -85,7 +85,9 @@ async function checkPage(browser: Browser, pagePath: string, width: number, cook
     const brokenImages = [...document.images]
       .filter((img) => {
         const r = img.getBoundingClientRect();
-        const visible = r.width > 0 && r.height > 0 && getComputedStyle(img).visibility !== "hidden";
+        // Lazy images parked off-screen horizontally (e.g. carousel slides) aren't loaded yet by design.
+        const onScreenX = r.right > 0 && r.left < window.innerWidth;
+        const visible = onScreenX && r.width > 0 && r.height > 0 && getComputedStyle(img).visibility !== "hidden";
         return visible && (!img.complete || img.naturalWidth === 0);
       })
       .map((img) => img.currentSrc || img.src);
@@ -108,7 +110,7 @@ async function checkPage(browser: Browser, pagePath: string, width: number, cook
     const h1 = document.querySelectorAll("h1").length;
     const missingAlt = [...document.images].filter((img) => !img.hasAttribute("alt")).length;
     const unlabeled = [...document.querySelectorAll<HTMLInputElement>("input:not([type=hidden]), select, textarea")]
-      .filter((el) => !el.closest("[aria-hidden=true]") && !el.labels?.length && !el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby"))
+      .filter((el) => el.getClientRects().length > 0 && !el.closest("[aria-hidden=true]") && !el.labels?.length && !el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby"))
       .map((el) => el.name || el.id);
     return { overflow, brokenImages, links, small, h1, missingAlt, unlabeled };
   });
@@ -136,14 +138,14 @@ async function checkPage(browser: Browser, pagePath: string, width: number, cook
 
 async function autoScroll(page: Page) {
   await page.evaluate(async () => {
-    for (let y = 0; y < document.body.scrollHeight; y += 700) {
+    for (let y = 0; y < document.body.scrollHeight; y += 400) {
       window.scrollTo(0, y);
-      await new Promise((r) => setTimeout(r, 40));
+      await new Promise((r) => setTimeout(r, 90));
     }
     window.scrollTo(0, 0);
   });
   await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(800);
 }
 
 async function main() {

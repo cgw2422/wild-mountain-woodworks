@@ -12,7 +12,7 @@ export function Breadcrumbs({ items, className, light }: { items: Array<{ label:
           {all.map((c, i) => (
             <li key={i} className="flex items-center gap-2">
               {c.href && i < all.length - 1 ? (
-                <Link href={c.href} className="link-underline hover:text-charcoal">
+                <Link href={c.href} className="link-underline inline-block py-1 hover:text-charcoal">
                   {c.label}
                 </Link>
               ) : (

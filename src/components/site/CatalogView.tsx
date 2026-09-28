@@ -91,7 +91,7 @@ function FilterLink({ href, active, children }: { href: string; active: boolean;
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "inline-flex min-h-12 items-center border-b py-3 text-[0.8rem] font-medium tracking-[0.04em] transition-colors",
+        "inline-flex min-h-12 min-w-6 items-center justify-center border-b py-3 text-[0.8rem] font-medium tracking-[0.04em] transition-colors",
         active ? "border-charcoal text-charcoal" : "border-transparent text-muted hover:text-charcoal",
       )}
     >

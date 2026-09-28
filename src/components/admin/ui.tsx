@@ -26,7 +26,7 @@ export function PageHeader({
               {breadcrumbs.map((b, i) => (
                 <li key={i} className="flex items-center gap-1.5">
                   {b.href ? (
-                    <Link href={b.href} className="hover:text-neutral-900 hover:underline">
+                    <Link href={b.href} className="inline-block py-1 hover:text-neutral-900 hover:underline">
                       {b.label}
                     </Link>
                   ) : (

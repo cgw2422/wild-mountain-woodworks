@@ -94,7 +94,7 @@ export default async function HomepageEditor() {
                   <span className="flex flex-wrap items-center gap-2">
                     {!c.visible ? <Badge tone="amber">Hidden in catalog — won&apos;t show</Badge> : null}
                     {!c.image ? <Badge tone="amber">No image</Badge> : null}
-                    <Link href={`/admin/categories/${c.id}`} className="text-xs text-neutral-600 underline hover:text-neutral-900">
+                    <Link href={`/admin/categories/${c.id}`} className="inline-block px-1 py-1 text-xs text-neutral-600 underline hover:text-neutral-900">
                       Edit<span className="sr-only"> {c.name}</span>
                     </Link>
                   </span>
@@ -158,7 +158,7 @@ export default async function HomepageEditor() {
       <nav aria-label="Homepage sections" className="mb-6 flex flex-wrap gap-x-3 gap-y-1 text-sm">
         <span className="text-neutral-500">Jump to:</span>
         {def.sections.map((s) => (
-          <a key={s.key} href={`#section-${s.key}`} className="text-neutral-700 underline hover:text-neutral-900">
+          <a key={s.key} href={`#section-${s.key}`} className="inline-block py-1 text-neutral-700 underline hover:text-neutral-900">
             {s.label}
           </a>
         ))}

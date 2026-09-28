@@ -6,7 +6,7 @@ export function SectionNav({ sections, label = "Sections" }: { sections: Array<{
       <ul className="flex flex-wrap gap-x-3 gap-y-1.5 text-sm lg:flex-col lg:gap-1">
         {sections.map((s) => (
           <li key={s.id}>
-            <a href={`#${s.id}`} className="rounded text-neutral-700 hover:text-neutral-950 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900">
+            <a href={`#${s.id}`} className="inline-block rounded py-1 text-neutral-700 hover:text-neutral-950 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900">
               {s.label}
             </a>
           </li>

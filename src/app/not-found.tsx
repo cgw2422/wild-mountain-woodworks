@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import { SiteChrome } from "@/components/site/SiteChrome";
 import { Container } from "@/components/ui/Container";
 import { ButtonLink } from "@/components/ui/Button";
@@ -6,7 +7,10 @@ import { RidgeLine } from "@/components/brand/Logo";
 
 export const metadata: Metadata = { title: "Page not found", robots: { index: false } };
 
-export default function NotFound() {
+export default async function NotFound() {
+  // Render per request: the header/footer read live settings from the database,
+  // which isn't reachable during the build.
+  await connection();
   return (
     <SiteChrome>
       <Container className="flex flex-col items-center py-28 text-center md:py-40">

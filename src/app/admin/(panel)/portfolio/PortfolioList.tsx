@@ -72,7 +72,7 @@ export function PortfolioList({ projects, onReorder }: { projects: ProjectRow[];
               )}
             </span>
             <span className="min-w-0 flex-1">
-              <Link href={`/admin/portfolio/${p.id}`} className="block truncate text-sm font-medium text-neutral-900 hover:underline">
+              <Link href={`/admin/portfolio/${p.id}`} className="block truncate py-1 text-sm font-medium text-neutral-900 hover:underline">
                 {p.name}
               </Link>
               <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">

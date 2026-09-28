@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { submitCustomRequest } from "@/app/(site)/actions";
-import { TIMELINE_OPTIONS } from "@/lib/validation/forms";
-import { usePublicForm } from "./usePublicForm";
+import { TIMELINE_OPTIONS, customRequestSchema } from "@/lib/validation/forms";
+import { clientValidator, usePublicForm } from "./usePublicForm";
+
+const validate = clientValidator(customRequestSchema);
 import { AntiSpamFields, FormErrorSummary, ReferenceImagesField, SelectField, SubmitButton, TextAreaField, TextField } from "./fields";
 
 export function CustomBuildForm({
@@ -22,6 +24,7 @@ export function CustomBuildForm({
         fd.delete("attachments");
         files.forEach((f) => fd.append("attachments", f));
       },
+      validate,
     }),
     [files],
   );

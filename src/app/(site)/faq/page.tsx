@@ -35,11 +35,11 @@ export default async function FaqPage() {
         {groups.length ? (
           <div className="grid gap-12 lg:grid-cols-12 lg:gap-20">
             {groups.length > 1 ? (
-              <nav aria-label="FAQ topics" className="lg:col-span-3">
+              <nav aria-label="FAQ topics" className="min-w-0 lg:col-span-3">
                 <ul className="flex gap-x-6 gap-y-2 overflow-x-auto pb-2 lg:sticky lg:top-32 lg:flex-col lg:overflow-visible">
                   {groups.map((g) => (
                     <li key={g.id} className="shrink-0">
-                      <a href={`#faq-${g.slug}`} className="link-underline text-[0.8rem] font-medium uppercase tracking-[0.12em] text-muted hover:text-charcoal">
+                      <a href={`#faq-${g.slug}`} className="link-underline inline-block py-1.5 text-[0.8rem] font-medium uppercase tracking-[0.12em] text-muted hover:text-charcoal">
                         {g.name}
                       </a>
                     </li>

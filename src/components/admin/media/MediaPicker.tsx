@@ -86,7 +86,6 @@ export function MediaPickerDialog({
 
   useEffect(() => {
     if (!open) return;
-    setSelected([]);
     const t = setTimeout(() => void load(query, 1), query ? 250 : 0);
     return () => clearTimeout(t);
   }, [open, query, load]);
@@ -99,16 +98,22 @@ export function MediaPickerDialog({
     setSelected((prev) => (prev.some((p) => p.id === item.id) ? prev.filter((p) => p.id !== item.id) : [...prev, item]));
   }
 
+  // Selection is cleared whenever the dialog closes, so it opens fresh.
+  function close() {
+    setSelected([]);
+    onClose();
+  }
+
   function confirm(list = selected) {
     if (!list.length) return;
     onSelect(list);
-    onClose();
+    close();
   }
 
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={close}
       title={title ?? (multiple ? "Add images" : "Choose an image")}
       size="xl"
       footer={
@@ -117,7 +122,7 @@ export function MediaPickerDialog({
             <span className="mr-auto self-center text-sm text-neutral-500">
               {selected.length ? `${selected.length} selected` : ratioHint ? `Displayed at ${ratioHint}. Any size works — it's cropped around the focal point.` : null}
             </span>
-            <button type="button" className={adminButton.secondary} onClick={onClose}>
+            <button type="button" className={adminButton.secondary} onClick={close}>
               Cancel
             </button>
             <button type="button" className={adminButton.primary} disabled={!selected.length} onClick={() => confirm()}>
@@ -233,7 +238,7 @@ export function MediaPickerDialog({
               if (!uploaded.length) return;
               if (multiple) {
                 onSelect(uploaded);
-                onClose();
+                close();
               } else confirm([uploaded[0]!]);
             }}
           />

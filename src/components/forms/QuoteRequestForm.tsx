@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { submitGeneralQuote } from "@/app/(site)/actions";
-import { TIMELINE_OPTIONS } from "@/lib/validation/forms";
-import { usePublicForm } from "./usePublicForm";
+import { TIMELINE_OPTIONS, generalQuoteSchema } from "@/lib/validation/forms";
+import { clientValidator, usePublicForm } from "./usePublicForm";
+
+const validate = clientValidator(generalQuoteSchema);
 import { AntiSpamFields, FormErrorSummary, ReferenceImagesField, SelectField, SubmitButton, TextAreaField, TextField } from "./fields";
 
 export function QuoteRequestForm({
@@ -22,6 +24,7 @@ export function QuoteRequestForm({
         fd.delete("attachments");
         files.forEach((f) => fd.append("attachments", f));
       },
+      validate,
     }),
     [files],
   );

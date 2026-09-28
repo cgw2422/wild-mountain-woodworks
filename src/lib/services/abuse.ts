@@ -6,23 +6,29 @@ import { HONEYPOT_FIELD_NAME as HONEYPOT_FIELD, STARTED_AT_FIELD_NAME as STARTED
 
 /**
  * Lightweight abuse protection for public forms:
- * - honeypot field that humans never see
- * - minimum fill time (bots submit instantly)
+ * - honeypot field that humans never see → silently accepted and dropped
+ * - minimum fill time → the visitor is asked to submit again (never dropped,
+ *   so a fast human using autofill can't lose their request)
  * - per-IP rate limit, stored in PostgreSQL
- *
- * Returns "bot" to silently accept-and-drop, "limited" when rate limited, or
- * "ok".
  */
+export type SubmissionVerdict = "ok" | "bot" | "too-fast" | "limited";
+
+export const MIN_FILL_MS = 1500;
+
+export function isHoneypotTripped(fd: FormData) {
+  const honeypot = fd.get(HONEYPOT_FIELD);
+  return typeof honeypot === "string" && honeypot.trim() !== "";
+}
+
 export async function checkPublicSubmission(
   fd: FormData,
   formKey: string,
   limits: { perWindow: number; windowSeconds: number } = { perWindow: 5, windowSeconds: 600 },
-): Promise<"ok" | "bot" | "limited"> {
-  const honeypot = fd.get(HONEYPOT_FIELD);
-  if (typeof honeypot === "string" && honeypot.trim() !== "") return "bot";
+): Promise<SubmissionVerdict> {
+  if (isHoneypotTripped(fd)) return "bot";
 
   const startedAt = Number(fd.get(STARTED_AT_FIELD));
-  if (Number.isFinite(startedAt) && startedAt > 0 && Date.now() - startedAt < 2500) return "bot";
+  if (Number.isFinite(startedAt) && startedAt > 0 && Date.now() - startedAt < MIN_FILL_MS) return "too-fast";
 
   const ip = await getClientIp();
   const res = await rateLimit(`form:${formKey}:${ip}`, limits.perWindow, limits.windowSeconds);

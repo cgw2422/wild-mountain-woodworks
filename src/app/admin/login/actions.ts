@@ -8,7 +8,7 @@ import { burnPasswordCheck, verifyPassword } from "@/lib/auth/password";
 import { createAdminSession, destroyCurrentSession, getClientIp } from "@/lib/auth/session";
 import { rateLimit } from "@/lib/rate-limit";
 
-export type LoginState = { error?: string } | undefined;
+export type LoginState = { error?: string; email?: string } | undefined;
 
 const schema = z.object({
   email: z.string().trim().toLowerCase().max(254),
@@ -23,7 +23,7 @@ function safeNext(next: string | undefined) {
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const parsed = schema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "Enter your email and password." };
+  if (!parsed.success) return { error: "Enter your email and password.", email: String(formData.get("email") ?? "") };
   const { email, password, next } = parsed.data;
 
   const ip = await getClientIp();
@@ -32,16 +32,16 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     rateLimit(`login:email:${email}`, 8, 15 * 60),
   ]);
   if (!byIp.allowed || !byEmail.allowed) {
-    return { error: "Too many sign-in attempts. Please wait 15 minutes and try again." };
+    return { error: "Too many sign-in attempts. Please wait 15 minutes and try again.", email };
   }
 
   const user = await prisma.adminUser.findUnique({ where: { email } });
   if (!user || !user.active) {
     await burnPasswordCheck(password);
-    return { error: "That email and password combination isn't correct." };
+    return { error: "That email and password combination isn't correct.", email };
   }
   if (!(await verifyPassword(password, user.passwordHash))) {
-    return { error: "That email and password combination isn't correct." };
+    return { error: "That email and password combination isn't correct.", email };
   }
 
   await createAdminSession(user.id);

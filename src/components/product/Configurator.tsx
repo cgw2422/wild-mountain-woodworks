@@ -7,9 +7,11 @@ import { cn } from "@/lib/cn";
 import { formatCents, formatModifier } from "@/lib/money";
 import { defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
 import type { ConfigAddOn, ConfigOptionGroup, ConfigurableProduct, ConfigurationSelection } from "@/lib/pricing/types";
-import { TIMELINE_OPTIONS } from "@/lib/validation/forms";
+import { TIMELINE_OPTIONS, configurationQuoteSchema } from "@/lib/validation/forms";
 import { submitConfigurationQuote } from "@/app/(site)/actions";
-import { usePublicForm } from "@/components/forms/usePublicForm";
+import { clientValidator, usePublicForm } from "@/components/forms/usePublicForm";
+
+const validateRequest = clientValidator(configurationQuoteSchema);
 import {
   AntiSpamFields,
   FormErrorSummary,
@@ -142,7 +144,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
               </span>
             </div>
             <details className="group mt-4">
-              <summary className="inline-flex cursor-pointer list-none items-center gap-2 text-sm text-muted hover:text-charcoal [&::-webkit-details-marker]:hidden">
+              <summary className="inline-flex min-h-8 cursor-pointer list-none items-center gap-2 py-1 text-sm text-muted hover:text-charcoal [&::-webkit-details-marker]:hidden">
                 <span className="link-quiet">Price breakdown</span>
                 <span aria-hidden="true" className="transition-transform group-open:rotate-180">
                   ⌄
@@ -580,6 +582,7 @@ function RequestPanel({
         fd.delete("attachments");
         files.forEach((f) => fd.append("attachments", f));
       },
+      validate: validateRequest,
     }),
     [product.id, selection, files],
   );
