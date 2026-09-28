@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { submitCustomRequest } from "@/app/(site)/actions";
-import { TIMELINE_OPTIONS, customRequestSchema } from "@/lib/validation/forms";
+import { TIMELINE_OPTIONS, clientRules } from "@/lib/validation/shared";
 import { clientValidator, usePublicForm } from "./usePublicForm";
 
-const validate = clientValidator(customRequestSchema);
+const validate = clientValidator(clientRules.customRequest);
 import { AntiSpamFields, FormErrorSummary, ReferenceImagesField, SelectField, SubmitButton, TextAreaField, TextField } from "./fields";
 
 export function CustomBuildForm({

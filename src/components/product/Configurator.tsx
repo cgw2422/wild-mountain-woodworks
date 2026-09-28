@@ -7,11 +7,11 @@ import { cn } from "@/lib/cn";
 import { formatCents, formatModifier } from "@/lib/money";
 import { defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
 import type { ConfigAddOn, ConfigOptionGroup, ConfigurableProduct, ConfigurationSelection } from "@/lib/pricing/types";
-import { TIMELINE_OPTIONS, configurationQuoteSchema } from "@/lib/validation/forms";
+import { TIMELINE_OPTIONS, clientRules } from "@/lib/validation/shared";
 import { submitConfigurationQuote } from "@/app/(site)/actions";
 import { clientValidator, usePublicForm } from "@/components/forms/usePublicForm";
 
-const validateRequest = clientValidator(configurationQuoteSchema);
+const validateRequest = clientValidator(clientRules.configurationQuote);
 import {
   AntiSpamFields,
   FormErrorSummary,

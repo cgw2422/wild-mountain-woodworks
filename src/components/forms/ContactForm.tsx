@@ -2,10 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { submitContactMessage } from "@/app/(site)/actions";
-import { CONTACT_REASONS, contactSchema } from "@/lib/validation/forms";
+import { CONTACT_REASONS, clientRules } from "@/lib/validation/shared";
 import { clientValidator, usePublicForm } from "./usePublicForm";
 
-const FORM_OPTS = { validate: clientValidator(contactSchema) };
+const FORM_OPTS = { validate: clientValidator(clientRules.contact) };
 import { AntiSpamFields, FormErrorSummary, SelectField, SubmitButton, TextAreaField, TextField } from "./fields";
 
 export function ContactForm({ defaultReason }: { defaultReason?: string }) {

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { CONTACT_REASONS, TIMELINE_OPTIONS, formDataToObject, type FormState } from "./shared";
+
+export { CONTACT_REASONS, TIMELINE_OPTIONS, formDataToObject };
+export type { FormState };
 
 /**
  * Public form schemas. Imported by client components for convenience
@@ -29,14 +33,6 @@ export const zipSchema = z
   .string()
   .trim()
   .regex(/^\d{5}(-\d{4})?$/, "Please enter a 5-digit ZIP code.");
-
-export const TIMELINE_OPTIONS = [
-  "As soon as possible",
-  "Within 1–3 months",
-  "Within 3–6 months",
-  "More than 6 months out",
-  "Flexible",
-] as const;
 
 const timelineSchema = z
   .string()
@@ -100,14 +96,6 @@ export const customRequestSchema = z.object({
 });
 export type CustomRequestInput = z.infer<typeof customRequestSchema>;
 
-export const CONTACT_REASONS = [
-  { value: "PRODUCT_QUESTION", label: "Product question" },
-  { value: "CUSTOM_FURNITURE", label: "Custom furniture" },
-  { value: "EXISTING_QUOTE", label: "Existing quote" },
-  { value: "DELIVERY_QUESTION", label: "Delivery question" },
-  { value: "OTHER", label: "Other" },
-] as const;
-
 export const contactSchema = z.object({
   name: nameSchema,
   email: emailSchema,
@@ -119,24 +107,11 @@ export const contactSchema = z.object({
 });
 export type ContactInput = z.infer<typeof contactSchema>;
 
-/** Standard result returned by public form server actions. */
-export type FormState =
-  | { status: "idle" }
-  | { status: "error"; message: string; fieldErrors?: Record<string, string> }
-  | { status: "success"; reference?: string; message?: string };
-
 export function fieldErrorsFrom(error: z.ZodError): Record<string, string> {
   const out: Record<string, string> = {};
   for (const issue of error.issues) {
     const key = issue.path.map(String).join(".") || "_form";
     if (!out[key]) out[key] = issue.message;
   }
-  return out;
-}
-
-/** Collect a FormData into a plain object of strings (files excluded). */
-export function formDataToObject(fd: FormData): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of fd.entries()) if (typeof v === "string") out[k] = v;
   return out;
 }

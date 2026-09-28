@@ -10,8 +10,6 @@ const cormorant = localFont({
     { path: "./fonts/cormorant-garamond-latin-400-normal.woff2", weight: "400", style: "normal" },
     { path: "./fonts/cormorant-garamond-latin-400-italic.woff2", weight: "400", style: "italic" },
     { path: "./fonts/cormorant-garamond-latin-500-normal.woff2", weight: "500", style: "normal" },
-    { path: "./fonts/cormorant-garamond-latin-500-italic.woff2", weight: "500", style: "italic" },
-    { path: "./fonts/cormorant-garamond-latin-600-normal.woff2", weight: "600", style: "normal" },
   ],
   fallback: ["Georgia", "Times New Roman", "serif"],
 });

@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { submitGeneralQuote } from "@/app/(site)/actions";
-import { TIMELINE_OPTIONS, generalQuoteSchema } from "@/lib/validation/forms";
+import { TIMELINE_OPTIONS, clientRules } from "@/lib/validation/shared";
 import { clientValidator, usePublicForm } from "./usePublicForm";
 
-const validate = clientValidator(generalQuoteSchema);
+const validate = clientValidator(clientRules.generalQuote);
 import { AntiSpamFields, FormErrorSummary, ReferenceImagesField, SelectField, SubmitButton, TextAreaField, TextField } from "./fields";
 
 export function QuoteRequestForm({

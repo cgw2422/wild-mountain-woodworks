@@ -22,6 +22,7 @@ const session = await import("@/lib/auth/session");
 const { SESSION_COOKIE, hashSessionToken } = await import("@/lib/auth/tokens");
 const { rateLimit } = await import("@/lib/rate-limit");
 const { hasTestDb, resetDb } = await import("../support/db");
+const { checkPublicSubmission } = await import("@/lib/services/abuse");
 
 describe.skipIf(!hasTestDb)("admin authentication", () => {
   beforeEach(async () => {
@@ -75,5 +76,32 @@ describe.skipIf(!hasTestDb)("admin authentication", () => {
     expect(results).toEqual([true, true, true, false]);
     await prisma.rateLimitBucket.update({ where: { key: "login:test" }, data: { resetAt: new Date(Date.now() - 1) } });
     expect((await rateLimit("login:test", 3, 60)).allowed).toBe(true);
+  });
+});
+
+describe.skipIf(!hasTestDb)("public form abuse protection", () => {
+  beforeEach(resetDb);
+
+  const form = (fields: Record<string, string>) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+    return fd;
+  };
+  const longAgo = String(Date.now() - 60_000);
+
+  it("silently drops honeypot submissions", async () => {
+    expect(await checkPublicSubmission(form({ company_website: "http://spam", form_started_at: longAgo }), "t")).toBe("bot");
+  });
+
+  it("asks instant submissions to retry instead of dropping them", async () => {
+    expect(await checkPublicSubmission(form({ form_started_at: String(Date.now()) }), "t")).toBe("too-fast");
+    expect(await checkPublicSubmission(form({ form_started_at: longAgo }), "t")).toBe("ok");
+  });
+
+  it("rate limits per IP and form", async () => {
+    const verdicts = [];
+    for (let i = 0; i < 3; i++) verdicts.push(await checkPublicSubmission(form({ form_started_at: longAgo }), "contact", { perWindow: 2, windowSeconds: 60 }));
+    expect(verdicts).toEqual(["ok", "ok", "limited"]);
+    expect(await checkPublicSubmission(form({ form_started_at: longAgo }), "quote", { perWindow: 2, windowSeconds: 60 })).toBe("ok");
   });
 });
