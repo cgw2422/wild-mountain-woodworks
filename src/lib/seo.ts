@@ -10,6 +10,8 @@ interface MetaInput {
   image?: { url: string; width?: number; height?: number; alt?: string } | null;
   noIndex?: boolean;
   type?: "website" | "article";
+  /** Don't append the " | Wild Mountain Woodworks" title template. */
+  absoluteTitle?: boolean;
 }
 
 function absolute(url: string) {
@@ -22,12 +24,12 @@ export async function buildMetadata(input: MetaInput): Promise<Metadata> {
   const siteName = settings.businessName;
   const title = input.title?.trim() || settings.defaultSeoTitle || siteName;
   const description = input.description?.trim() || settings.defaultSeoDescription || settings.tagline;
-  const image = input.image ?? settings.defaultOgImage;
+  const image = input.image ?? settings.defaultOgImage ?? { url: "/brand/wild-mountain-social-card.png", width: 1200, height: 630, alt: siteName };
   const images = image
     ? [{ url: absolute(image.url), width: image.width, height: image.height, alt: image.alt || title }]
     : undefined;
   return {
-    title,
+    title: input.absoluteTitle ? { absolute: title } : title,
     description,
     alternates: { canonical: siteUrl(input.path) },
     openGraph: {

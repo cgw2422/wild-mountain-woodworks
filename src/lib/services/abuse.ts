@@ -2,8 +2,7 @@ import "server-only";
 import { getClientIp } from "@/lib/auth/session";
 import { rateLimit } from "@/lib/rate-limit";
 
-export const HONEYPOT_FIELD = "company_website";
-export const STARTED_AT_FIELD = "form_started_at";
+import { HONEYPOT_FIELD_NAME as HONEYPOT_FIELD, STARTED_AT_FIELD_NAME as STARTED_AT_FIELD } from "@/lib/validation/honeypot";
 
 /**
  * Lightweight abuse protection for public forms:

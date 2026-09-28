@@ -26,6 +26,8 @@ interface CmsImageProps {
   /** Use the slot's mobile ratio below the md breakpoint when it has one. */
   responsiveRatio?: boolean;
   placeholderLabel?: string;
+  /** Explicit display ratio (e.g. the photo's natural ratio in masonry layouts). */
+  ratio?: number;
 }
 
 /**
@@ -44,19 +46,22 @@ export function CmsImage({
   fill,
   responsiveRatio,
   placeholderLabel,
+  ratio,
 }: CmsImageProps) {
   const def = IMAGE_SLOTS[slot];
   const mobileRatio = "mobileRatio" in def ? def.mobileRatio : undefined;
   const style: React.CSSProperties & Record<string, string | number> = fill
     ? {}
-    : responsiveRatio && mobileRatio
+    : ratio
+      ? { aspectRatio: String(ratio) }
+      : responsiveRatio && mobileRatio
       ? { "--r-mobile": String(mobileRatio), "--r-desktop": String(def.ratio) }
       : { aspectRatio: String(def.ratio) };
 
   const wrapper = cn(
     "relative overflow-hidden bg-stone-light",
     fill && "h-full w-full",
-    !fill && responsiveRatio && mobileRatio && "[aspect-ratio:var(--r-mobile)] md:[aspect-ratio:var(--r-desktop)]",
+    !fill && !ratio && responsiveRatio && mobileRatio && "[aspect-ratio:var(--r-mobile)] md:[aspect-ratio:var(--r-desktop)]",
     className,
   );
 

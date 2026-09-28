@@ -178,7 +178,16 @@ export async function createCustomRequest(input: CustomRequestInput, files: File
       prisma.customRequest.create({
         data: {
           reference,
-          ...input,
+          name: input.name,
+          email: input.email,
+          phone: input.phone,
+          zipCode: input.zipCode,
+          furnitureType: input.furnitureType,
+          approximateDimensions: input.approximateDimensions,
+          woodPreference: input.woodPreference,
+          finishPreference: input.finishPreference,
+          description: input.description,
+          timeline: input.timeline,
           attachments: { create: attachments },
           statusEvents: { create: { toStatus: "NEW" } },
         },
@@ -198,7 +207,9 @@ export async function createCustomRequest(input: CustomRequestInput, files: File
 }
 
 export async function createContactMessage(input: ContactInput) {
-  const message = await prisma.contactMessage.create({ data: input });
+  const message = await prisma.contactMessage.create({
+    data: { name: input.name, email: input.email, phone: input.phone, reason: input.reason, message: input.message },
+  });
   await logActivity("message.received", `Message from ${message.name}`, { entityType: "message", entityId: message.id });
   void notifyContactMessage(message).catch((error) => logger.error("notifyContactMessage failed", { error }));
   void sendContactConfirmation(message).catch((error) => logger.error("sendContactConfirmation failed", { error }));

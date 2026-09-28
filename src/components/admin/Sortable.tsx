@@ -18,6 +18,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useId } from "react";
 import { cn } from "@/lib/cn";
 
 /**
@@ -40,6 +41,8 @@ export function SortableList<T extends { id: string }>({
   className?: string;
   itemClassName?: string;
 }) {
+  // Stable id so dnd-kit's aria-describedby matches between SSR and hydration.
+  const dndId = useId();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -57,7 +60,7 @@ export function SortableList<T extends { id: string }>({
   const move = (from: number, to: number) => () => onReorder(arrayMove(items, from, to));
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+    <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={items.map((i) => i.id)} strategy={layout === "grid" ? rectSortingStrategy : verticalListSortingStrategy}>
         <ul className={className}>
           {items.map((item, index) => (

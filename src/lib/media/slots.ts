@@ -10,7 +10,7 @@ export const IMAGE_SLOTS = {
   landscape: { label: "Landscape feature", ratio: 3 / 2, sizes: "(min-width: 1024px) 60vw, 100vw" },
   category: { label: "Category tile", ratio: 4 / 5, sizes: "(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw" },
   productCard: { label: "Product card", ratio: 4 / 5, sizes: "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw" },
-  productGallery: { label: "Product gallery", ratio: 4 / 3, sizes: "(min-width: 1024px) 60vw, 100vw" },
+  productGallery: { label: "Product gallery", ratio: 1, sizes: "(min-width: 1024px) 58vw, 100vw" },
   portfolioCard: { label: "Portfolio card", ratio: 3 / 4, sizes: "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw" },
   square: { label: "Square", ratio: 1, sizes: "(min-width: 1024px) 25vw, 50vw" },
   swatch: { label: "Option swatch", ratio: 1, sizes: "96px" },

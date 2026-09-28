@@ -23,12 +23,27 @@ export type ActivityType =
   | "media.uploaded"
   | "media.replaced"
   | "media.deleted"
+  | "media.updated"
+  | "portfolio.created"
+  | "portfolio.unpublished"
+  | "portfolio.archived"
+  | "portfolio.deleted"
+  | "faq.created"
+  | "faq.deleted"
+  | "admin.created"
+  | "admin.updated"
+  | "account.password_changed"
   | "page.updated"
   | "homepage.updated"
   | "faq.updated"
   | "settings.updated"
   | "admin.login"
-  | "order.created";
+  | "order.created"
+  | "message.status_changed"
+  | "order.production_status_changed"
+  | "note.added"
+  | "note.deleted"
+  | "sample_content.removed";
 
 /** Record an event for the dashboard's Recent Activity. Never throws. */
 export async function logActivity(

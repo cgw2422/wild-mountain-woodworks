@@ -1,0 +1,200 @@
+import { getPageContent } from "@/lib/cms/queries";
+import type { getProductPage } from "@/lib/catalog/queries";
+import { commerceState, getSettings } from "@/lib/settings";
+import { formatCents } from "@/lib/money";
+import { siteUrl } from "@/lib/site-url";
+import { Container } from "@/components/ui/Container";
+import { ButtonLink } from "@/components/ui/Button";
+import { Markdown } from "@/components/ui/Markdown";
+import { Breadcrumbs } from "@/components/site/Breadcrumbs";
+import { Accordion } from "@/components/site/Accordion";
+import { ProductCard } from "@/components/site/ProductCard";
+import { CtaBand } from "@/components/site/CtaBand";
+import { JsonLd } from "@/components/site/JsonLd";
+import { SectionHeading } from "@/components/site/SectionHeading";
+import { RidgeLine } from "@/components/brand/Logo";
+import { ProductGallery } from "./ProductGallery";
+import { Configurator, type PurchaseMode } from "./Configurator";
+
+type Data = NonNullable<Awaited<ReturnType<typeof getProductPage>>>;
+
+export async function ProductView({ data }: { data: Data }) {
+  const [settings, shared, quotePage] = await Promise.all([getSettings(), getPageContent("product"), getPageContent("request-quote")]);
+  const { product, images, configurable, pricesVisible, startingPriceCents, related, faqs } = data;
+  const flags = commerceState(settings);
+  const mode: PurchaseMode = flags.ecommerce && product.purchasable ? "cart" : flags.quotes ? "quote" : "contact";
+
+  const madeToOrder = shared.section("made-to-order");
+  const woodNote = shared.section("wood-note");
+  const request = shared.section("request");
+  const closing = shared.section("cta");
+  const confirmation = quotePage.section("confirmation");
+  const leadTime = product.leadTime || settings.defaultLeadTime;
+
+  const details = [
+    { id: "dimensions", title: "Dimensions", content: product.dimensions },
+    { id: "materials", title: "Materials", content: product.materials },
+    { id: "construction", title: "Construction & Details", content: product.construction },
+    { id: "care", title: "Finish & Care", content: product.careInstructions },
+    { id: "delivery", title: "Delivery", content: product.deliveryInfo },
+  ].filter((d) => d.content?.trim());
+
+  const crumbs = [
+    { label: "Furniture", href: "/furniture" },
+    ...(product.category && !product.category.linkUrl ? [{ label: product.category.name, href: `/furniture/${product.category.slug}` }] : []),
+    { label: product.name },
+  ];
+
+  const absoluteImages = images.map((i) => (i.url.startsWith("http") ? i.url : siteUrl(i.url)));
+
+  return (
+    <>
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@type": "Product",
+          name: product.name,
+          description: product.shortDescription || undefined,
+          sku: product.sku ?? undefined,
+          image: absoluteImages.length ? absoluteImages : undefined,
+          brand: { "@type": "Brand", name: settings.businessName },
+          category: product.category?.name,
+          url: siteUrl(`/furniture/${product.slug}`),
+          ...(startingPriceCents != null
+            ? {
+                offers: {
+                  "@type": "Offer",
+                  priceCurrency: "USD",
+                  price: (startingPriceCents / 100).toFixed(2),
+                  availability: "https://schema.org/MadeToOrder",
+                  url: siteUrl(`/furniture/${product.slug}`),
+                  seller: { "@type": "Organization", name: settings.businessName },
+                },
+              }
+            : {}),
+        }}
+      />
+
+      <Container size="wide" className="pt-6 md:pt-10">
+        <Breadcrumbs items={crumbs} className="mb-6 md:mb-10" />
+        <div className="grid gap-10 lg:grid-cols-12 lg:gap-14 xl:gap-20">
+          <div className="lg:col-span-7">
+            <div className="lg:sticky lg:top-28">
+              <ProductGallery images={images.map((img, i) => ({ ...img, id: `${img.id}-${i}` }))} productName={product.name} />
+            </div>
+          </div>
+
+          <div className="pb-16 lg:col-span-5 lg:pb-24">
+            {product.category ? <p className="eyebrow text-bronze-text">{product.category.name}</p> : null}
+            <h1 className="display-lg mt-4">{product.name}</h1>
+            {startingPriceCents != null ? (
+              <p className="mt-4 text-lg">
+                <span className="text-muted">From </span>
+                <span className="nums">{formatCents(startingPriceCents)}</span>
+              </p>
+            ) : null}
+            {product.shortDescription ? <p className="lede mt-5 text-muted">{product.shortDescription}</p> : null}
+
+            <div className="mt-8 flex flex-col gap-4 border-y border-stone py-5 text-sm sm:flex-row sm:gap-8">
+              <div className="flex flex-1 items-start gap-3">
+                <RidgeLine className="mt-1.5 h-2.5 w-7 shrink-0 text-bronze" />
+                <div>
+                  <p className="font-semibold">{madeToOrder.heading || "Handcrafted to order"}</p>
+                  {madeToOrder.body ? <p className="mt-0.5 text-muted">{madeToOrder.body}</p> : null}
+                </div>
+              </div>
+              {leadTime ? (
+                <div className="pl-10 sm:w-44 sm:shrink-0 sm:border-l sm:border-stone sm:pl-8">
+                  <p className="font-semibold">Estimated lead time</p>
+                  <p className="mt-0.5 text-muted">{leadTime}</p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-10">
+              <Configurator
+                product={configurable}
+                pricesVisible={pricesVisible}
+                priceDisclaimer={settings.priceDisclaimer}
+                mode={mode}
+                requestCopy={{ heading: request.heading, body: request.body }}
+                confirmationCopy={{ heading: confirmation.heading, body: confirmation.body }}
+              />
+            </div>
+          </div>
+        </div>
+      </Container>
+
+      {/* Details */}
+      <section aria-labelledby="details-heading" className="border-t border-stone bg-paper py-20 md:py-28">
+        <Container size="wide">
+          <div className="grid gap-14 lg:grid-cols-12 lg:gap-20">
+            <div className="lg:col-span-6">
+              <h2 id="details-heading" className="display-md">
+                About the {product.name.replace(/^The\s+/i, "")}
+              </h2>
+              <Markdown className="mt-6">{product.description || product.shortDescription}</Markdown>
+            </div>
+            <div className="lg:col-span-6">
+              {details.length ? (
+                <Accordion
+                  headingLevel={3}
+                  items={details.map((d, i) => ({ id: d.id, title: d.title, defaultOpen: i === 0, content: <Markdown className="text-[0.97rem]">{d.content}</Markdown> }))}
+                />
+              ) : null}
+              {woodNote.visible && woodNote.heading ? (
+                <div className="mt-10 bg-stone-light p-7">
+                  <h3 className="font-display text-2xl">{woodNote.heading}</h3>
+                  {woodNote.body ? <p className="mt-3 leading-relaxed text-muted">{woodNote.body}</p> : null}
+                  {woodNote.primaryCta ? (
+                    <ButtonLink href={woodNote.primaryCta.href} variant="text" className="mt-4" arrow>
+                      {woodNote.primaryCta.label}
+                    </ButtonLink>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </Container>
+      </section>
+
+      {faqs.length ? (
+        <section aria-labelledby="product-faq" className="py-20 md:py-28">
+          <Container size="wide">
+            <div className="grid gap-10 lg:grid-cols-12 lg:gap-20">
+              <div className="lg:col-span-4">
+                <h2 id="product-faq" className="display-md">
+                  Questions
+                </h2>
+                <ButtonLink href="/faq" variant="text" className="mt-6" arrow>
+                  All FAQs
+                </ButtonLink>
+              </div>
+              <div className="lg:col-span-8">
+                <Accordion items={faqs.map((f) => ({ id: f.id, title: f.question, content: <Markdown className="text-[0.97rem]">{f.answer}</Markdown> }))} />
+              </div>
+            </div>
+          </Container>
+        </section>
+      ) : null}
+
+      {related.length ? (
+        <section aria-labelledby="related-heading" className="border-t border-stone py-20 md:py-28">
+          <Container size="wide">
+            <SectionHeading eyebrow="You may also like" heading="More pieces" size="md" />
+            <span id="related-heading" className="sr-only">
+              More pieces
+            </span>
+            <div className="mt-12 grid gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3 lg:gap-x-10">
+              {related.map((p) => (
+                <ProductCard key={p.id} product={p} />
+              ))}
+            </div>
+          </Container>
+        </section>
+      ) : null}
+
+      <CtaBand section={closing} />
+    </>
+  );
+}

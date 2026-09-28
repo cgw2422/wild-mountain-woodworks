@@ -144,6 +144,10 @@
     font-size: clamp(1.45rem, 2vw, 1.8rem);
     line-height: 1.2;
   }
+  /* Prices and figures: lining, tabular numerals (Cormorant defaults to old-style). */
+  .nums {
+    font-variant-numeric: lining-nums tabular-nums;
+  }
   .lede {
     font-size: clamp(1.02rem, 1.25vw, 1.15rem);
     line-height: 1.75;
