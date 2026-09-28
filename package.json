@@ -18,7 +18,8 @@
     "db:reset": "prisma migrate reset",
     "admin:create": "tsx scripts/create-admin.ts",
     "brand": "tsx scripts/generate-brand.ts",
-    "qa": "tsx scripts/qa.ts"
+    "qa": "tsx scripts/qa.ts",
+    "start:production": "sh scripts/start-production.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",

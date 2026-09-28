@@ -357,10 +357,34 @@ async function seedSampleCatalog() {
   log("faqs ok");
 }
 
+/**
+ * Local-disk storage on a host without a persistent volume (e.g. Railway
+ * without R2) loses files on every redeploy. Regenerate any missing sample
+ * image files in place so the sample site never shows broken images.
+ * (Images uploaded in admin can't be regenerated — use R2 in production.)
+ */
+async function restoreMissingSampleFiles() {
+  if (storage.name !== "local") return;
+  if (process.env.NODE_ENV === "production" && !process.env.LOCAL_STORAGE_DIR) {
+    log("WARNING: using local disk storage in production without LOCAL_STORAGE_DIR — uploads are lost on redeploy. Configure Cloudflare R2 (see README).");
+  }
+  const samples = await prisma.media.findMany({ where: { isSample: true }, select: { id: true, storageKey: true, originalName: true } });
+  let restored = 0;
+  for (const m of samples) {
+    if (await storage.get(m.storageKey)) continue;
+    const spec = Object.values(IMAGE_SPECS).find((sp) => sp.name === m.originalName);
+    if (!spec) continue;
+    await storage.put(m.storageKey, await renderScene(spec.scene), "image/jpeg");
+    restored++;
+  }
+  if (restored) log(`restored ${restored} missing sample image file(s)`);
+}
+
 /* ------------------------------------------------------------ main */
 
 async function main() {
   await ensureSettings();
+  await restoreMissingSampleFiles();
   const emptyCatalog = (await prisma.product.count()) === 0 && (await prisma.category.count()) === 0;
   const withSample = process.env.SEED_SAMPLE_CONTENT !== "false" && emptyCatalog;
   if (withSample) {

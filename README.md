@@ -281,7 +281,7 @@ Secrets are only read on the server. Only variables prefixed `NEXT_PUBLIC_` are 
 
 ## Deploying to Railway
 
-`railway.json` configures the build (`npm run build`). It also runs migrations before each deploy (`npx prisma migrate deploy`), starts the app with `npm start`, and health-checks `/api/health`, which tests the database connection.
+`railway.json` builds with `npm run build` and starts with `npm run start:production` (`scripts/start-production.sh`), which applies migrations, runs the idempotent seed (settings, pages, first admin from `ADMIN_EMAIL`/`ADMIN_PASSWORD`, sample content into an empty catalog) and then starts the server. The health check at `/api/health` reports `not_configured`, `unreachable` or `migrations_pending` if the database isn't ready.
 
 1. **Create a project** in Railway, **add PostgreSQL**, then **Deploy from GitHub** with this repository.
 2. **Set service variables** on the web service:
