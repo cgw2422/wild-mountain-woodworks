@@ -5,9 +5,10 @@
  * everywhere (browser, favicon, social cards, future engraving/branding-iron
  * maker's mark) without depending on installed fonts.
  *
- * The horizontal lockup comes from the supplied artwork
- * (public/brand/WMW-horizonal.svg): its transforms are flattened into plain
- * path data, the brown mark/divider become "accent" paths and the lettering
+ * The horizontal and stacked lockups come from the supplied artwork
+ * (public/brand/WMW-horizonal.svg, WMW-stacked.svg; compact is the stacked
+ * lettering without the mountain): transforms are flattened into plain path
+ * data, the brown mark and rules become "accent" paths and the lettering
  * follows the text colour.
  *
  * Outputs:
@@ -28,7 +29,6 @@ const font = (p: string) => {
   return opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
 };
 const serif = font("@fontsource/cormorant-garamond/files/cormorant-garamond-latin-600-normal.woff");
-const sans = font("@fontsource/manrope/files/manrope-latin-600-normal.woff");
 
 const CHARCOAL = "#1F1E1C";
 const IVORY = "#F7F3EC";
@@ -155,6 +155,8 @@ function parseTransform(t: string | undefined): Matrix {
   return m;
 }
 
+const emptyBox = (): Box => ({ x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
+
 /** Apply a matrix to absolute M/L/C/Z path data (all the artwork uses). */
 function transformPath(pathD: string, m: Matrix, box: Box): string {
   const r = (v: number) => String(Math.round(v * 100) / 100);
@@ -177,14 +179,20 @@ function transformPath(pathD: string, m: Matrix, box: Box): string {
     .join("");
 }
 
-function artworkLockup(file: string): Lockup {
+/**
+ * Import supplied logo artwork. With `withoutMark`, paths that sit entirely
+ * above the dark lettering (the mountain) are left out.
+ */
+function artworkLockup(file: string, { withoutMark = false } = {}): Lockup {
   const svg = readFileSync(path.join(root, file), "utf8").replace(/<defs>[\s\S]*?<\/defs>/, "");
   const attr = (tag: string, name: string) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
   // Transforms and fills are inherited from enclosing groups.
   const stack: Array<{ m: Matrix; fill?: string }> = [{ m: IDENTITY }];
-  const box: Box = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
-  const fills: string[] = [];
-  const accents: string[] = [];
+  const items: Array<{ d: string; accent: boolean; box: Box }> = [];
+  const add = (pathD: string, m: Matrix, color: string) => {
+    const box = emptyBox();
+    items.push({ d: transformPath(pathD, m, box), accent: color === ACCENT, box });
+  };
   for (const [tag] of svg.matchAll(/<\/?(?:g|path)\b[^>]*>/g)) {
     if (tag.startsWith("</")) {
       stack.pop();
@@ -201,7 +209,7 @@ function artworkLockup(file: string): Lockup {
     if (!pathD) continue;
     const stroke = attr(tag, "stroke")?.toUpperCase();
     if (stroke && stroke !== "NONE") {
-      // Straight stroked lines (the divider) become filled rectangles.
+      // Straight stroked lines (dividers, rules) become filled rectangles.
       const nums = pathD.match(/-?\d*\.?\d+(?:e-?\d+)?/gi)?.map(Number) ?? [];
       if (!/^\s*M[^MLCZ]*L[^MLCZ]*$/i.test(pathD) || nums.length !== 4) throw new Error("Only straight stroked lines are supported in logo artwork");
       const [x1, y1, x2, y2] = nums as [number, number, number, number];
@@ -210,11 +218,16 @@ function artworkLockup(file: string): Lockup {
       const [a, b] = [p(x1, y1), p(x2, y2)];
       const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
       const [nx, ny] = [(-(b[1] - a[1]) / len) * half, ((b[0] - a[0]) / len) * half];
-      const rect = `M${a[0] + nx} ${a[1] + ny}L${b[0] + nx} ${b[1] + ny}L${b[0] - nx} ${b[1] - ny}L${a[0] - nx} ${a[1] - ny}Z`;
-      (stroke === ACCENT ? accents : fills).push(transformPath(rect, IDENTITY, box));
+      add(`M${a[0] + nx} ${a[1] + ny}L${b[0] + nx} ${b[1] + ny}L${b[0] - nx} ${b[1] - ny}L${a[0] - nx} ${a[1] - ny}Z`, IDENTITY, stroke);
     }
-    if (fill && fill !== "NONE") (fill === ACCENT ? accents : fills).push(transformPath(pathD, m, box));
+    if (fill && fill !== "NONE") add(pathD, m, fill);
   }
+  let kept = items;
+  if (withoutMark) {
+    const textTop = Math.min(...items.filter((i) => !i.accent).map((i) => i.box.y1));
+    kept = items.filter((i) => i.box.y2 > textTop);
+  }
+  const box = kept.reduce((b, i) => ({ x1: Math.min(b.x1, i.box.x1), y1: Math.min(b.y1, i.box.y1), x2: Math.max(b.x2, i.box.x2), y2: Math.max(b.y2, i.box.y2) }), emptyBox());
   // Re-origin at the top-left of the artwork with a little padding.
   const pad = 1;
   const shift = (p: string) => offsetPath(p, -box.x1, -box.y1);
@@ -224,47 +237,9 @@ function artworkLockup(file: string): Lockup {
     viewBox: `${-pad} ${-pad} ${(w + pad * 2).toFixed(2)} ${(h + pad * 2).toFixed(2)}`,
     width: w + pad * 2,
     height: h + pad * 2,
-    fills: fills.map(shift),
-    accents: accents.map(shift),
+    fills: kept.filter((i) => !i.accent).map((i) => shift(i.d)),
+    accents: kept.filter((i) => i.accent).map((i) => shift(i.d)),
     strokes: [],
-  };
-}
-
-// --- Stacked / compact ----------------------------------------------------
-function stacked(withRidge: boolean): Lockup {
-  const primary = textPath(serif, "WILD MOUNTAIN", 100, 0.06);
-  const pW = primary.box.x2 - primary.box.x1;
-  const pH = primary.box.y2 - primary.box.y1;
-  const secondary = textPath(sans, "WOODWORKS", 27, 0.42);
-  const sW = secondary.box.x2 - secondary.box.x1;
-  const sH = secondary.box.y2 - secondary.box.y1;
-
-  let y = 0;
-  const strokes: Lockup["strokes"] = [];
-  if (withRidge) {
-    const r = ridge(pW * 0.2);
-    const rx = (pW - pW * 0.2) / 2;
-    strokes.push({ d: offsetPath(r.d, rx, 0), width: 2.4 });
-    y += r.height + 30;
-  }
-  translate(primary.path, -primary.box.x1, y - primary.box.y1);
-  y += pH + 26;
-  const sx = (pW - sW) / 2;
-  translate(secondary.path, sx - secondary.box.x1, y - secondary.box.y1);
-  // Hairlines either side of WOODWORKS
-  const lineY = y + sH / 2;
-  const ruleGap = 26;
-  strokes.push({ d: `M0 ${lineY.toFixed(2)} L${(sx - ruleGap).toFixed(2)} ${lineY.toFixed(2)}`, width: 1.6 });
-  strokes.push({ d: `M${(sx + sW + ruleGap).toFixed(2)} ${lineY.toFixed(2)} L${pW.toFixed(2)} ${lineY.toFixed(2)}`, width: 1.6 });
-  y += sH;
-  const pad = 3;
-  return {
-    viewBox: `${-pad} ${-pad} ${(pW + pad * 2).toFixed(2)} ${(y + pad * 2).toFixed(2)}`,
-    width: pW + pad * 2,
-    height: y + pad * 2,
-    fills: [d(primary.path), d(secondary.path)],
-    accents: [],
-    strokes,
   };
 }
 
@@ -308,8 +283,8 @@ function toSvg(l: Lockup, color: string, accent: string, title: string) {
 
 const lockups = {
   horizontal: artworkLockup("public/brand/WMW-horizonal.svg"),
-  stacked: stacked(true),
-  compact: stacked(false),
+  stacked: artworkLockup("public/brand/WMW-stacked.svg"),
+  compact: artworkLockup("public/brand/WMW-stacked.svg", { withoutMark: true }),
   monogram: monogram(),
 };
 

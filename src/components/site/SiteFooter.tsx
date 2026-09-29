@@ -47,7 +47,7 @@ export function SiteFooter({ settings, categories }: { settings: SiteSettings; c
       <div className="mx-auto max-w-[96rem] px-5 pb-10 pt-20 sm:px-8 lg:px-12 lg:pt-24">
         <div className="grid gap-14 lg:grid-cols-12 lg:gap-8">
           <div className="lg:col-span-4">
-            <Link href="/" aria-label="Wild Mountain Woodworks — home" className="inline-block text-ivory">
+            <Link href="/" aria-label="Wild Mountain Woodworks — home" className="inline-block text-ivory [--logo-accent:var(--color-bronze-light)]">
               <Logo variant="stacked" className="w-56" title="" />
             </Link>
             {settings.brandStatement ? <p className="mt-8 max-w-xs text-[0.95rem] leading-relaxed text-ivory/70">{settings.brandStatement}</p> : null}

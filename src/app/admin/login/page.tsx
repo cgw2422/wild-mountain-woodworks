@@ -13,7 +13,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <main className="flex min-h-dvh items-center justify-center bg-charcoal px-5 py-16">
       <div className="w-full max-w-sm">
-        <Logo variant="stacked" className="mx-auto mb-10 w-56 text-ivory" />
+        <Logo variant="stacked" className="mx-auto mb-10 w-56 text-ivory [--logo-accent:var(--color-bronze-light)]" />
         <div className="bg-ivory p-8 shadow-sm">
           <h1 className="font-display text-2xl">Admin sign in</h1>
           <p className="mt-1 text-sm text-muted">Manage the Wild Mountain website.</p>

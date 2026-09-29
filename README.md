@@ -410,12 +410,12 @@ The sample copy doesn't claim anything about your history, experience, awards or
 
 The logo system is generated from the brand fonts with the lettering converted to vector outlines (`npm run brand` → `scripts/generate-brand.ts`), so it looks identical everywhere and can be used for engraving or a branding iron.
 
-The primary horizontal logo comes from the supplied artwork in `public/brand/WMW-horizonal.svg`. To update it, replace that file and run `npm run brand`. The script flattens the artwork into plain path data. The brown mountain and divider (`#7f582d`) are drawn in the accent colour, set through the `--logo-accent` CSS variable (a lighter bronze on dark backgrounds). The lettering follows the text colour.
+The horizontal and stacked logos come from the supplied artwork in `public/brand/WMW-horizonal.svg` and `public/brand/WMW-stacked.svg`. The compact logo is the stacked lettering without the mountain. To update a logo, replace its file and run `npm run brand`. The script flattens the artwork into plain path data. The brown mountain, divider and rules (`#7f582d`) are drawn in the accent colour, set through the `--logo-accent` CSS variable (a lighter bronze on dark backgrounds). The lettering follows the text colour.
 
 | Asset | Files |
 | --- | --- |
 | Primary horizontal logo | `public/brand/wild-mountain-horizontal-{dark,light}.{svg,png}` |
-| Stacked logo (with ridge line) | `public/brand/wild-mountain-stacked-{dark,light}.{svg,png}` |
+| Stacked logo (with mountain) | `public/brand/wild-mountain-stacked-{dark,light}.{svg,png}` |
 | Compact stacked | `public/brand/wild-mountain-compact-{dark,light}.{svg,png}` |
 | WM monogram / maker's mark | `public/brand/wild-mountain-monogram-{dark,light}.{svg,png}` |
 | Favicon / site mark | `src/app/icon.svg`, `src/app/apple-icon.png`, `public/brand/wild-mountain-sitemark-*` |

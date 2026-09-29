@@ -136,7 +136,7 @@ export function AdminNav({ counts, userName, logout }: { counts: NavCounts; user
 
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col bg-charcoal lg:flex">
-        <Link href="/admin" className="block px-6 pb-3 pt-6 text-ivory" aria-label="Admin dashboard">
+        <Link href="/admin" className="block px-6 pb-3 pt-6 text-ivory [--logo-accent:var(--color-bronze-light)]" aria-label="Admin dashboard">
           <Logo variant="compact" className="w-40" title="" />
           <span className="mt-2 block text-[0.68rem] uppercase tracking-[0.2em] text-white/40">Admin</span>
         </Link>

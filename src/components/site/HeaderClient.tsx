@@ -109,7 +109,7 @@ export function MobileMenu({
       >
         <div className="flex h-full flex-col px-6 pb-8">
           <div className="flex h-[4.5rem] items-center justify-between">
-            <Link href="/" className="text-ivory" aria-label="Wild Mountain Woodworks — home" onClick={() => setOpen(false)}>
+            <Link href="/" className="text-ivory [--logo-accent:var(--color-bronze-light)]" aria-label="Wild Mountain Woodworks — home" onClick={() => setOpen(false)}>
               <Logo variant="compact" className="h-[2.35rem] w-auto" title="" />
             </Link>
             <button type="button" onClick={() => setOpen(false)} className="-mr-2 flex h-11 w-11 items-center justify-center" aria-label="Close menu">
