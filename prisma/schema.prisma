@@ -734,6 +734,8 @@ model SiteSetting {
   pricingTargetMarginPct       Float    @default(35)
   pricingMinMarginWarnPct      Float    @default(25)
   pricingMaterialsLaborWarnPct Float    @default(50)
+  pricingDepositPct            Float    @default(50)
+  pricingRoundToDollars        Int      @default(50) // round recommendations UP to this many dollars (0 = off)
   updatedAt                    DateTime @updatedAt
 }
 
@@ -834,34 +836,51 @@ model RateLimitBucket {
 // ---------------------------------------------------------------------------
 
 model PriceEstimate {
-  id                  String        @id @default(cuid())
-  name                String
-  customerName        String?
-  customerEmail       String?
-  customerPhone       String?
-  customerZip         String?
-  productId           String?
-  product             Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
-  quoteRequestId      String?
-  quoteRequest        QuoteRequest? @relation(fields: [quoteRequestId], references: [id], onDelete: SetNull)
-  // Full calculator inputs (line items, labor phases, overhead method …)
-  inputs              Json
+  id                    String        @id @default(cuid())
+  name                  String
+  customerName          String?
+  customerEmail         String?
+  customerPhone         String?
+  customerZip           String?
+  productId             String?
+  product               Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  quoteRequestId        String?
+  quoteRequest          QuoteRequest? @relation(fields: [quoteRequestId], references: [id], onDelete: SetNull)
+  // Project details
+  productType           String?
+  dimensions            String?
+  woodSpecies           String?
+  // Full calculator inputs (line items, labor phases, adjustments …)
+  inputs                Json
   // Results recalculated on the server at save time
-  materialCostCents   Int
-  laborCostCents      Int
-  overheadCostCents   Int
-  totalCostCents      Int
-  targetMarginPct     Float
-  materialsCheckCents Int
-  fiftyCheckCents     Int
-  fullCostPriceCents  Int?
-  finalPriceCents     Int?
-  notes               String?
-  archivedAt          DateTime?
-  createdById         String?
-  createdBy           AdminUser?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  materialCostCents     Int
+  suppliesCostCents     Int           @default(0)
+  otherDirectCostCents  Int           @default(0)
+  laborHours            Float         @default(0)
+  laborCostCents        Int
+  overheadCostCents     Int
+  totalCostCents        Int
+  targetMarginPct       Float
+  floorCents            Int // material cost ÷ 0.30
+  detailedPriceCents    Int? // total cost ÷ (1 − margin)
+  baseRecommendedCents  Int           @default(0) // MAX(floor, detailed)
+  valueAdjustmentCents  Int           @default(0)
+  finalRecommendedCents Int           @default(0)
+  fiftyCheckCents       Int
+  finalPriceCents       Int? // final selling price (manual or recommended)
+  manualPrice           Boolean       @default(false)
+  depositPct            Float         @default(50)
+  depositCents          Int           @default(0)
+  balanceCents          Int           @default(0)
+  grossProfitCents      Int           @default(0)
+  grossMarginPct        Float?
+  netProfitCents        Int           @default(0)
+  notes                 String?
+  archivedAt            DateTime?
+  createdById           String?
+  createdBy             AdminUser?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
   @@index([archivedAt, updatedAt])
   @@index([productId])

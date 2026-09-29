@@ -177,7 +177,7 @@ export function Stat({ label, value, href, hint }: { label: string; value: React
 
 /** Table styling helpers — tables stay semantic <table> markup. */
 export const table = {
-  wrap: "overflow-x-auto rounded-md border border-neutral-200 bg-white",
+  wrap: "relative overflow-x-auto rounded-md border border-neutral-200 bg-white",
   table: "min-w-full divide-y divide-neutral-200 text-sm",
   thead: "bg-neutral-50",
   th: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500 whitespace-nowrap",

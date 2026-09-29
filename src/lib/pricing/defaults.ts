@@ -1,4 +1,4 @@
-import type { EstimateThresholds, OverheadMethod } from "./estimator";
+import type { EstimateThresholds, OverheadMethod, PricingDefaults } from "./estimator";
 
 type PricingSettings = {
   pricingLaborRateCents: number;
@@ -11,10 +11,12 @@ type PricingSettings = {
   pricingTargetMarginPct: number;
   pricingMinMarginWarnPct: number;
   pricingMaterialsLaborWarnPct: number;
+  pricingDepositPct: number;
+  pricingRoundToDollars: number;
 };
 
 /** Calculator defaults from Settings → Pricing. */
-export function pricingDefaults(s: PricingSettings) {
+export function pricingDefaults(s: PricingSettings): PricingDefaults {
   return {
     laborRateCents: s.pricingLaborRateCents,
     lumberWastePct: s.pricingLumberWastePct,
@@ -24,6 +26,8 @@ export function pricingDefaults(s: PricingSettings) {
     monthlyOverheadCents: s.pricingMonthlyOverheadCents,
     projectsPerMonth: s.pricingProjectsPerMonth,
     targetMarginPct: s.pricingTargetMarginPct,
+    depositPct: s.pricingDepositPct,
+    roundToDollars: s.pricingRoundToDollars,
   };
 }
 

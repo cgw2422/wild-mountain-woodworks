@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getSettings } from "@/lib/settings";
 import { centsToDollarInput } from "@/lib/money";
+import { ROUNDING_OPTIONS } from "@/lib/pricing/estimator";
 import { AdminLinkButton, Card, PageHeader } from "@/components/admin/ui";
 import { ActionForm, MoneyInput, Select, SubmitButton, TextInput } from "@/components/admin/forms";
 import { savePricingSettings } from "../../pricing-calculator/actions";
@@ -21,9 +22,9 @@ export default async function PricingSettingsPage() {
       <ActionForm action={savePricingSettings} successMessage="Pricing defaults saved." className="max-w-3xl space-y-6">
         <Card title="Labor & materials">
           <div className="grid gap-4 sm:grid-cols-3">
-            <MoneyInput label="Hourly labor rate" name="pricingLaborRateCents" defaultValue={centsToDollarInput(s.pricingLaborRateCents)} help="Per hour." />
+            <MoneyInput label="Shop labor rate" name="pricingLaborRateCents" defaultValue={centsToDollarInput(s.pricingLaborRateCents)} help="Per build hour." />
             <TextInput label="Lumber waste %" name="pricingLumberWastePct" inputMode="decimal" defaultValue={String(s.pricingLumberWastePct)} help="Typically 10–25%." />
-            <TextInput label="Other material waste %" name="pricingMaterialWastePct" inputMode="decimal" defaultValue={String(s.pricingMaterialWastePct)} />
+            <TextInput label="Hardware & component waste %" name="pricingMaterialWastePct" inputMode="decimal" defaultValue={String(s.pricingMaterialWastePct)} />
           </div>
         </Card>
         <Card title="Overhead" description="Choose the method new estimates start with.">
@@ -33,7 +34,7 @@ export default async function PricingSettingsPage() {
               name="pricingOverheadMethod"
               defaultValue={s.pricingOverheadMethod}
               options={[
-                { value: "percent", label: "Percentage of materials + labor" },
+                { value: "percent", label: "Percentage of direct costs" },
                 { value: "allocated", label: "Monthly overhead ÷ projects per month" },
               ]}
             />
@@ -46,7 +47,21 @@ export default async function PricingSettingsPage() {
           <div className="grid gap-4 sm:grid-cols-3">
             <TextInput label="Default target margin %" name="pricingTargetMarginPct" inputMode="decimal" defaultValue={String(s.pricingTargetMarginPct)} help="Profit as a share of the selling price." />
             <TextInput label="Warn below margin %" name="pricingMinMarginWarnPct" inputMode="decimal" defaultValue={String(s.pricingMinMarginWarnPct)} />
-            <TextInput label="Warn when materials + labor exceed %" name="pricingMaterialsLaborWarnPct" inputMode="decimal" defaultValue={String(s.pricingMaterialsLaborWarnPct)} help="Also used for the “Materials + Labor” price check." />
+            <TextInput label="Warn when materials + labor exceed %" name="pricingMaterialsLaborWarnPct" inputMode="decimal" defaultValue={String(s.pricingMaterialsLaborWarnPct)} help="Also used for the reference “Materials + Labor” check." />
+          </div>
+        </Card>
+        <Card
+          title="Recommendation & deposit"
+          description="The pricing floor is always material cost ÷ 0.30. Recommendations are rounded up — never below the floor."
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Select
+              label="Round recommended price up to"
+              name="pricingRoundToDollars"
+              defaultValue={String(s.pricingRoundToDollars)}
+              options={ROUNDING_OPTIONS.map((d) => ({ value: String(d), label: d ? `Nearest $${d}` : "No rounding" }))}
+            />
+            <TextInput label="Default deposit %" name="pricingDepositPct" inputMode="decimal" defaultValue={String(s.pricingDepositPct)} help="Share of the final price due up front." />
           </div>
         </Card>
         <SubmitButton>Save defaults</SubmitButton>

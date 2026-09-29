@@ -6,7 +6,10 @@ const cents = num(0, 100_000_000).int();
 const id = z.string().max(40);
 const text = z.string().trim().max(200);
 
-export const estimateInputsSchema = z.object({
+const inputsObject = z.object({
+  productType: text.default(""),
+  dimensions: text.default(""),
+  woodSpecies: text.default(""),
   lumber: z
     .array(
       z.object({
@@ -21,8 +24,14 @@ export const estimateInputsSchema = z.object({
     )
     .max(100),
   lumberWastePct: num(0, 200),
-  materials: z.array(z.object({ id, description: text, quantity: num(0, 100_000), unitCostCents: cents })).max(200),
+  materials: z
+    .array(z.object({ id, description: text, category: z.enum(["material", "supplies"]).default("material"), quantity: num(0, 100_000), unitCostCents: cents }))
+    .max(200),
   materialWastePct: num(0, 200),
+  otherCosts: z
+    .array(z.object({ id, kind: z.enum(["delivery", "installation", "outsourced", "other"]), description: text, amountCents: cents }))
+    .max(50)
+    .default([]),
   laborMode: z.enum(["simple", "phases"]),
   laborHours: num(0, 10_000),
   laborRateCents: cents,
@@ -32,8 +41,26 @@ export const estimateInputsSchema = z.object({
   monthlyOverheadCents: cents,
   projectsPerMonth: num(0, 10_000).int(),
   targetMarginPct: num(0, 99.9),
-  proposedPriceCents: cents.nullable(),
+  valueAdjustments: z
+    .array(z.object({ id, label: text, mode: z.enum(["amount", "percent"]), value: num(0, 100_000_000) }))
+    .max(30)
+    .default([]),
+  roundToDollars: num(0, 10_000).default(0),
+  manualPriceCents: cents.nullable().default(null),
+  depositPct: num(0, 100).default(50),
 });
+
+/**
+ * Estimates saved before the 30% floor update stored the admin's price as
+ * `proposedPriceCents`; it is read as the manual final price.
+ */
+export const estimateInputsSchema = z.preprocess((raw) => {
+  if (raw && typeof raw === "object" && !("manualPriceCents" in raw) && "proposedPriceCents" in raw) {
+    const { proposedPriceCents, ...rest } = raw as Record<string, unknown>;
+    return { ...rest, manualPriceCents: proposedPriceCents };
+  }
+  return raw;
+}, inputsObject);
 
 export const estimateMetaSchema = z.object({
   name: z.string().trim().min(1, "Give this estimate a name.").max(160),

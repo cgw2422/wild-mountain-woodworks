@@ -202,14 +202,18 @@ If a section is added to the code later, the site still renders it with empty va
 
 **Admin → Pricing Calculator** (`/admin/pricing-calculator`) is a staff-only decision-support tool. Customers never see it, and it never publishes a price or changes a product on its own.
 
-- **Inputs:** board-foot lumber lines (thickness × width × length ÷ 12 × quantity, with a waste factor), other material line items (optional waste %), labor as total hours or by phase (design, milling, cutting, assembly, sanding, finishing, delivery), overhead as a percentage of materials + labor *or* monthly overhead ÷ expected projects, and a target margin (presets 25–45%).
-- **Three prices side by side:**
-  - *Materials-Based Price Check:* materials ÷ 0.30 — a quick estimate only.
-  - *Materials + Labor 50% Check:* (materials + labor) ÷ 0.50.
-  - *Full Cost + Margin:* (materials + labor + overhead) ÷ (1 − margin) — the most detailed method. Margin is kept separate from markup: $1,000 of cost at a 35% margin is $1,538.46, not $1,350.
-- **Proposed price analysis:** revenue, each cost, profit, margin, markup and materials + labor share, a visual breakdown, and advisory (never blocking) warnings for projected losses, margins below 25% and materials + labor above 50%.
+- **Inputs:** project details (product type, dimensions, wood species), board-foot lumber lines (thickness × width × length ÷ 12 × quantity, with a waste factor), material line items tagged either *Material* or *Finishing / shop supply*, other direct costs (delivery, installation, outsourced work, other), labor as build hours × shop rate or by phase, overhead as a percentage of direct costs *or* monthly overhead ÷ expected projects, and a target margin (presets 25–45%).
+- **Material cost** means every direct physical material in the piece: lumber, legs/bases, chairs if included, hardware, drawer slides, hinges, fasteners, epoxy/resin and purchased components. Finishing consumables and shop supplies are tracked separately, so nothing is counted twice. Labor never counts toward the floor.
+- **Pricing method** (`src/lib/pricing/estimator.ts`):
+  1. *30% pricing floor* = material cost ÷ 0.30.
+  2. *Detailed cost-based price* = total cost ÷ (1 − margin). Margin is not markup: $1,000 of cost at a 35% margin is $1,538.46, not $1,350.
+  3. *Base recommended price* = MAX(floor, detailed). The two are never averaged.
+  4. *Value adjustments* are optional $ or % premiums (custom design, complexity, premium hardwood, rush order and so on). They are added only when you enter them. The result is optionally rounded **up** to the nearest $10, $25, $50 or $100, so it never lands below the floor. This gives the *Final recommended price*.
+  5. *Final selling price* is either the recommendation or your manual override. An override is never blocked. Below the floor, the calculator shows "WARNING: This price is below the 30% material-cost pricing floor." together with the material cost, the floor, your price and the materials share.
+- **Profit breakdown:** selling price, material cost and its % of the sale, labor, other direct costs, gross profit and gross margin. Overhead and net profit are shown separately. Also includes a visual breakdown and advisory warnings.
+- **Deposit:** the default is 50%, editable per estimate and in the defaults. The calculator shows the deposit due and the remaining balance. It also shows whether the deposit covers the material cost and how much is left after materials.
 - **Estimates** can be saved, duplicated, archived, started from a product (loading its internal material-cost and labor-hour estimates) or from a quote, and converted into a quote. **Update product pricing** is a deliberate action that pushes only the values you tick to the product.
-- **Defaults** (labor rate, waste %, overhead, target margin, warning thresholds) live in **Settings → Pricing calculator defaults** (`/admin/settings/pricing`).
+- **Defaults** (shop labor rate, waste %, overhead, target margin, warning thresholds, rounding, deposit %) live in **Settings → Pricing calculator defaults** (`/admin/settings/pricing`).
 
 ## Quotes and historical snapshots
 

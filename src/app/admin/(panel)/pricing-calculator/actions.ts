@@ -48,15 +48,31 @@ async function resultsFor(inputs: EstimateInputs) {
   const settings = await getSettings();
   const r = computeEstimate(inputs, pricingThresholds(settings));
   return {
+    productType: inputs.productType || null,
+    dimensions: inputs.dimensions || null,
+    woodSpecies: inputs.woodSpecies || null,
     materialCostCents: r.materialCostCents,
+    suppliesCostCents: r.suppliesCostCents,
+    otherDirectCostCents: r.otherDirectCostCents,
+    laborHours: r.laborHours,
     laborCostCents: r.laborCostCents,
     overheadCostCents: r.overheadCostCents,
     totalCostCents: r.totalCostCents,
     targetMarginPct: inputs.targetMarginPct,
-    materialsCheckCents: r.methods.materialsCheckCents,
-    fiftyCheckCents: r.methods.fiftyCheckCents,
-    fullCostPriceCents: r.methods.fullCostPriceCents,
-    finalPriceCents: inputs.proposedPriceCents,
+    floorCents: r.pricing.floorCents,
+    detailedPriceCents: r.pricing.detailedPriceCents,
+    baseRecommendedCents: r.pricing.baseRecommendedCents,
+    valueAdjustmentCents: r.pricing.valueAdjustmentCents,
+    finalRecommendedCents: r.pricing.finalRecommendedCents,
+    fiftyCheckCents: r.pricing.fiftyCheckCents,
+    finalPriceCents: r.finalPriceCents,
+    manualPrice: r.manualPrice,
+    depositPct: r.deposit.pct,
+    depositCents: r.deposit.depositCents,
+    balanceCents: r.deposit.balanceCents,
+    grossProfitCents: r.profit.grossProfitCents,
+    grossMarginPct: r.profit.grossMarginPct,
+    netProfitCents: r.profit.netProfitCents,
   };
 }
 
@@ -93,15 +109,31 @@ export const duplicateEstimate = adminAction(async (admin, estimateId: string) =
       customerZip: src.customerZip,
       productId: src.productId,
       inputs: src.inputs as Prisma.InputJsonValue,
+      productType: src.productType,
+      dimensions: src.dimensions,
+      woodSpecies: src.woodSpecies,
       materialCostCents: src.materialCostCents,
+      suppliesCostCents: src.suppliesCostCents,
+      otherDirectCostCents: src.otherDirectCostCents,
+      laborHours: src.laborHours,
       laborCostCents: src.laborCostCents,
       overheadCostCents: src.overheadCostCents,
       totalCostCents: src.totalCostCents,
       targetMarginPct: src.targetMarginPct,
-      materialsCheckCents: src.materialsCheckCents,
+      floorCents: src.floorCents,
+      detailedPriceCents: src.detailedPriceCents,
+      baseRecommendedCents: src.baseRecommendedCents,
+      valueAdjustmentCents: src.valueAdjustmentCents,
+      finalRecommendedCents: src.finalRecommendedCents,
       fiftyCheckCents: src.fiftyCheckCents,
-      fullCostPriceCents: src.fullCostPriceCents,
       finalPriceCents: src.finalPriceCents,
+      manualPrice: src.manualPrice,
+      depositPct: src.depositPct,
+      depositCents: src.depositCents,
+      balanceCents: src.balanceCents,
+      grossProfitCents: src.grossProfitCents,
+      grossMarginPct: src.grossMarginPct,
+      netProfitCents: src.netProfitCents,
       notes: src.notes,
       createdById: admin.id,
     },
@@ -137,16 +169,23 @@ export const convertEstimateToQuote = adminAction(async (admin, estimateId: stri
   const e = await prisma.priceEstimate.findUnique({ where: { id: estimateId }, include: { product: { select: { id: true, name: true } } } });
   if (!e) throw new AdminError("That estimate no longer exists.");
   if (e.quoteRequestId) throw new AdminError("This estimate has already been converted into a quote.");
-  const price = e.finalPriceCents ?? e.fullCostPriceCents;
-  if (!price) throw new AdminError("Enter a proposed selling price and save the estimate first.");
+  const price = e.finalPriceCents;
+  if (!price) throw new AdminError("Save the estimate with a selling price first.");
   const c = convertSchema.parse({ name: fd.str(data, "name"), email: fd.str(data, "email"), phone: fd.str(data, "phone"), zipCode: fd.str(data, "zipCode") });
 
+  // Internal note only — customers never see costs, margins or formulas.
   const summary = [
     `Created from price estimate "${e.name}".`,
-    `Quoted price: ${formatCents(price)}${e.finalPriceCents ? "" : " (full cost + margin price)"}`,
-    `Materials ${formatCents(e.materialCostCents)} · Labor ${formatCents(e.laborCostCents)} · Overhead ${formatCents(e.overheadCostCents)} · Total cost ${formatCents(e.totalCostCents)}`,
-    `Projected profit ${formatCents(price - e.totalCostCents)} (${fmtPct(((price - e.totalCostCents) / price) * 100)} margin)`,
-  ].join("\n");
+    [e.productType, e.woodSpecies, e.dimensions].filter(Boolean).join(" · "),
+    `Quoted price: ${formatCents(price)}${e.manualPrice ? " (manual price)" : " (recommended price)"}`,
+    `30% pricing floor ${formatCents(e.floorCents)} · Detailed price ${e.detailedPriceCents != null ? formatCents(e.detailedPriceCents) : "—"} · Base recommended ${formatCents(e.baseRecommendedCents)}${e.valueAdjustmentCents ? ` · Value adjustments +${formatCents(e.valueAdjustmentCents)}` : ""}`,
+    price < e.floorCents ? "WARNING: This price is below the 30% material-cost pricing floor." : "",
+    `Materials ${formatCents(e.materialCostCents)} (${fmtPct((e.materialCostCents / price) * 100)} of sale) · Labor ${formatCents(e.laborCostCents)} · Other direct ${formatCents(e.otherDirectCostCents)} · Overhead ${formatCents(e.overheadCostCents)}`,
+    `Gross profit ${formatCents(e.grossProfitCents)} (${fmtPct(e.grossMarginPct)} gross margin) · Net after overhead ${formatCents(e.netProfitCents)}`,
+    `Deposit ${fmtPct(e.depositPct)}: ${formatCents(e.depositCents)} · Balance ${formatCents(e.balanceCents)}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const quote = await withUniqueReference("Q", (reference) =>
     prisma.quoteRequest.create({
@@ -159,7 +198,8 @@ export const convertEstimateToQuote = adminAction(async (admin, estimateId: stri
         phone: c.phone,
         zipCode: c.zipCode,
         productId: e.product?.id ?? null,
-        productName: e.product?.name ?? e.name,
+        productName: e.product?.name ?? e.productType ?? e.name,
+        requestedDimensions: e.dimensions,
         estimatedTotalCents: price,
         notes: e.notes,
         readAt: new Date(),
@@ -258,6 +298,8 @@ export const savePricingSettings = adminAction(async (admin, data: FormData) => 
       pricingTargetMarginPct: pctText(95),
       pricingMinMarginWarnPct: pctText(95),
       pricingMaterialsLaborWarnPct: pctText(100),
+      pricingDepositPct: pctText(100),
+      pricingRoundToDollars: z.enum(["0", "10", "25", "50", "100"]).transform(Number),
     })
     .parse({
       pricingLaborRateCents: fd.str(data, "pricingLaborRateCents"),
@@ -270,6 +312,8 @@ export const savePricingSettings = adminAction(async (admin, data: FormData) => 
       pricingTargetMarginPct: fd.str(data, "pricingTargetMarginPct"),
       pricingMinMarginWarnPct: fd.str(data, "pricingMinMarginWarnPct"),
       pricingMaterialsLaborWarnPct: fd.str(data, "pricingMaterialsLaborWarnPct"),
+      pricingDepositPct: fd.str(data, "pricingDepositPct"),
+      pricingRoundToDollars: fd.str(data, "pricingRoundToDollars"),
     });
   await prisma.siteSetting.upsert({ where: { id: "default" }, update: v, create: { id: "default", ...v } });
   await logActivity("pricing.settings_updated", `${admin.name} updated pricing calculator defaults`, { actorId: admin.id });

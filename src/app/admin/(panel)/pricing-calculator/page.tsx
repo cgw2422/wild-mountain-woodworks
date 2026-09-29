@@ -36,7 +36,7 @@ export default async function PricingCalculatorPage({ searchParams }: { searchPa
     <>
       <PageHeader
         title="Pricing calculator"
-        description="Internal decision support for pricing custom work. Compare quick checks against a full cost + margin price, then choose the final price yourself."
+        description="Internal only. Recommended price = the higher of the 30% material-cost floor (materials ÷ 0.30) and the detailed cost-based price, plus any value adjustments you choose."
         actions={<AdminLinkButton href="/admin/settings/pricing">Pricing defaults</AdminLinkButton>}
       />
 
@@ -85,9 +85,11 @@ export default async function PricingCalculatorPage({ searchParams }: { searchPa
                 <tr>
                   <th className={table.th}>Estimate</th>
                   <th className={table.th}>Product</th>
-                  <th className={cn(table.th, "text-right")}>Total cost</th>
+                  <th className={cn(table.th, "text-right")}>Materials</th>
+                  <th className={cn(table.th, "text-right")}>30% floor</th>
                   <th className={cn(table.th, "text-right")}>Final price</th>
-                  <th className={cn(table.th, "text-right")}>Margin</th>
+                  <th className={cn(table.th, "text-right")}>Gross margin</th>
+                  <th className={cn(table.th, "text-right")}>Deposit</th>
                   <th className={table.th}>Updated</th>
                   <th className={table.th}>
                     <span className="sr-only">Actions</span>
@@ -96,7 +98,7 @@ export default async function PricingCalculatorPage({ searchParams }: { searchPa
               </thead>
               <tbody className={table.tbody}>
                 {estimates.map((e) => {
-                  const price = e.finalPriceCents ?? e.fullCostPriceCents;
+                  const price = e.finalPriceCents;
                   return (
                     <tr key={e.id} className={table.tr}>
                       <td className={table.td}>
@@ -108,12 +110,22 @@ export default async function PricingCalculatorPage({ searchParams }: { searchPa
                           {e.quoteRequest ? ` · Quote ${e.quoteRequest.reference}` : ""}
                         </p>
                       </td>
-                      <td className={table.td}>{e.product?.name ?? <span className="text-neutral-400">Custom</span>}</td>
-                      <td className={cn(table.td, "text-right tabular-nums")}>{formatCents(e.totalCostCents)}</td>
-                      <td className={cn(table.td, "text-right tabular-nums")}>
-                        {e.finalPriceCents != null ? formatCents(e.finalPriceCents) : <span className="text-neutral-400">{price ? `${formatCents(price)}*` : "—"}</span>}
+                      <td className={table.td}>
+                        {e.product?.name ?? e.productType ?? <span className="text-neutral-400">Custom</span>}
+                        {e.woodSpecies || e.dimensions ? <p className="text-xs text-neutral-500">{[e.woodSpecies, e.dimensions].filter(Boolean).join(" · ")}</p> : null}
                       </td>
-                      <td className={cn(table.td, "text-right tabular-nums")}>{price ? fmtPct(((price - e.totalCostCents) / price) * 100) : "—"}</td>
+                      <td className={cn(table.td, "text-right tabular-nums")}>{formatCents(e.materialCostCents)}</td>
+                      <td className={cn(table.td, "text-right tabular-nums")}>{formatCents(e.floorCents)}</td>
+                      <td className={cn(table.td, "text-right tabular-nums")}>
+                        {price != null ? formatCents(price) : "—"}
+                        {price != null && price < e.floorCents ? <span className="block text-xs font-medium text-red-700">Below floor</span> : null}
+                        {e.valueAdjustmentCents ? <span className="block text-xs text-neutral-500">incl. +{formatCents(e.valueAdjustmentCents)} adj.</span> : null}
+                      </td>
+                      <td className={cn(table.td, "text-right tabular-nums")}>{fmtPct(e.grossMarginPct)}</td>
+                      <td className={cn(table.td, "text-right tabular-nums")}>
+                        {formatCents(e.depositCents)}
+                        <span className="block text-xs text-neutral-500">bal. {formatCents(e.balanceCents)}</span>
+                      </td>
                       <td className={cn(table.td, "whitespace-nowrap")}>{formatDate(e.updatedAt)}</td>
                       <td className={cn(table.td, "whitespace-nowrap text-right")}>
                         <span className="inline-flex gap-2">
@@ -137,9 +149,6 @@ export default async function PricingCalculatorPage({ searchParams }: { searchPa
             description={showArchived ? "Archived estimates appear here." : "Build an estimate above and save it to keep it for later, duplicate it for similar pieces, or turn it into a quote."}
           />
         )}
-        {estimates.some((e) => e.finalPriceCents == null) ? (
-          <p className="mt-2 text-xs text-neutral-500">* No final price chosen yet — showing the Full Cost + Margin price.</p>
-        ) : null}
       </section>
     </>
   );
