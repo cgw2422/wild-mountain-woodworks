@@ -114,8 +114,8 @@ export function AdminNav({ counts, userName, logout }: { counts: NavCounts; user
     <>
       {/* Mobile top bar */}
       <div className="sticky top-0 z-30 flex h-14 items-center justify-between bg-charcoal px-4 lg:hidden">
-        <Link href="/admin" className="py-3 text-ivory" aria-label="Admin dashboard">
-          <Logo variant="horizontal" className="h-4 w-auto" title="" />
+        <Link href="/admin" className="py-3 text-ivory [--logo-accent:var(--color-bronze-light)]" aria-label="Admin dashboard">
+          <Logo variant="horizontal" className="h-5 w-auto" title="" />
         </Link>
         <button
           type="button"

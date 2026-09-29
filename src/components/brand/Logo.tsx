@@ -10,8 +10,10 @@ interface LogoProps {
 }
 
 /**
- * Wild Mountain Woodworks logo system. Uses `currentColor`, so the light and
- * dark versions are simply `text-ivory` / `text-charcoal`.
+ * Wild Mountain Woodworks logo system. Lettering uses `currentColor`, so the
+ * light and dark versions are simply `text-ivory` / `text-charcoal`. Accent
+ * paths (the horizontal lockup's mountain and divider) use `--logo-accent`,
+ * defaulting to the brand brown; set it lighter on dark backgrounds.
  *
  * Variants: horizontal (primary), stacked (with ridge line), compact
  * (stacked without ridge, for small headers), monogram (WM maker's mark).
@@ -31,6 +33,9 @@ export function Logo({ variant = "horizontal", className, title = "Wild Mountain
       {title ? <title>{title}</title> : null}
       {data.strokes.map((s, i) => (
         <path key={`s${i}`} d={s.d} fill="none" stroke="currentColor" strokeWidth={s.width} strokeLinejoin="miter" />
+      ))}
+      {data.accents.map((f, i) => (
+        <path key={`a${i}`} d={f} fill="var(--logo-accent, #7f582d)" />
       ))}
       {data.fills.map((f, i) => (
         <path key={`f${i}`} d={f} />

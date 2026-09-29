@@ -122,7 +122,7 @@ Useful scripts:
 | `npm run db:seed` | Seed (idempotent) |
 | `npm run admin:create -- --email … --name "…"` | Create an admin, or reset a password with `--reset` |
 | `npm run qa` | Crawl the running site for errors, overflow, broken images and links |
-| `npm run brand` | Regenerate the logo files from the brand fonts |
+| `npm run brand` | Regenerate the logo files from the brand fonts and the supplied horizontal artwork |
 
 ## Admin accounts
 
@@ -409,6 +409,8 @@ The sample copy doesn't claim anything about your history, experience, awards or
 ## Brand assets
 
 The logo system is generated from the brand fonts with the lettering converted to vector outlines (`npm run brand` → `scripts/generate-brand.ts`), so it looks identical everywhere and can be used for engraving or a branding iron.
+
+The primary horizontal logo comes from the supplied artwork in `public/brand/WMW-horizonal.svg`. To update it, replace that file and run `npm run brand`. The script flattens the artwork into plain path data. The brown mountain and divider (`#7f582d`) are drawn in the accent colour, set through the `--logo-accent` CSS variable (a lighter bronze on dark backgrounds). The lettering follows the text colour.
 
 | Asset | Files |
 | --- | --- |

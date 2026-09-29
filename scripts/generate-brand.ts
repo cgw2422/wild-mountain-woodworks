@@ -5,6 +5,11 @@
  * everywhere (browser, favicon, social cards, future engraving/branding-iron
  * maker's mark) without depending on installed fonts.
  *
+ * The horizontal lockup comes from the supplied artwork
+ * (public/brand/WMW-horizonal.svg): its transforms are flattened into plain
+ * path data, the brown mark/divider become "accent" paths and the lettering
+ * follows the text colour.
+ *
  * Outputs:
  *   src/components/brand/logo-data.ts   path data for the <Logo/> component
  *   public/brand/*.svg                  standalone light & dark versions
@@ -27,6 +32,9 @@ const sans = font("@fontsource/manrope/files/manrope-latin-600-normal.woff");
 
 const CHARCOAL = "#1F1E1C";
 const IVORY = "#F7F3EC";
+/** Brown of the supplied artwork, and a lighter bronze for dark backgrounds. */
+const ACCENT = "#7F582D";
+const ACCENT_ON_DARK = "#C3A67A";
 
 interface Box {
   x1: number;
@@ -118,28 +126,107 @@ type Lockup = {
   width: number;
   height: number;
   fills: string[];
+  /** Paths drawn in the accent colour (brand brown). */
+  accents: string[];
   strokes: Array<{ d: string; width: number }>;
 };
 
-// --- Horizontal: WILD MOUNTAIN | WOODWORKS -------------------------------
-function horizontal(): Lockup {
-  const primary = textPath(serif, "WILD MOUNTAIN", 100, 0.06);
-  const primaryH = primary.box.y2 - primary.box.y1;
-  const secondary = textPath(sans, "WOODWORKS", 30, 0.34);
-  const secH = secondary.box.y2 - secondary.box.y1;
-  translate(primary.path, -primary.box.x1, -primary.box.y1);
-  const gap = 34;
-  const ruleX = primary.box.x2 - primary.box.x1 + gap;
-  const secX = ruleX + gap;
-  translate(secondary.path, secX - secondary.box.x1, (primaryH - secH) / 2 - secondary.box.y1);
-  const width = secX + (secondary.box.x2 - secondary.box.x1);
-  const pad = 2;
+// --- Supplied artwork --------------------------------------------------------
+type Matrix = [number, number, number, number, number, number];
+const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
+const multiply = (m: Matrix, n: Matrix): Matrix => [
+  m[0] * n[0] + m[2] * n[1],
+  m[1] * n[0] + m[3] * n[1],
+  m[0] * n[2] + m[2] * n[3],
+  m[1] * n[2] + m[3] * n[3],
+  m[0] * n[4] + m[2] * n[5] + m[4],
+  m[1] * n[4] + m[3] * n[5] + m[5],
+];
+
+function parseTransform(t: string | undefined): Matrix {
+  if (!t) return IDENTITY;
+  let m = IDENTITY;
+  for (const [, fn, args] of t.matchAll(/(matrix|translate|scale)\(([^)]*)\)/g)) {
+    const a = args!.split(/[\s,]+/).filter(Boolean).map(Number);
+    if (fn === "matrix") m = multiply(m, a as Matrix);
+    else if (fn === "translate") m = multiply(m, [1, 0, 0, 1, a[0]!, a[1] ?? 0]);
+    else m = multiply(m, [a[0]!, 0, 0, a[1] ?? a[0]!, 0, 0]);
+  }
+  return m;
+}
+
+/** Apply a matrix to absolute M/L/C/Z path data (all the artwork uses). */
+function transformPath(pathD: string, m: Matrix, box: Box): string {
+  const r = (v: number) => String(Math.round(v * 100) / 100);
+  return [...pathD.matchAll(/([MLCZ])([^MLCZ]*)/gi)]
+    .map(([, cmd, args]) => {
+      if (!/[MLCZ]/.test(cmd!)) throw new Error(`Unsupported path command "${cmd}" in logo artwork`);
+      const nums = args!.trim().split(/[\s,]+/).filter(Boolean).map(Number);
+      const pts: string[] = [];
+      for (let i = 0; i < nums.length; i += 2) {
+        const x = m[0] * nums[i]! + m[2] * nums[i + 1]! + m[4];
+        const y = m[1] * nums[i]! + m[3] * nums[i + 1]! + m[5];
+        box.x1 = Math.min(box.x1, x);
+        box.y1 = Math.min(box.y1, y);
+        box.x2 = Math.max(box.x2, x);
+        box.y2 = Math.max(box.y2, y);
+        pts.push(`${r(x)} ${r(y)}`);
+      }
+      return cmd! + pts.join(" ");
+    })
+    .join("");
+}
+
+function artworkLockup(file: string): Lockup {
+  const svg = readFileSync(path.join(root, file), "utf8").replace(/<defs>[\s\S]*?<\/defs>/, "");
+  const attr = (tag: string, name: string) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
+  // Transforms and fills are inherited from enclosing groups.
+  const stack: Array<{ m: Matrix; fill?: string }> = [{ m: IDENTITY }];
+  const box: Box = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+  const fills: string[] = [];
+  const accents: string[] = [];
+  for (const [tag] of svg.matchAll(/<\/?(?:g|path)\b[^>]*>/g)) {
+    if (tag.startsWith("</")) {
+      stack.pop();
+      continue;
+    }
+    const parent = stack.at(-1)!;
+    const m = multiply(parent.m, parseTransform(attr(tag, "transform")));
+    const fill = attr(tag, "fill")?.toUpperCase() ?? parent.fill;
+    if (tag.startsWith("<g")) {
+      if (!tag.endsWith("/>")) stack.push({ m, fill });
+      continue;
+    }
+    const pathD = attr(tag, "d");
+    if (!pathD) continue;
+    const stroke = attr(tag, "stroke")?.toUpperCase();
+    if (stroke && stroke !== "NONE") {
+      // Straight stroked lines (the divider) become filled rectangles.
+      const nums = pathD.match(/-?\d*\.?\d+(?:e-?\d+)?/gi)?.map(Number) ?? [];
+      if (!/^\s*M[^MLCZ]*L[^MLCZ]*$/i.test(pathD) || nums.length !== 4) throw new Error("Only straight stroked lines are supported in logo artwork");
+      const [x1, y1, x2, y2] = nums as [number, number, number, number];
+      const half = (Number(attr(tag, "stroke-width") ?? 1) / 2) * Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]));
+      const p = (x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+      const [a, b] = [p(x1, y1), p(x2, y2)];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const [nx, ny] = [(-(b[1] - a[1]) / len) * half, ((b[0] - a[0]) / len) * half];
+      const rect = `M${a[0] + nx} ${a[1] + ny}L${b[0] + nx} ${b[1] + ny}L${b[0] - nx} ${b[1] - ny}L${a[0] - nx} ${a[1] - ny}Z`;
+      (stroke === ACCENT ? accents : fills).push(transformPath(rect, IDENTITY, box));
+    }
+    if (fill && fill !== "NONE") (fill === ACCENT ? accents : fills).push(transformPath(pathD, m, box));
+  }
+  // Re-origin at the top-left of the artwork with a little padding.
+  const pad = 1;
+  const shift = (p: string) => offsetPath(p, -box.x1, -box.y1);
+  const w = box.x2 - box.x1;
+  const h = box.y2 - box.y1;
   return {
-    viewBox: `${-pad} ${-pad} ${(width + pad * 2).toFixed(2)} ${(primaryH + pad * 2).toFixed(2)}`,
-    width: width + pad * 2,
-    height: primaryH + pad * 2,
-    fills: [d(primary.path), d(secondary.path)],
-    strokes: [{ d: `M${ruleX.toFixed(2)} ${(primaryH * 0.08).toFixed(2)} L${ruleX.toFixed(2)} ${(primaryH * 0.92).toFixed(2)}`, width: 2 }],
+    viewBox: `${-pad} ${-pad} ${(w + pad * 2).toFixed(2)} ${(h + pad * 2).toFixed(2)}`,
+    width: w + pad * 2,
+    height: h + pad * 2,
+    fills: fills.map(shift),
+    accents: accents.map(shift),
+    strokes: [],
   };
 }
 
@@ -176,6 +263,7 @@ function stacked(withRidge: boolean): Lockup {
     width: pW + pad * 2,
     height: y + pad * 2,
     fills: [d(primary.path), d(secondary.path)],
+    accents: [],
     strokes,
   };
 }
@@ -197,7 +285,7 @@ function monogram(): Lockup {
     { d: `M${c} ${c - 92} A92 92 0 1 1 ${c - 0.01} ${c - 92}`, width: 3 },
     { d: offsetPath(r.d, c - 32, c - 58), width: 3 },
   ];
-  return { viewBox: `0 0 ${size} ${size}`, width: size, height: size, fills: [d(wm.path)], strokes };
+  return { viewBox: `0 0 ${size} ${size}`, width: size, height: size, fills: [d(wm.path)], accents: [], strokes };
 }
 
 // --- Site mark (favicon): WM on a solid tile --------------------------------
@@ -211,14 +299,15 @@ function siteMarkSvg(bg: string, fg: string) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}"><rect width="${size}" height="${size}" rx="6" fill="${bg}"/><path d="${d(wm.path)}" fill="${fg}"/></svg>`;
 }
 
-function toSvg(l: Lockup, color: string, title: string) {
+function toSvg(l: Lockup, color: string, accent: string, title: string) {
   const strokes = l.strokes.map((s) => `<path d="${s.d}" fill="none" stroke="${color}" stroke-width="${s.width}" stroke-linejoin="miter"/>`).join("");
   const fills = l.fills.map((f) => `<path d="${f}" fill="${color}"/>`).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${l.viewBox}" role="img" aria-label="${title}"><title>${title}</title>${strokes}${fills}</svg>\n`;
+  const accents = l.accents.map((f) => `<path d="${f}" fill="${accent}"/>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${l.viewBox}" role="img" aria-label="${title}"><title>${title}</title>${strokes}${accents}${fills}</svg>\n`;
 }
 
 const lockups = {
-  horizontal: horizontal(),
+  horizontal: artworkLockup("public/brand/WMW-horizonal.svg"),
   stacked: stacked(true),
   compact: stacked(false),
   monogram: monogram(),
@@ -233,8 +322,8 @@ const outDir = path.join(root, "public/brand");
 mkdirSync(outDir, { recursive: true });
 const title = "Wild Mountain Woodworks";
 for (const [name, l] of Object.entries(lockups)) {
-  writeFileSync(path.join(outDir, `wild-mountain-${name}-dark.svg`), toSvg(l, CHARCOAL, title));
-  writeFileSync(path.join(outDir, `wild-mountain-${name}-light.svg`), toSvg(l, IVORY, title));
+  writeFileSync(path.join(outDir, `wild-mountain-${name}-dark.svg`), toSvg(l, CHARCOAL, ACCENT, title));
+  writeFileSync(path.join(outDir, `wild-mountain-${name}-light.svg`), toSvg(l, IVORY, ACCENT_ON_DARK, title));
 }
 const markDark = siteMarkSvg(CHARCOAL, IVORY);
 const markLight = siteMarkSvg(IVORY, CHARCOAL);
@@ -247,15 +336,15 @@ async function rasterize() {
   await sharp(Buffer.from(markDark)).resize(512, 512).png().toFile(path.join(outDir, "wild-mountain-sitemark-512.png"));
   await sharp(Buffer.from(markDark)).resize(192, 192).png().toFile(path.join(outDir, "wild-mountain-sitemark-192.png"));
   // A generic brand social card used only until an OG image is set in admin.
-  const stackedLight = toSvg(lockups.stacked, IVORY, title).replace("<svg ", `<svg width="640" `);
+  const stackedLight = toSvg(lockups.stacked, IVORY, ACCENT_ON_DARK, title).replace("<svg ", `<svg width="640" `);
   const card = await sharp({ create: { width: 1200, height: 630, channels: 4, background: CHARCOAL } })
     .composite([{ input: await sharp(Buffer.from(stackedLight)).png().toBuffer(), gravity: "center" }])
     .png()
     .toBuffer();
   writeFileSync(path.join(outDir, "wild-mountain-social-card.png"), card);
   for (const [name, l] of Object.entries(lockups)) {
-    for (const [tone, color] of [["dark", CHARCOAL], ["light", IVORY]] as const) {
-      const svg = toSvg(l, color, title).replace("<svg ", `<svg width="${name === "monogram" ? 1024 : 2400}" `);
+    for (const [tone, color, accent] of [["dark", CHARCOAL, ACCENT], ["light", IVORY, ACCENT_ON_DARK]] as const) {
+      const svg = toSvg(l, color, accent, title).replace("<svg ", `<svg width="${name === "monogram" ? 1024 : 2400}" `);
       await sharp(Buffer.from(svg)).png().toFile(path.join(outDir, `wild-mountain-${name}-${tone}.png`));
     }
   }
