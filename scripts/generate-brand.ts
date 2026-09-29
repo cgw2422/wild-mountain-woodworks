@@ -180,10 +180,11 @@ function transformPath(pathD: string, m: Matrix, box: Box): string {
 }
 
 /**
- * Import supplied logo artwork. With `withoutMark`, paths that sit entirely
- * above the dark lettering (the mountain) are left out.
+ * Import supplied logo artwork. `part` keeps everything, only the lettering
+ * (dropping paths that sit entirely above the dark lettering — the
+ * mountain), or only the mountain mark.
  */
-function artworkLockup(file: string, { withoutMark = false } = {}): Lockup {
+function artworkLockup(file: string, { part = "all" }: { part?: "all" | "lettering" | "mark" } = {}): Lockup {
   const svg = readFileSync(path.join(root, file), "utf8").replace(/<defs>[\s\S]*?<\/defs>/, "");
   const attr = (tag: string, name: string) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
   // Transforms and fills are inherited from enclosing groups.
@@ -222,11 +223,8 @@ function artworkLockup(file: string, { withoutMark = false } = {}): Lockup {
     }
     if (fill && fill !== "NONE") add(pathD, m, fill);
   }
-  let kept = items;
-  if (withoutMark) {
-    const textTop = Math.min(...items.filter((i) => !i.accent).map((i) => i.box.y1));
-    kept = items.filter((i) => i.box.y2 > textTop);
-  }
+  const textTop = Math.min(...items.filter((i) => !i.accent).map((i) => i.box.y1));
+  const kept = part === "all" ? items : items.filter((i) => (part === "mark" ? i.box.y2 <= textTop : i.box.y2 > textTop));
   const box = kept.reduce((b, i) => ({ x1: Math.min(b.x1, i.box.x1), y1: Math.min(b.y1, i.box.y1), x2: Math.max(b.x2, i.box.x2), y2: Math.max(b.y2, i.box.y2) }), emptyBox());
   // Re-origin at the top-left of the artwork with a little padding.
   const pad = 1;
@@ -263,15 +261,19 @@ function monogram(): Lockup {
   return { viewBox: `0 0 ${size} ${size}`, width: size, height: size, fills: [d(wm.path)], accents: [], strokes };
 }
 
-// --- Site mark (favicon): WM on a solid tile --------------------------------
+// --- Site mark (favicon / app icons): the mountain on a solid tile ----------
+const mark = artworkLockup("public/brand/WMW-stacked.svg", { part: "mark" });
+
 function siteMarkSvg(bg: string, fg: string) {
-  // Favicon-scale mark: the WM monogram alone, large enough to read at 16px.
+  // The mark is ~4:1, so at favicon sizes it is scaled past the tile width:
+  // the peaks fill the icon and the thin tapering slopes run off the edges.
   const size = 64;
-  const wm = textPath(serif, "WM", 40, 0.0);
-  const w = wm.box.x2 - wm.box.x1;
-  const h = wm.box.y2 - wm.box.y1;
-  translate(wm.path, size / 2 - w / 2 - wm.box.x1, size / 2 - h / 2 - wm.box.y1);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}"><rect width="${size}" height="${size}" rx="6" fill="${bg}"/><path d="${d(wm.path)}" fill="${fg}"/></svg>`;
+  const [, , vbW, vbH] = mark.viewBox.split(" ").map(Number) as [number, number, number, number];
+  const scale = (size * 1.5) / vbW;
+  const x = (size - vbW * scale) / 2;
+  const y = (size - vbH * scale) / 2 + size * 0.04; // sit slightly low: the peak carries the visual weight
+  const paths = [...mark.accents, ...mark.fills].map((p) => `<path d="${p}"/>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}"><defs><clipPath id="t"><rect width="${size}" height="${size}" rx="6"/></clipPath></defs><rect width="${size}" height="${size}" rx="6" fill="${bg}"/><g clip-path="url(#t)"><g fill="${fg}" transform="translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${scale.toFixed(5)}) translate(1 1)">${paths}</g></g></svg>`;
 }
 
 function toSvg(l: Lockup, color: string, accent: string, title: string) {
@@ -284,7 +286,7 @@ function toSvg(l: Lockup, color: string, accent: string, title: string) {
 const lockups = {
   horizontal: artworkLockup("public/brand/WMW-horizonal.svg"),
   stacked: artworkLockup("public/brand/WMW-stacked.svg"),
-  compact: artworkLockup("public/brand/WMW-stacked.svg", { withoutMark: true }),
+  compact: artworkLockup("public/brand/WMW-stacked.svg", { part: "lettering" }),
   monogram: monogram(),
 };
 
@@ -300,8 +302,8 @@ for (const [name, l] of Object.entries(lockups)) {
   writeFileSync(path.join(outDir, `wild-mountain-${name}-dark.svg`), toSvg(l, CHARCOAL, ACCENT, title));
   writeFileSync(path.join(outDir, `wild-mountain-${name}-light.svg`), toSvg(l, IVORY, ACCENT_ON_DARK, title));
 }
-const markDark = siteMarkSvg(CHARCOAL, IVORY);
-const markLight = siteMarkSvg(IVORY, CHARCOAL);
+const markDark = siteMarkSvg(CHARCOAL, ACCENT_ON_DARK);
+const markLight = siteMarkSvg(IVORY, ACCENT);
 writeFileSync(path.join(outDir, "wild-mountain-sitemark-dark.svg"), markDark);
 writeFileSync(path.join(outDir, "wild-mountain-sitemark-light.svg"), markLight);
 writeFileSync(path.join(root, "src/app/icon.svg"), markDark);

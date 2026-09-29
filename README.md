@@ -418,7 +418,7 @@ The horizontal and stacked logos come from the supplied artwork in `public/brand
 | Stacked logo (with mountain) | `public/brand/wild-mountain-stacked-{dark,light}.{svg,png}` |
 | Compact stacked | `public/brand/wild-mountain-compact-{dark,light}.{svg,png}` |
 | WM monogram / maker's mark | `public/brand/wild-mountain-monogram-{dark,light}.{svg,png}` |
-| Favicon / site mark | `src/app/icon.svg`, `src/app/apple-icon.png`, `public/brand/wild-mountain-sitemark-*` |
+| Favicon / app icons (the mountain from the stacked artwork) | `src/app/icon.svg`, `src/app/apple-icon.png`, `public/brand/wild-mountain-sitemark-*` |
 | Default social card | `public/brand/wild-mountain-social-card.png` |
 
 In code, use `<Logo variant="horizontal | stacked | compact | monogram" />`. It uses `currentColor`, so the light and dark versions are just text colors.
