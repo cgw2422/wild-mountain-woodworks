@@ -112,6 +112,7 @@ export default async function DashboardPage() {
             <AdminLinkButton href="/admin/products/new" variant="primary">
               Add product
             </AdminLinkButton>
+            <AdminLinkButton href="/admin/pricing-calculator">Pricing calculator</AdminLinkButton>
             <AdminLinkButton href="/admin/media">Upload images</AdminLinkButton>
             <AdminLinkButton href="/admin/homepage">Edit homepage</AdminLinkButton>
           </>
