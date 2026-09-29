@@ -14,9 +14,6 @@ export function proxy(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
 
   if (!isLogin && !hasSession) {
-    if (pathname.startsWith("/api/admin")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
     const url = request.nextUrl.clone();
     url.pathname = "/admin/login";
     url.search = pathname === "/admin" ? "" : `?next=${encodeURIComponent(pathname + request.nextUrl.search)}`;
@@ -25,6 +22,9 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
+// /api/admin/* is deliberately not matched: every admin API route validates
+// the session itself (guardAdminApi), and running proxy on it would cap
+// request bodies at 10 MB (proxyClientMaxBodySize), truncating photo uploads.
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/:path*"],
+  matcher: ["/admin/:path*"],
 };

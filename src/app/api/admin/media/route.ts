@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger";
 import { toMediaDTO } from "@/lib/media/dto";
 import { UploadError } from "@/lib/media/process";
 import { createMediaFromFile, getMediaUsageCounts } from "@/lib/media/service";
+import { storageErrorHint } from "@/lib/storage/errors";
 import type { Prisma } from "@/generated/prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
       if (err instanceof UploadError) errors.push(err.message);
       else {
         logger.error("Media upload failed", { error: err, file: file.name });
-        errors.push(`${file.name} could not be uploaded. Please try again.`);
+        errors.push(`${file.name} could not be uploaded. ${storageErrorHint(err)}`);
       }
     }
   }

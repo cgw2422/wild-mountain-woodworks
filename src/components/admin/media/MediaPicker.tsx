@@ -30,7 +30,14 @@ export function uploadMedia(
         if (xhr.status === 401) return resolve({ items: [], errors: ["Your session expired. Please sign in again."] });
         resolve({ items: json.items ?? [], errors: json.errors ?? (json.error ? [json.error] : []) });
       } catch {
-        resolve({ items: [], errors: ["Upload failed. Please try again."] });
+        resolve({
+          items: [],
+          errors: [
+            xhr.status === 413
+              ? "The upload was too large for the server. Try fewer or smaller images at a time."
+              : `Upload failed (server error ${xhr.status}). Please try again. If it keeps happening, check the image storage status in Settings.`,
+          ],
+        });
       }
     };
     xhr.onerror = () => resolve({ items: [], errors: ["Network error during upload. Please check your connection and try again."] });
