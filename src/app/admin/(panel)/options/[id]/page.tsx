@@ -5,7 +5,17 @@ import { prisma } from "@/lib/db";
 import { Badge, Card, PageHeader, StatusBadge, formatDate } from "@/components/admin/ui";
 import { ActionButton, ConfirmAction } from "@/components/admin/forms";
 import { toImageValue } from "../../products/_lib/media";
-import { deleteOptionGroup, deleteOptionValue, reorderOptionValues, saveOptionValue, setOptionGroupActive, updateOptionGroup } from "../actions";
+import { RunActionButton } from "@/components/admin/catalog/RunActionButton";
+import {
+  deleteOptionGroup,
+  deleteOptionValue,
+  duplicateOptionGroup,
+  duplicateOptionValue,
+  reorderOptionValues,
+  saveOptionValue,
+  setOptionGroupActive,
+  updateOptionGroup,
+} from "../actions";
 import { inputTypeLabel } from "../input-types";
 import { OptionGroupForm } from "../OptionGroupForm";
 import { ValuesEditor } from "./ValuesEditor";
@@ -64,6 +74,7 @@ export default async function OptionGroupPage({ params }: { params: Promise<{ id
               inputType={group.inputType}
               save={saveOptionValue.bind(null, group.id)}
               remove={deleteOptionValue.bind(null, group.id)}
+              duplicate={duplicateOptionValue.bind(null, group.id)}
               reorder={reorderOptionValues.bind(null, group.id)}
               values={group.values.map((v) => ({
                 id: v.id,
@@ -99,6 +110,18 @@ export default async function OptionGroupPage({ params }: { params: Promise<{ id
           </Card>
           <Card title="Manage">
             <div className="grid gap-3">
+              <RunActionButton
+                action={duplicateOptionGroup.bind(null, group.id)}
+                navigatePrefix="/admin/options/"
+                confirm={{
+                  title: `Duplicate “${group.name}”?`,
+                  body: `Creates a new group “Copy of ${group.name}” with all ${group.values.length} value${group.values.length === 1 ? "" : "s"} — prices, images, swatches and settings. It isn't attached to any product, so the site doesn't change until you attach it. Unsaved edits on this page are not copied.`,
+                  confirmLabel: "Duplicate",
+                }}
+                pendingLabel="Duplicating…"
+              >
+                Duplicate group
+              </RunActionButton>
               {group.active ? (
                 <ConfirmAction
                   action={setOptionGroupActive.bind(null, group.id, false)}

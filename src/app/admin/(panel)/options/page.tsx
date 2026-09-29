@@ -3,7 +3,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { AdminLinkButton, Badge, EmptyState, PageHeader } from "@/components/admin/ui";
 import { SortableRows } from "@/components/admin/catalog/SortableRows";
-import { reorderOptionGroups } from "./actions";
+import { RunActionButton } from "@/components/admin/catalog/RunActionButton";
+import { duplicateOptionGroup, reorderOptionGroups } from "./actions";
 import { inputTypeLabel } from "./input-types";
 
 export const metadata: Metadata = { title: "Options" };
@@ -53,6 +54,19 @@ export default async function OptionsPage() {
                   <span className="w-28 text-right text-sm tabular-nums text-neutral-600">
                     {g._count.products ? `Used by ${g._count.products}` : "Not used"}
                   </span>
+                  <RunActionButton
+                    action={duplicateOptionGroup.bind(null, g.id)}
+                    navigatePrefix="/admin/options/"
+                    variant="small"
+                    confirm={{
+                      title: `Duplicate “${g.name}”?`,
+                      body: `Creates “Copy of ${g.name}” with all ${g._count.values} value${g._count.values === 1 ? "" : "s"}. It isn't attached to any product until you attach it.`,
+                      confirmLabel: "Duplicate",
+                    }}
+                    pendingLabel="Duplicating…"
+                  >
+                    Duplicate
+                  </RunActionButton>
                 </div>
               </div>
             ),

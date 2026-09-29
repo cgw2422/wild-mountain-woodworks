@@ -160,3 +160,92 @@ export const reorderOptionValues = adminAction(async (admin, groupId: string, id
   revalidateSite();
   return { ok: true, message: "Value order saved." };
 });
+
+/* ------------------------------------------------------------------------ */
+/* Duplicating                                                               */
+/* ------------------------------------------------------------------------ */
+
+/** First of "base", "base (2)", "base (3)"… that `taken` doesn't contain (case-insensitive). */
+function nextFreeName(base: string, taken: string[]) {
+  const used = new Set(taken.map((n) => n.toLowerCase()));
+  const trimmed = base.slice(0, 110);
+  if (!used.has(trimmed.toLowerCase())) return trimmed;
+  for (let i = 2; ; i++) {
+    const candidate = `${trimmed} (${i})`;
+    if (!used.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/**
+ * Copy a group and all of its values (prices, images, swatches, custom and
+ * active flags, order) as a new group. The copy isn't attached to any
+ * product, so nothing changes on the public site until you attach it.
+ */
+export const duplicateOptionGroup = adminAction(async (admin, id: string) => {
+  const src = await prisma.optionGroup.findUnique({ where: { id }, include: { values: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }] } } });
+  if (!src) throw new AdminError("That option group no longer exists.");
+  const similar = await prisma.optionGroup.findMany({ where: { name: { startsWith: `Copy of ${src.name}`.slice(0, 110), mode: "insensitive" } }, select: { name: true } });
+  const name = nextFreeName(`Copy of ${src.name}`, similar.map((g) => g.name));
+  const last = await prisma.optionGroup.aggregate({ _max: { displayOrder: true } });
+  const copy = await prisma.optionGroup.create({
+    data: {
+      name,
+      displayName: src.displayName,
+      description: src.description,
+      inputType: src.inputType,
+      required: src.required,
+      active: src.active,
+      displayOrder: (last._max.displayOrder ?? -1) + 1,
+      values: {
+        create: src.values.map((v, i) => ({
+          name: v.name,
+          displayName: v.displayName,
+          description: v.description,
+          imageId: v.imageId,
+          swatchColor: v.swatchColor,
+          priceModifierCents: v.priceModifierCents,
+          isCustom: v.isCustom,
+          active: v.active,
+          displayOrder: i,
+        })),
+      },
+    },
+  });
+  await logActivity("option.updated", `${admin.name} duplicated option group "${src.name}" as "${copy.name}"`, { actorId: admin.id, entityType: "optionGroup", entityId: copy.id });
+  revalidateSite();
+  return { ok: true, id: copy.id, message: "Option group duplicated." };
+});
+
+/**
+ * Copy one value within its group, placed directly after the original. The
+ * copy starts inactive: the group may already be live on products, and an
+ * identical second choice shouldn't appear there before it's edited.
+ */
+export const duplicateOptionValue = adminAction(async (admin, groupId: string, valueId: string) => {
+  const src = await prisma.optionValue.findFirst({ where: { id: valueId, groupId }, include: { group: { select: { name: true } } } });
+  if (!src) throw new AdminError("That value no longer exists.");
+  const siblings = await prisma.optionValue.findMany({ where: { groupId }, orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }], select: { id: true, name: true } });
+  const name = nextFreeName(`${src.name} (copy)`, siblings.map((s) => s.name));
+  const copy = await prisma.$transaction(async (tx) => {
+    const created = await tx.optionValue.create({
+      data: {
+        groupId,
+        name,
+        displayName: src.displayName,
+        description: src.description,
+        imageId: src.imageId,
+        swatchColor: src.swatchColor,
+        priceModifierCents: src.priceModifierCents,
+        isCustom: src.isCustom,
+        active: false,
+      },
+    });
+    // Renumber so the copy sits right after the original.
+    const order = siblings.flatMap((s) => (s.id === src.id ? [s.id, created.id] : [s.id]));
+    for (const [i, id] of order.entries()) await tx.optionValue.update({ where: { id }, data: { displayOrder: i } });
+    return created;
+  });
+  await logActivity("option.updated", `${admin.name} duplicated value "${src.displayName}" in "${src.group.name}"`, { actorId: admin.id, entityType: "optionGroup", entityId: groupId });
+  revalidateSite();
+  return { ok: true, id: copy.id, message: `Duplicated as “${name}” (inactive). Edit it, then switch it to Active.` };
+});

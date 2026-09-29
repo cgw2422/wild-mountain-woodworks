@@ -4,7 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import type { ActionResult } from "@/lib/admin/types";
 import { centsToDollarInput, formatModifier } from "@/lib/money";
-import { ActionForm, ConfirmAction, Dialog, MoneyInput, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
+import { ActionButton, ActionForm, ConfirmAction, Dialog, MoneyInput, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { Badge, EmptyState, adminButton } from "@/components/admin/ui";
 import { ImageField, type ImageValue } from "@/components/admin/media/ImageField";
 import { ColorField } from "@/components/admin/catalog/ColorField";
@@ -28,12 +28,14 @@ export function ValuesEditor({
   values,
   save,
   remove,
+  duplicate,
   reorder,
 }: {
   inputType: string;
   values: ValueRow[];
   save: (valueId: string | null, data: FormData) => Promise<ActionResult>;
   remove: (valueId: string) => Promise<ActionResult>;
+  duplicate: (valueId: string) => Promise<ActionResult>;
   reorder: (ids: string[]) => Promise<ActionResult>;
 }) {
   const [editing, setEditing] = useState<ValueRow | "new" | null>(null);
@@ -92,6 +94,9 @@ export function ValuesEditor({
                   <button type="button" className={adminButton.small} onClick={() => setEditing(v)}>
                     Edit
                   </button>
+                  <ActionButton action={() => duplicate(v.id)} variant="small" pendingLabel="Duplicating…" title={`Duplicate “${v.displayName}”`}>
+                    Duplicate
+                  </ActionButton>
                   <ConfirmAction
                     action={() => remove(v.id)}
                     label="Delete"
