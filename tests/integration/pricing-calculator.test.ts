@@ -1,0 +1,131 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const jar = new Map<string, string>();
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) => (jar.has(name) ? { name, value: jar.get(name)! } : undefined),
+    set: (name: string, value: string) => void jar.set(name, value),
+    delete: (name: string) => void jar.delete(name),
+  }),
+  headers: async () => new Headers({ "user-agent": "vitest" }),
+}));
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => {
+    throw Object.assign(new Error(`REDIRECT ${url}`), { digest: `NEXT_REDIRECT;${url}` });
+  },
+}));
+vi.mock("next/cache", () => ({ revalidatePath: () => undefined, revalidateTag: () => undefined }));
+
+const { prisma } = await import("@/lib/db");
+const { createAdminSession } = await import("@/lib/auth/session");
+const { defaultEstimateInputs } = await import("@/lib/pricing/estimator");
+const actions = await import("@/app/admin/(panel)/pricing-calculator/actions");
+const { hasTestDb, resetDb } = await import("../support/db");
+
+function form(fields: Record<string, string>) {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  return fd;
+}
+
+const inputs = {
+  ...defaultEstimateInputs({
+    laborRateCents: 4000,
+    lumberWastePct: 0,
+    materialWastePct: 0,
+    overheadPct: 0,
+    overheadMethod: "allocated",
+    monthlyOverheadCents: 30000,
+    projectsPerMonth: 4,
+    targetMarginPct: 35,
+  }),
+  materials: [{ id: "m", description: "White oak & hardware", quantity: 1, unitCostCents: 30000 }],
+  laborHours: 10,
+  proposedPriceCents: 150000,
+};
+
+describe.skipIf(!hasTestDb)("pricing calculator actions", () => {
+  beforeEach(async () => {
+    await resetDb();
+    jar.clear();
+    await prisma.siteSetting.create({ data: { id: "default" } });
+    const u = await prisma.adminUser.create({ data: { email: "owner@example.com", name: "Owner", passwordHash: "x" } });
+    await createAdminSession(u.id);
+  });
+
+  it("requires an admin session", async () => {
+    jar.clear();
+    await expect(actions.saveEstimate(null, form({ name: "X", inputs: JSON.stringify(inputs) }))).rejects.toThrow(/REDIRECT \/admin\/login/);
+  });
+
+  it("recalculates results on the server when saving", async () => {
+    const res = await actions.saveEstimate(null, form({ name: 'Smith 84" White Oak Dining Table', inputs: JSON.stringify(inputs) }));
+    expect(res.ok).toBe(true);
+    const e = await prisma.priceEstimate.findUniqueOrThrow({ where: { id: res.id! } });
+    expect(e).toMatchObject({
+      materialCostCents: 30000,
+      laborCostCents: 40000,
+      overheadCostCents: 7500,
+      totalCostCents: 77500,
+      materialsCheckCents: 100000,
+      fiftyCheckCents: 140000,
+      fullCostPriceCents: 119231,
+      finalPriceCents: 150000,
+    });
+  });
+
+  it("rejects out-of-range inputs", async () => {
+    const bad = await actions.saveEstimate(null, form({ name: "Bad", inputs: JSON.stringify({ ...inputs, targetMarginPct: 150 }) }));
+    expect(bad.ok).toBe(false);
+    expect(await prisma.priceEstimate.count()).toBe(0);
+  });
+
+  it("duplicates, archives and converts into a quote without touching products", async () => {
+    const product = await prisma.product.create({ data: { name: "Ridge", slug: "ridge", basePriceCents: 129500, status: "ACTIVE" } });
+    const { id } = await actions.saveEstimate(null, form({ name: "Estimate", productId: product.id, inputs: JSON.stringify(inputs) }));
+    const dup = await actions.duplicateEstimate(id!);
+    expect((await prisma.priceEstimate.findUniqueOrThrow({ where: { id: dup.id! } })).name).toBe("Copy of Estimate");
+    await actions.setEstimateArchived(dup.id!, true);
+    expect((await prisma.priceEstimate.findUniqueOrThrow({ where: { id: dup.id! } })).archivedAt).not.toBeNull();
+
+    const converted = await actions.convertEstimateToQuote(id!, form({ name: "Pat Smith", email: "pat@example.com", phone: "", zipCode: "43215" }));
+    expect(converted.ok).toBe(true);
+    const quote = await prisma.quoteRequest.findUniqueOrThrow({ where: { id: converted.id! }, include: { internalNotes: true } });
+    expect(quote).toMatchObject({ status: "QUOTED", estimatedTotalCents: 150000, productId: product.id });
+    expect(quote.internalNotes[0]!.body).toMatch(/Projected profit \$725/);
+    expect((await actions.convertEstimateToQuote(id!, form({ name: "Pat Smith", email: "pat@example.com", zipCode: "" }))).ok).toBe(false);
+
+    // Saving or converting never changes the product's price.
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).basePriceCents).toBe(129500);
+  });
+
+  it("updates product pricing only when explicitly requested, field by field", async () => {
+    const product = await prisma.product.create({ data: { name: "Ridge", slug: "ridge", basePriceCents: 129500 } });
+    const none = await actions.updateProductPricing(product.id, form({ basePrice: "1500" }));
+    expect(none.ok).toBe(false);
+    const res = await actions.updateProductPricing(product.id, form({ applyBasePrice: "on", basePrice: "1,500", applyLabor: "on", laborHours: "22.5", materialCost: "999" }));
+    expect(res.ok).toBe(true);
+    expect(await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).toMatchObject({ basePriceCents: 150000, estLaborHours: 22.5, estMaterialCostCents: null });
+  });
+
+  it("saves pricing defaults with validation", async () => {
+    const good = await actions.savePricingSettings(
+      form({
+        pricingLaborRateCents: "55",
+        pricingLumberWastePct: "20",
+        pricingMaterialWastePct: "0",
+        pricingOverheadPct: "5",
+        pricingOverheadMethod: "allocated",
+        pricingMonthlyOverheadCents: "1,200",
+        pricingProjectsPerMonth: "3",
+        pricingTargetMarginPct: "40",
+        pricingMinMarginWarnPct: "25",
+        pricingMaterialsLaborWarnPct: "50",
+      }),
+    );
+    expect(good.ok).toBe(true);
+    expect(await prisma.siteSetting.findUniqueOrThrow({ where: { id: "default" } })).toMatchObject({ pricingLaborRateCents: 5500, pricingMonthlyOverheadCents: 120000, pricingOverheadMethod: "allocated" });
+    const bad = await actions.savePricingSettings(form({ pricingLaborRateCents: "abc", pricingProjectsPerMonth: "0", pricingOverheadMethod: "percent" }));
+    expect(bad.ok).toBe(false);
+  });
+});

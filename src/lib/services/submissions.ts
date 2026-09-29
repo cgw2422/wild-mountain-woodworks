@@ -70,7 +70,7 @@ async function cleanupAttachments(items: AttachmentData[]) {
 }
 
 /** Retry creation if a (very unlikely) reference collision occurs. */
-async function withUniqueReference<T>(prefix: "Q" | "C", create: (reference: string) => Promise<T>): Promise<T> {
+export async function withUniqueReference<T>(prefix: "Q" | "C", create: (reference: string) => Promise<T>): Promise<T> {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       return await create(generateReference(prefix));

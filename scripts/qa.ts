@@ -58,6 +58,8 @@ const ADMIN_PATHS = [
   "/admin/media",
   "/admin/settings",
   "/admin/orders",
+  "/admin/pricing-calculator",
+  "/admin/settings/pricing",
 ];
 
 type Problem = { path: string; width?: number; kind: string; detail: string };

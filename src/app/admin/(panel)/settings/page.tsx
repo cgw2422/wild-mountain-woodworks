@@ -13,7 +13,7 @@ import {
   SEO_TITLE_MAX,
   SEO_TITLE_RECOMMENDED,
 } from "@/components/admin/content/validation";
-import { Badge, Card, PageHeader, formatDate, humanizeEnum, table } from "@/components/admin/ui";
+import { AdminLinkButton, Badge, Card, PageHeader, formatDate, humanizeEnum, table } from "@/components/admin/ui";
 import { editorMediaSelect } from "../pages/data";
 import { changePassword, createAdminUser, saveSettings, setAdminActive } from "./actions";
 
@@ -57,7 +57,11 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description={`Business details, defaults and features used across the site. Last updated ${formatDate(settings.updatedAt, true)}.`} />
+      <PageHeader
+        title="Settings"
+        description={`Business details, defaults and features used across the site. Last updated ${formatDate(settings.updatedAt, true)}.`}
+        actions={<AdminLinkButton href="/admin/settings/pricing">Pricing calculator defaults</AdminLinkButton>}
+      />
       <nav aria-label="Settings sections" className="mb-6 flex flex-wrap gap-x-3 gap-y-1 text-sm">
         <span className="text-neutral-500">Jump to:</span>
         {[

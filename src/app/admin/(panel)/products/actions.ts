@@ -51,6 +51,19 @@ const detailsSchema = z.object({
   shortDescription: z.string().trim().max(500, "Keep this under 500 characters."),
   description: z.string().trim().max(20000, "Keep this under 20,000 characters."),
   basePrice: moneyText(),
+  estMaterialCost: moneyText(),
+  estLaborHours: z
+    .string()
+    .trim()
+    .transform((v, ctx) => {
+      if (v === "") return null;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0 || n > 10000) {
+        ctx.addIssue({ code: "custom", message: "Enter hours like 24 or 12.5." });
+        return null;
+      }
+      return n;
+    }),
   showPrice: z.boolean(),
   featured: z.boolean(),
   featuredOrder: intText({ min: 0, max: 9999 }),
@@ -229,6 +242,8 @@ export const saveProduct = adminAction(async (admin, productId: string, data: Fo
     shortDescription: fd.str(data, "shortDescription"),
     description: fd.str(data, "description"),
     basePrice: fd.str(data, "basePrice"),
+    estMaterialCost: fd.str(data, "estMaterialCost"),
+    estLaborHours: fd.str(data, "estLaborHours"),
     showPrice: fd.bool(data, "showPrice"),
     featured: fd.bool(data, "featured"),
     featuredOrder: fd.str(data, "featuredOrder"),
@@ -260,14 +275,14 @@ export const saveProduct = adminAction(async (admin, productId: string, data: Fo
   const options = hasOptions ? parseJson(fd.str(data, "optionsJson"), optionsPayloadSchema, "options") : null;
   const addOns = hasAddOns ? parseJson(fd.str(data, "addOnsJson"), addOnsPayloadSchema, "add-ons") : null;
 
-  const { basePrice, featuredOrder, ...rest } = input;
+  const { basePrice, estMaterialCost, featuredOrder, ...rest } = input;
   const existing = await prisma.product.findUnique({ where: { id: productId }, select: { id: true } });
   if (!existing) throw new AdminError("That product no longer exists.");
 
   await prisma.$transaction(async (tx) => {
     await tx.product.update({
       where: { id: productId },
-      data: { ...rest, slug, basePriceCents: basePrice, featuredOrder: featuredOrder ?? 0 },
+      data: { ...rest, slug, basePriceCents: basePrice, estMaterialCostCents: estMaterialCost, featuredOrder: featuredOrder ?? 0 },
     });
     if (options) await syncOptions(tx, productId, options);
     if (addOns) await syncAddOns(tx, productId, addOns);
@@ -405,6 +420,8 @@ export const duplicateProduct = adminAction(async (admin, productId: string) => 
         deliveryInfo: src.deliveryInfo,
         seoTitle: src.seoTitle,
         seoDescription: src.seoDescription,
+        estMaterialCostCents: src.estMaterialCostCents,
+        estLaborHours: src.estLaborHours,
         displayOrder: src.displayOrder,
         isSample: false,
         images: {

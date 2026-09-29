@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { QuoteStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -56,9 +57,14 @@ export default async function QuoteDetailPage({ params }: Props) {
         }
         description={`${quote.source === "GENERAL" ? "General quote request" : "Configurator quote request"} · received ${formatDate(quote.createdAt, true)}`}
         actions={
-          <a href={mailto} className={adminButton.primary}>
-            Reply by email
-          </a>
+          <>
+            <Link href={`/admin/pricing-calculator?quote=${quote.id}`} className={adminButton.secondary}>
+              Price in calculator
+            </Link>
+            <a href={mailto} className={adminButton.primary}>
+              Reply by email
+            </a>
+          </>
         }
       />
 

@@ -45,6 +45,7 @@ model AdminUser {
   notes        InternalNote[]
   statusEvents StatusEvent[]
   mediaUploads Media[]
+  estimates    PriceEstimate[]
 }
 
 model AdminSession {
@@ -155,43 +156,47 @@ enum ProductStatus {
 }
 
 model Product {
-  id               String        @id @default(cuid())
-  name             String
-  slug             String        @unique
-  sku              String?       @unique
-  status           ProductStatus @default(DRAFT)
-  categoryId       String?
-  category         Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  shortDescription String        @default("")
-  description      String        @default("") // Markdown
-  basePriceCents   Int?
-  showPrice        Boolean       @default(true)
-  featured         Boolean       @default(false)
-  featuredOrder    Int           @default(0)
+  id                   String        @id @default(cuid())
+  name                 String
+  slug                 String        @unique
+  sku                  String?       @unique
+  status               ProductStatus @default(DRAFT)
+  categoryId           String?
+  category             Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  shortDescription     String        @default("")
+  description          String        @default("") // Markdown
+  basePriceCents       Int?
+  showPrice            Boolean       @default(true)
+  featured             Boolean       @default(false)
+  featuredOrder        Int           @default(0)
   // Future commerce: individual products can be excluded from online
   // purchase even when e-commerce is globally enabled (e.g. quote-only).
-  purchasable      Boolean       @default(true)
-  leadTime         String?
-  dimensions       String? // Markdown
-  materials        String? // Markdown
-  construction     String? // Markdown
-  careInstructions String? // Markdown
-  deliveryInfo     String? // Markdown
-  seoTitle         String?
-  seoDescription   String?
-  displayOrder     Int           @default(0)
+  purchasable          Boolean       @default(true)
+  leadTime             String?
+  dimensions           String? // Markdown
+  materials            String? // Markdown
+  construction         String? // Markdown
+  careInstructions     String? // Markdown
+  deliveryInfo         String? // Markdown
+  seoTitle             String?
+  seoDescription       String?
+  // Internal cost assumptions used by the admin pricing calculator
+  estMaterialCostCents Int?
+  estLaborHours        Float?
+  displayOrder         Int           @default(0)
   // Seeded demonstration content (removable in one click from the dashboard)
-  isSample         Boolean       @default(false)
-  publishedAt      DateTime?
-  archivedAt       DateTime?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  isSample             Boolean       @default(false)
+  publishedAt          DateTime?
+  archivedAt           DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
 
   images       ProductImage[]
   optionGroups ProductOptionGroup[]
   addOns       ProductAddOn[]
   quotes       QuoteRequest[]
   orderItems   OrderItem[]
+  estimates    PriceEstimate[]
 
   @@index([status, displayOrder])
   @@index([categoryId])
@@ -442,9 +447,10 @@ model QuoteRequest {
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt
 
-  attachments   Attachment[]
-  internalNotes InternalNote[]
-  statusEvents  StatusEvent[]
+  attachments    Attachment[]
+  internalNotes  InternalNote[]
+  statusEvents   StatusEvent[]
+  priceEstimates PriceEstimate[]
 
   @@index([status, createdAt])
   @@index([createdAt])
@@ -690,34 +696,45 @@ model SectionItem {
 // ---------------------------------------------------------------------------
 
 model SiteSetting {
-  id                    String   @id @default("default")
-  businessName          String   @default("Wild Mountain Woodworks")
-  tagline               String   @default("Built by hand. Made to belong.")
-  brandStatement        String?
-  email                 String?
-  phone                 String?
-  locationText          String? // e.g. "Ohio"
-  serviceAreaText       String?
-  addressLocality       String?
-  addressRegion         String?
-  instagramUrl          String?
-  facebookUrl           String?
-  pinterestUrl          String?
-  houzzUrl              String?
-  defaultSeoTitle       String?
-  defaultSeoDescription String?
-  defaultOgImageId      String?
-  defaultOgImage        Media?   @relation("SettingsOgImage", fields: [defaultOgImageId], references: [id], onDelete: SetNull)
-  defaultLeadTime       String?
-  priceDisclaimer       String?
-  quoteConfirmationText String?
-  notificationEmail     String?
+  id                           String   @id @default("default")
+  businessName                 String   @default("Wild Mountain Woodworks")
+  tagline                      String   @default("Built by hand. Made to belong.")
+  brandStatement               String?
+  email                        String?
+  phone                        String?
+  locationText                 String? // e.g. "Ohio"
+  serviceAreaText              String?
+  addressLocality              String?
+  addressRegion                String?
+  instagramUrl                 String?
+  facebookUrl                  String?
+  pinterestUrl                 String?
+  houzzUrl                     String?
+  defaultSeoTitle              String?
+  defaultSeoDescription        String?
+  defaultOgImageId             String?
+  defaultOgImage               Media?   @relation("SettingsOgImage", fields: [defaultOgImageId], references: [id], onDelete: SetNull)
+  defaultLeadTime              String?
+  priceDisclaimer              String?
+  quoteConfirmationText        String?
+  notificationEmail            String?
   // Feature flags
-  showPrices            Boolean  @default(true)
-  quotesEnabled         Boolean  @default(true)
-  customOrdersEnabled   Boolean  @default(true)
-  ecommerceEnabled      Boolean  @default(false)
-  updatedAt             DateTime @updatedAt
+  showPrices                   Boolean  @default(true)
+  quotesEnabled                Boolean  @default(true)
+  customOrdersEnabled          Boolean  @default(true)
+  ecommerceEnabled             Boolean  @default(false)
+  // Internal pricing calculator defaults (never shown publicly)
+  pricingLaborRateCents        Int      @default(4500)
+  pricingLumberWastePct        Float    @default(15)
+  pricingMaterialWastePct      Float    @default(0)
+  pricingOverheadPct           Float    @default(5)
+  pricingOverheadMethod        String   @default("percent") // "percent" | "allocated"
+  pricingMonthlyOverheadCents  Int      @default(0)
+  pricingProjectsPerMonth      Int      @default(4)
+  pricingTargetMarginPct       Float    @default(35)
+  pricingMinMarginWarnPct      Float    @default(25)
+  pricingMaterialsLaborWarnPct Float    @default(50)
+  updatedAt                    DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------
@@ -810,4 +827,42 @@ model RateLimitBucket {
   resetAt DateTime
 
   @@index([resetAt])
+}
+
+// ---------------------------------------------------------------------------
+// Internal pricing calculator (admin only — never exposed publicly)
+// ---------------------------------------------------------------------------
+
+model PriceEstimate {
+  id                  String        @id @default(cuid())
+  name                String
+  customerName        String?
+  customerEmail       String?
+  customerPhone       String?
+  customerZip         String?
+  productId           String?
+  product             Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  quoteRequestId      String?
+  quoteRequest        QuoteRequest? @relation(fields: [quoteRequestId], references: [id], onDelete: SetNull)
+  // Full calculator inputs (line items, labor phases, overhead method …)
+  inputs              Json
+  // Results recalculated on the server at save time
+  materialCostCents   Int
+  laborCostCents      Int
+  overheadCostCents   Int
+  totalCostCents      Int
+  targetMarginPct     Float
+  materialsCheckCents Int
+  fiftyCheckCents     Int
+  fullCostPriceCents  Int?
+  finalPriceCents     Int?
+  notes               String?
+  archivedAt          DateTime?
+  createdById         String?
+  createdBy           AdminUser?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@index([archivedAt, updatedAt])
+  @@index([productId])
 }

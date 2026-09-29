@@ -40,6 +40,7 @@ const GROUPS: Array<{ label: string; items: Array<{ href: string; label: string;
   {
     label: "Business",
     items: [
+      { href: "/admin/pricing-calculator", label: "Pricing Calculator" },
       { href: "/admin/settings", label: "Settings" },
       { href: "/admin/orders", label: "Future Orders" },
     ],

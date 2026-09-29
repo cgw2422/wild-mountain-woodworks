@@ -161,6 +161,19 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
                   <Toggle label="Show price" name="showPrice" defaultChecked={product.showPrice} description="When off, customers see “Request a quote” instead of prices for this product." />
                 </div>
               </div>
+              <div className="mt-5 rounded-md border border-dashed border-neutral-300 p-4">
+                <p className="text-sm font-medium text-neutral-800">Internal cost estimates</p>
+                <p className="mb-3 text-xs text-neutral-500">Never shown to customers. Used as the starting point in the pricing calculator.</p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <MoneyInput label="Base material cost" name="estMaterialCost" defaultValue={centsToDollarInput(product.estMaterialCostCents)} placeholder="e.g. 420" />
+                  <TextInput label="Typical labor hours" name="estLaborHours" inputMode="decimal" defaultValue={product.estLaborHours != null ? String(product.estLaborHours) : ""} placeholder="e.g. 24" />
+                  <div className="sm:pt-7">
+                    <Link href={`/admin/pricing-calculator?product=${product.id}`} className="text-sm underline" target="_blank">
+                      Price in calculator ↗
+                    </Link>
+                  </div>
+                </div>
+              </div>
               <p className={`mt-4 rounded px-3 py-2 text-sm ${settings.showPrices ? "bg-neutral-50 text-neutral-600" : "bg-amber-50 text-amber-800"}`}>
                 {settings.showPrices
                   ? "Prices are enabled site-wide in Settings, so this product's “Show price” setting applies."

@@ -73,6 +73,7 @@ It is built as an **e-commerce platform with purchasing turned off**. Server-sid
 - **Quotes, Custom Requests and Messages:** statuses, status history, internal notes and private reference images.
 - **Settings:** business details, social links, SEO defaults and feature flags. Also your account password, admin users and a system status panel.
 - **Future Orders:** the order-management screens, ready for when checkout is enabled.
+- **Pricing Calculator:** internal cost-and-margin pricing for custom work ([details](#internal-pricing-calculator)).
 
 ## Tech stack
 
@@ -196,6 +197,19 @@ If a section is added to the code later, the site still renders it with empty va
   - The same pure function gives the live estimate in the browser.
   - The server always re-prices from the database before storing anything. **Prices sent by a browser are never trusted** — there isn't even a price field to send.
 - **Showing prices.** Prices appear when Settings → Show prices *and* the product's own Show price setting are both on.
+
+## Internal pricing calculator
+
+**Admin → Pricing Calculator** (`/admin/pricing-calculator`) is a staff-only decision-support tool. Customers never see it, and it never publishes a price or changes a product on its own.
+
+- **Inputs:** board-foot lumber lines (thickness × width × length ÷ 12 × quantity, with a waste factor), other material line items (optional waste %), labor as total hours or by phase (design, milling, cutting, assembly, sanding, finishing, delivery), overhead as a percentage of materials + labor *or* monthly overhead ÷ expected projects, and a target margin (presets 25–45%).
+- **Three prices side by side:**
+  - *Materials-Based Price Check:* materials ÷ 0.30 — a quick estimate only.
+  - *Materials + Labor 50% Check:* (materials + labor) ÷ 0.50.
+  - *Full Cost + Margin:* (materials + labor + overhead) ÷ (1 − margin) — the most detailed method. Margin is kept separate from markup: $1,000 of cost at a 35% margin is $1,538.46, not $1,350.
+- **Proposed price analysis:** revenue, each cost, profit, margin, markup and materials + labor share, a visual breakdown, and advisory (never blocking) warnings for projected losses, margins below 25% and materials + labor above 50%.
+- **Estimates** can be saved, duplicated, archived, started from a product (loading its internal material-cost and labor-hour estimates) or from a quote, and converted into a quote. **Update product pricing** is a deliberate action that pushes only the values you tick to the product.
+- **Defaults** (labor rate, waste %, overhead, target margin, warning thresholds) live in **Settings → Pricing calculator defaults** (`/admin/settings/pricing`).
 
 ## Quotes and historical snapshots
 
