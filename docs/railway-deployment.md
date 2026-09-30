@@ -99,7 +99,22 @@ Do these in order. Stop at any step that doesn't behave as described.
 
 If production misbehaves after the switch, first redeploy the previous successful deployment from the dashboard. That restores the old code, and a still-present `railway.json` if it was in that commit.
 
-Migrations only ever add to the schema, and the production seed only inserts records, so rolling back never needs database changes.
+The production seed only inserts records. Migrations normally only add to the schema. The one exception is `20261005000000_sales_quotes_invoices_orders` (see below): it renames and replaces columns while keeping the data. Code from before it can't run against a database that has it.
+
+### The sales migration (quote → invoice → order)
+
+`20261005000000_sales_quotes_invoices_orders` runs automatically in pre-deploy and keeps all existing data:
+
+- **Quote statuses.** Every existing quote request is kept. Statuses are mapped: CONTACTED → REVIEWING and QUOTED → SENT.
+- **Quote numbers.** Existing quotes are numbered WMQ-1001… by date. Their old `WM-Q-…` references still work.
+- **Customers.** One customer is created per exact email address, and quotes are linked to it.
+- **Revisions.** Each old quote gets its first draft revision (and secure link) the first time it's opened in admin.
+- **Settings.** `ecommerceEnabled` is renamed to `stripeInvoicingEnabled` (it was never on).
+- **Orders.** Legacy order statuses map into separate production, payment and delivery statuses. No orders are expected in production.
+
+Take a database backup before deploying it. If you need to roll back past it, restore that backup together with the previous deployment.
+
+After it deploys, the seed adds the editable email templates and the starter quote terms. Nothing else is needed. Stripe invoicing stays off until you set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and turn on the Settings switch (see README → Sales).
 
 ## 4. Verifying a deploy
 
@@ -123,5 +138,6 @@ Then:
 - `GET /api/health` returns `{"status":"ok","database":"ok","adminAuth":"ok",…}`.
 - The home page, `/furniture`, `/furniture/sale` and a product page load.
 - Admin sign-in with two-factor works, and Admin → Promotions and Pages → Sale collection open.
+- Admin → Quotes, Orders, Invoices, Payments, Customers and Emails open; existing quote requests are listed with WMQ numbers.
 
 If the `[predeploy]` lines are **missing**, the pre-deploy command isn't running. The start script's safety net keeps the site working, but fix the configuration: in Railway → the web service → **Settings → Deploy → Pre-deploy Command**, it should read `npm run deploy:prepare`. When pre-deploy runs, the `[start]` step reports "No pending migrations" and "nothing changed".

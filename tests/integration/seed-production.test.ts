@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { PAGE_DEFINITIONS } from "@/lib/cms/definitions";
+import { EMAIL_TEMPLATES } from "@/lib/email/template-definitions";
 import { applyRequiredDefaults } from "@/lib/seed/defaults";
 import { createPasswordAdmin } from "@/lib/auth/accounts";
 import { hasTestDb, resetDb, seedRidge } from "../support/db";
@@ -27,8 +28,10 @@ describe.skipIf(!hasTestDb)("production seed (pre-deploy)", () => {
 
   it("creates only what's missing, and a second run changes nothing", async () => {
     const created = await prisma.$transaction((tx) => applyRequiredDefaults(tx, quiet, { ADMIN_EMAIL: "owner@example.com", ADMIN_PASSWORD: STRONG }));
-    // settings + pages + sections + starter announcement + 5 starter menus + first owner
-    expect(created).toBe(1 + PAGE_DEFINITIONS.length + sectionCount + 1 + 5 + 1);
+    // settings + pages + sections + starter announcement + 5 starter menus + email templates + starter quote terms + first owner
+    expect(created).toBe(1 + PAGE_DEFINITIONS.length + sectionCount + 1 + 5 + EMAIL_TEMPLATES.length + 1 + 1);
+    expect(await prisma.emailTemplate.count()).toBe(EMAIL_TEMPLATES.length);
+    expect((await prisma.siteSetting.findFirstOrThrow()).defaultQuoteTerms).toMatch(/deposit/);
     expect(await prisma.siteSetting.count()).toBe(1);
     expect(await prisma.page.count()).toBe(PAGE_DEFINITIONS.length);
     expect(await prisma.pageSection.count()).toBe(sectionCount);
@@ -44,7 +47,8 @@ describe.skipIf(!hasTestDb)("production seed (pre-deploy)", () => {
   it("never overwrites settings, content, products, announcements or admins", async () => {
     await prisma.$transaction((tx) => applyRequiredDefaults(tx, quiet, {}));
     const { product } = await seedRidge();
-    await prisma.siteSetting.update({ where: { id: "default" }, data: { businessName: "Renamed Co", showPrices: false, ecommerceEnabled: true } });
+    await prisma.siteSetting.update({ where: { id: "default" }, data: { businessName: "Renamed Co", showPrices: false, stripeInvoicingEnabled: true, defaultQuoteTerms: null } });
+    await prisma.emailTemplate.update({ where: { key: "quote_sent" }, data: { subject: "Owner's subject" } });
     const hero = await prisma.pageSection.findFirstOrThrow({ where: { key: "hero", page: { slug: "sale" } } });
     await prisma.pageSection.update({ where: { id: hero.id }, data: { heading: "Owner's heading", visible: false } });
     await prisma.product.update({ where: { id: product.id }, data: { name: "Owner's Table", basePriceCents: 99900 } });
@@ -59,7 +63,9 @@ describe.skipIf(!hasTestDb)("production seed (pre-deploy)", () => {
     const created = await prisma.$transaction((tx) => applyRequiredDefaults(tx, quiet, { ADMIN_EMAIL: "someone-else@example.com", ADMIN_PASSWORD: STRONG }));
     expect(created).toBe(1);
 
-    expect(await prisma.siteSetting.findUniqueOrThrow({ where: { id: "default" } })).toMatchObject({ businessName: "Renamed Co", showPrices: false, ecommerceEnabled: true });
+    // Terms the owner cleared stay cleared; edited templates stay edited.
+    expect(await prisma.siteSetting.findUniqueOrThrow({ where: { id: "default" } })).toMatchObject({ businessName: "Renamed Co", showPrices: false, stripeInvoicingEnabled: true, defaultQuoteTerms: null });
+    expect((await prisma.emailTemplate.findUniqueOrThrow({ where: { key: "quote_sent" } })).subject).toBe("Owner's subject");
     expect(await prisma.pageSection.findUniqueOrThrow({ where: { id: hero.id } })).toMatchObject({ heading: "Owner's heading", visible: false });
     expect(await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).toMatchObject({ name: "Owner's Table", basePriceCents: 99900 });
     expect(await prisma.announcement.count()).toBe(0);

@@ -9,6 +9,8 @@
  *     announcements always survive;
  *   - one-time starter content (e.g. the starter announcement) is recorded in
  *     SeedMarker, so it is never re-created after the owner deletes it;
+ *   - a newly added setting may be given starting text once, only while it
+ *     is still empty (also recorded in SeedMarker);
  *   - admin accounts are never modified: the first owner is created only
  *     when there are no admin users at all.
  *
@@ -18,6 +20,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { PAGE_DEFINITIONS } from "@/lib/cms/definitions";
 import { createPasswordAdmin } from "@/lib/auth/accounts";
 import { validatePasswordStrength } from "@/lib/auth/password";
+import { EMAIL_TEMPLATES } from "@/lib/email/template-definitions";
 import { SEED_PAGES } from "../../../prisma/seed-data/pages";
 
 type Db = Prisma.TransactionClient;
@@ -40,7 +43,7 @@ export const DEFAULT_SETTINGS = {
   showPrices: true,
   quotesEnabled: true,
   customOrdersEnabled: true,
-  ecommerceEnabled: false,
+  stripeInvoicingEnabled: false,
 } satisfies Prisma.SiteSettingCreateInput;
 
 /** The settings row, created with launch defaults only if it doesn't exist. Never updated. */
@@ -267,6 +270,45 @@ export async function ensureMenus(db: Db, log: Log): Promise<number> {
   return created;
 }
 
+/**
+ * Editable email templates (Admin → Settings → Emails): any template key
+ * that doesn't exist yet is created with its starting text. Existing
+ * templates are never changed.
+ */
+export async function ensureEmailTemplates(db: Db, log: Log): Promise<number> {
+  const existing = new Set((await db.emailTemplate.findMany({ select: { key: true } })).map((t) => t.key));
+  let created = 0;
+  for (const t of EMAIL_TEMPLATES) {
+    if (existing.has(t.key)) continue;
+    await db.emailTemplate.create({ data: { key: t.key, name: t.name, subject: t.subject, heading: t.heading, body: t.body, buttonLabel: t.buttonLabel } });
+    created++;
+  }
+  if (created) log(`created ${created} email template(s)`);
+  return created;
+}
+
+export const DEFAULT_QUOTE_TERMS = `- Prices are valid until the expiration date shown on this quote.
+- Your piece is scheduled into the shop once the deposit is received. The remaining balance is due before delivery.
+- Lead times are estimates and are confirmed when your deposit is received.
+- Solid wood is a natural material: grain, color and character vary from board to board and from any photos or samples.
+- Changes after acceptance may affect price and lead time and are confirmed in writing.`;
+
+/**
+ * Starting quote terms, filled in once (tracked in SeedMarker) and only if
+ * the owner hasn't written their own. Never changed after that.
+ */
+export async function ensureSalesDefaults(db: Db, log: Log): Promise<number> {
+  let changed = 0;
+  await once(db, "sales-default-terms", async () => {
+    const res = await db.siteSetting.updateMany({ where: { id: "default", defaultQuoteTerms: null }, data: { defaultQuoteTerms: DEFAULT_QUOTE_TERMS } });
+    if (res.count) {
+      log("added starter quote terms");
+      changed = 1;
+    }
+  });
+  return changed;
+}
+
 /** Everything the application requires, insert-only. Returns how many records were created. */
 export async function applyRequiredDefaults(db: Db, log: Log, env: Record<string, string | undefined> = process.env): Promise<number> {
   return (
@@ -274,6 +316,8 @@ export async function applyRequiredDefaults(db: Db, log: Log, env: Record<string
     (await ensurePages(db, log)) +
     (await ensureStarterAnnouncement(db, log)) +
     (await ensureMenus(db, log)) +
+    (await ensureEmailTemplates(db, log)) +
+    (await ensureSalesDefaults(db, log)) +
     (await bootstrapFirstOwner(db, log, env))
   );
 }

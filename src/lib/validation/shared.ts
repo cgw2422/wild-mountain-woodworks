@@ -92,5 +92,18 @@ export const clientRules = {
       ...person,
       notes: [max(4000)],
     }),
-  configurationQuote: (v: Values) => check(v, { ...person, notes: [max(4000)] }),
+  configurationQuote: (v: Values) =>
+    check(v, {
+      ...person,
+      quantity: [(x) => (x === "" || (/^\d{1,2}$/.test(x) && Number(x) >= 1 && Number(x) <= 20) ? null : "Enter a quantity from 1 to 20.")],
+      address: [max(300)],
+      notes: [max(4000)],
+    }),
+  acceptQuote: (v: Values) =>
+    check(v, {
+      name: person.name!,
+      agreeTerms: [(x) => (x === "on" ? null : "Please confirm this statement.")],
+      agreeDeposit: [(x) => (x === "on" ? null : "Please confirm this statement.")],
+    }),
+  declineQuote: (v: Values) => check(v, { reason: [max(1000)] }),
 };

@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger";
 import { requireStaff, type CurrentAdmin } from "@/lib/auth/session";
 import { can, type Permission } from "@/lib/auth/permissions";
 import { fieldErrorsFrom } from "@/lib/validation/forms";
+import { SalesError } from "@/lib/sales/errors";
 import type { ActionResult } from "./types";
 
 export type { ActionResult } from "./types";
@@ -40,7 +41,7 @@ function guarded<Args extends unknown[]>(
       if (err instanceof z.ZodError) {
         return { ok: false, message: "Please correct the highlighted fields.", fieldErrors: fieldErrorsFrom(err) };
       }
-      if (err instanceof AdminError) return { ok: false, message: err.message, fieldErrors: err.fieldErrors };
+      if (err instanceof AdminError || err instanceof SalesError) return { ok: false, message: err.message, fieldErrors: err.fieldErrors };
       if (err instanceof Prisma.PrismaClientKnownRequestError) {
         if (err.code === "P2002") {
           const target = (err.meta?.target as string[] | string | undefined) ?? "";
@@ -69,9 +70,14 @@ export function adminAction<Args extends unknown[]>(fn: (admin: CurrentAdmin, ..
   return guarded((a) => a.role === "OWNER" || a.role === "ADMIN", fn);
 }
 
-/** Staff whose role has `permission` (src/lib/auth/permissions.ts), e.g. editors for "content". */
-export function permittedAction<Args extends unknown[]>(permission: Permission, fn: (admin: CurrentAdmin, ...args: Args) => Promise<ActionResult | void>) {
-  return guarded((a) => can(a.role, permission), fn);
+/**
+ * Staff whose role has `permission` (src/lib/auth/permissions.ts), e.g.
+ * editors for "content". Pass several to require all of them (e.g. quote
+ * pricing needs both "sales" and "finance").
+ */
+export function permittedAction<Args extends unknown[]>(permission: Permission | Permission[], fn: (admin: CurrentAdmin, ...args: Args) => Promise<ActionResult | void>) {
+  const needed = Array.isArray(permission) ? permission : [permission];
+  return guarded((a) => needed.length > 0 && needed.every((p) => can(a.role, p)), fn);
 }
 
 /**

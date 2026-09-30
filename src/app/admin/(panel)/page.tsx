@@ -1,12 +1,18 @@
 import type { Metadata } from "next";
 import { requirePermission } from "@/lib/auth/session";
 import Link from "next/link";
-import type { CustomRequestStatus, QuoteStatus } from "@/generated/prisma/client";
+import type { CustomRequestStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { cn } from "@/lib/cn";
 import { formatCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { getSampleContentSummary } from "@/lib/admin/sample-content";
+import { can } from "@/lib/auth/permissions";
+import { markPastDueInvoices } from "@/lib/sales/ledger";
+import { expireDueQuotes } from "@/lib/sales/quotes";
+import { INVOICE_UNPAID_STATUSES, PRODUCTION_ACTIVE, QUOTE_AWAITING_STATUSES, QUOTE_OPEN_STATUSES } from "@/lib/sales/status";
+import { siteDayStart, siteDateInput } from "@/lib/site-time";
+import { SalesBadge } from "@/components/admin/sales/SalesBadge";
 import { AdminLinkButton, Card, PageHeader, Stat, StatusBadge, formatDate } from "@/components/admin/ui";
 import { RelativeTime } from "@/components/admin/inbox/time";
 import { RemoveSampleContent } from "@/components/admin/dashboard/RemoveSampleContent";
@@ -14,7 +20,6 @@ import { removeSampleContentAction } from "@/components/admin/dashboard/actions"
 
 export const metadata: Metadata = { title: "Dashboard" };
 
-const OPEN_QUOTES: QuoteStatus[] = ["NEW", "CONTACTED", "QUOTED"];
 const CLOSED_CUSTOM: CustomRequestStatus[] = ["DECLINED", "COMPLETED"];
 
 /** Link to the entity an activity row refers to, when it can still exist. */
@@ -27,6 +32,8 @@ function activityHref(a: { type: string; entityType: string | null; entityId: st
     product: "/admin/products",
     media: "/admin/media",
     order: "/admin/orders",
+    invoice: "/admin/invoices",
+    customer: "/admin/customers",
   };
   return base[a.entityType] ? `${base[a.entityType]}/${a.entityId}` : null;
 }
@@ -51,6 +58,49 @@ function ChecklistItem({ ok, title, children }: { ok: boolean; title: React.Reac
   );
 }
 
+/**
+ * Sales widgets and quiet alerts: each alert appears only when there's
+ * something to do, so the dashboard isn't noisy.
+ */
+async function salesOverview(alertDays: number, finance: boolean) {
+  const now = new Date();
+  const soon = new Date(now.getTime() + 3 * 86_400_000);
+  const staleBefore = new Date(now.getTime() - Math.max(1, alertDays) * 86_400_000);
+  const monthStart = siteDayStart(`${siteDateInput(now).slice(0, 7)}-01`) ?? now;
+  const [awaiting, awaitingDeposit, inProduction, readyForDelivery, staleNew, expiring, pastDue, draftInvoices, undated, failedEmails, unpaid, received] = await Promise.all([
+    prisma.quoteRequest.count({ where: { status: { in: QUOTE_AWAITING_STATUSES }, archivedAt: null } }),
+    prisma.order.count({ where: { productionStatus: { in: ["QUOTE_ACCEPTED", "AWAITING_DEPOSIT"] } } }),
+    prisma.order.count({ where: { productionStatus: { in: PRODUCTION_ACTIVE } } }),
+    prisma.order.count({ where: { productionStatus: "READY_FOR_DELIVERY" } }),
+    prisma.quoteRequest.count({ where: { status: "NEW", archivedAt: null, createdAt: { lt: staleBefore } } }),
+    prisma.quoteRequest.count({ where: { status: { in: QUOTE_AWAITING_STATUSES }, archivedAt: null, revisions: { some: { status: "SENT", expiresAt: { gt: now, lt: soon } } } } }),
+    finance ? prisma.invoice.count({ where: { status: "PAST_DUE" } }) : 0,
+    finance ? prisma.invoice.count({ where: { status: "DRAFT", createdAt: { lt: new Date(now.getTime() - 86_400_000) } } }) : 0,
+    prisma.order.count({ where: { productionStatus: "READY_FOR_DELIVERY", deliveryDate: null } }),
+    prisma.emailLog.count({ where: { status: "FAILED", createdAt: { gt: new Date(now.getTime() - 14 * 86_400_000) } } }),
+    finance ? prisma.invoice.aggregate({ where: { status: { in: INVOICE_UNPAID_STATUSES } }, _sum: { totalCents: true, amountPaidCents: true } }) : null,
+    finance ? prisma.payment.aggregate({ where: { receivedAt: { gte: monthStart }, status: { in: ["SUCCEEDED", "PARTIALLY_REFUNDED", "REFUNDED"] } }, _sum: { amountCents: true, refundedCents: true } }) : null,
+  ]);
+  const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const alerts = [
+    staleNew ? { label: `${plural(staleNew, "quote request")} waiting more than ${plural(alertDays, "day")}`, href: "/admin/quotes?status=action" } : null,
+    expiring ? { label: `${plural(expiring, "sent quote")} expiring in the next 3 days`, href: "/admin/quotes?status=waiting" } : null,
+    pastDue ? { label: `${plural(pastDue, "invoice")} past due`, href: "/admin/invoices?status=pastdue" } : null,
+    draftInvoices ? { label: `${plural(draftInvoices, "draft invoice")} not sent yet`, href: "/admin/invoices?status=draft" } : null,
+    undated ? { label: `${plural(undated, "order")} ready for delivery without a delivery date`, href: "/admin/orders?status=delivery" } : null,
+    failedEmails ? { label: `${plural(failedEmails, "email")} failed to send recently`, href: "/admin/settings/emails#log" } : null,
+  ].filter((a): a is { label: string; href: string } => Boolean(a));
+  return {
+    awaiting,
+    awaitingDeposit,
+    inProduction,
+    readyForDelivery,
+    outstandingCents: unpaid ? (unpaid._sum.totalCents ?? 0) - (unpaid._sum.amountPaidCents ?? 0) : 0,
+    receivedThisMonthCents: received ? (received._sum.amountCents ?? 0) - (received._sum.refundedCents ?? 0) : 0,
+    alerts,
+  };
+}
+
 const linkCls = "font-medium text-neutral-900 underline underline-offset-2 hover:text-neutral-600";
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
@@ -58,6 +108,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const denied = (await searchParams).denied === "1";
   // Editors get a content-only dashboard: no inbox, catalog or security data.
   if (admin.role === "EDITOR") return <EditorDashboard name={admin.name} denied={denied} />;
+  const finance = can(admin.role, "finance");
+  await Promise.all([expireDueQuotes(), finance ? markPastDueInvoices() : null]);
   const [
     settings,
     activeProducts,
@@ -76,15 +128,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     getSettings(),
     prisma.product.count({ where: { status: "ACTIVE" } }),
     prisma.product.count({ where: { status: "DRAFT" } }),
-    prisma.quoteRequest.count({ where: { status: "NEW" } }),
-    prisma.quoteRequest.count({ where: { status: { in: OPEN_QUOTES } } }),
+    prisma.quoteRequest.count({ where: { status: "NEW", archivedAt: null } }),
+    prisma.quoteRequest.count({ where: { status: { in: QUOTE_OPEN_STATUSES }, archivedAt: null } }),
     prisma.customRequest.count({ where: { status: { notIn: CLOSED_CUSTOM } } }),
     prisma.contactMessage.count({ where: { status: "UNREAD" } }),
     prisma.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 15, include: { actor: { select: { name: true } } } }),
     prisma.quoteRequest.findMany({
       orderBy: { createdAt: "desc" },
       take: 5,
-      select: { id: true, reference: true, name: true, productName: true, source: true, estimatedTotalCents: true, status: true, readAt: true, createdAt: true },
+      where: { archivedAt: null },
+      select: { id: true, number: true, reference: true, name: true, productName: true, source: true, estimatedTotalCents: true, status: true, readAt: true, createdAt: true },
     }),
     prisma.customRequest.findMany({
       orderBy: { createdAt: "desc" },
@@ -96,6 +149,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     getSampleContentSummary(),
   ]);
 
+  const sales = await salesOverview(settings.quoteAlertDays, finance);
   const hasSample = sample.products + sample.portfolio + sample.media > 0;
   const checklist = [
     Boolean(settings.email?.trim()),
@@ -118,6 +172,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <AdminLinkButton href="/admin/products/new" variant="primary">
               Add product
             </AdminLinkButton>
+            <AdminLinkButton href="/admin/quotes/new">New quote</AdminLinkButton>
             <AdminLinkButton href="/admin/pricing-calculator">Pricing calculator</AdminLinkButton>
             <AdminLinkButton href="/admin/media">Upload images</AdminLinkButton>
             <AdminLinkButton href="/admin/homepage">Edit homepage</AdminLinkButton>
@@ -125,15 +180,48 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         }
       />
 
-      <section aria-labelledby="dash-stats" className="mb-8">
-        <h2 id="dash-stats" className="sr-only">
-          At a glance
+      {sales.alerts.length ? (
+        <section aria-labelledby="dash-alerts" className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-5 py-4">
+          <h2 id="dash-alerts" className="text-sm font-semibold text-amber-900">
+            Needs attention
+          </h2>
+          <ul className="mt-2 space-y-1 text-sm">
+            {sales.alerts.map((a) => (
+              <li key={a.href}>
+                <Link href={a.href} className="inline-block py-0.5 text-amber-950 underline underline-offset-2">
+                  {a.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <section aria-labelledby="dash-sales" className="mb-6">
+        <h2 id="dash-sales" className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+          Sales
         </h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <Stat label="New quote requests" value={newQuotes} href="/admin/quotes?status=action" />
+          <Stat label="Quotes to prepare" value={openQuotes} href="/admin/quotes?status=action" hint="New, reviewing or draft" />
+          <Stat label="Waiting on customer" value={sales.awaiting} href="/admin/quotes?status=waiting" hint="Sent or viewed" />
+          <Stat label="Awaiting deposit" value={sales.awaitingDeposit} href="/admin/orders?status=deposit" />
+          <Stat label="In the shop" value={sales.inProduction} href="/admin/orders?status=production" />
+          {finance ? (
+            <Stat label="Outstanding" value={formatCents(sales.outstandingCents)} href="/admin/invoices?status=unpaid" hint={`Received this month: ${formatCents(sales.receivedThisMonthCents)}`} />
+          ) : (
+            <Stat label="Ready for delivery" value={sales.readyForDelivery} href="/admin/orders?status=delivery" />
+          )}
+        </div>
+      </section>
+
+      <section aria-labelledby="dash-stats" className="mb-8">
+        <h2 id="dash-stats" className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+          Site
+        </h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="Active products" value={activeProducts} href="/admin/products?status=active" />
           <Stat label="Draft products" value={draftProducts} href="/admin/products?status=draft" />
-          <Stat label="New quote requests" value={newQuotes} href="/admin/quotes?status=NEW" />
-          <Stat label="Open quotes" value={openQuotes} href="/admin/quotes?status=open" hint="New, contacted or quoted" />
           <Stat label="Open custom requests" value={openCustom} href="/admin/custom-requests?status=open" hint="Not declined or completed" />
           <Stat label="Unread messages" value={unreadMessages} href="/admin/messages?status=unread" />
         </div>
@@ -143,7 +231,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <div className="min-w-0 space-y-6 xl:col-span-2">
           <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
             <Card
-              title="Recent quote requests"
+              title="Recent quotes"
               className="min-w-0"
               actions={
                 <Link href="/admin/quotes" className="inline-block py-1 text-sm font-medium text-neutral-600 hover:text-neutral-900 hover:underline">
@@ -165,12 +253,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                             {!q.readAt ? <span className="sr-only"> (unread)</span> : null}
                           </span>
                           <span className="block truncate text-xs text-neutral-500">
-                            <span className="font-mono">{q.reference}</span> · {q.source === "GENERAL" ? "General request" : (q.productName ?? "—")}
+                            <span className="font-mono">{q.number ?? q.reference}</span> · {q.productName ?? (q.source === "MANUAL" ? "Manual quote" : "General request")}
                             {q.estimatedTotalCents != null ? ` · ${formatCents(q.estimatedTotalCents)}` : ""}
                           </span>
                         </span>
                         <span className="flex shrink-0 flex-col items-end gap-1">
-                          <StatusBadge status={q.status} />
+                          <SalesBadge status={q.status} />
                           <span className="text-xs text-neutral-500">{formatDate(q.createdAt)}</span>
                         </span>
                       </Link>
@@ -235,7 +323,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                         ) : (
                           <p className="text-neutral-900 [overflow-wrap:anywhere]">{a.message}</p>
                         )}
-                        <p className="mt-0.5 text-xs text-neutral-500">{a.actor?.name ?? (a.type.endsWith(".received") ? "Website" : "System")}</p>
+                        <p className="mt-0.5 text-xs text-neutral-500">{a.actor?.name ?? (a.type.endsWith(".received") ? "Website" : ["quote.viewed", "quote.accepted", "quote.declined"].includes(a.type) ? "Customer" : "System")}</p>
                       </div>
                       <RelativeTime date={a.createdAt} className="shrink-0 whitespace-nowrap text-xs text-neutral-500" />
                     </li>

@@ -1,49 +1,37 @@
 import { CONTACT_REASONS } from "@/lib/validation/forms";
-import {
-  type ContactReason,
-  CustomRequestStatus,
-  MessageStatus,
-  ProductionStatus,
-  QuoteStatus,
-} from "@/generated/prisma/enums";
+import { type ContactReason, CustomRequestStatus, MessageStatus } from "@/generated/prisma/enums";
+import { statusLabel as salesStatusLabel } from "@/lib/sales/status";
 
 /**
- * Inbox record kinds shared by the notes / status components and the generic
+ * Record kinds shared by the notes / status components and the generic
  * inbox server actions. Pure data — safe to import from client components.
+ *
+ * Quote and order statuses are NOT changed through the generic status
+ * action: they follow the sales workflow (src/lib/sales) and have their own
+ * actions. Invoices and customers only use notes here.
  */
-export type InboxKind = "quote" | "custom_request" | "message" | "order";
+export type InboxKind = "quote" | "custom_request" | "message" | "order" | "invoice" | "customer";
 
-export const INBOX_KINDS: readonly InboxKind[] = ["quote", "custom_request", "message", "order"];
+export const INBOX_KINDS: readonly InboxKind[] = ["quote", "custom_request", "message", "order", "invoice", "customer"];
 
 export const INBOX_KIND_META: Record<InboxKind, { label: string; basePath: string; statuses: readonly string[] }> = {
-  quote: { label: "Quote request", basePath: "/admin/quotes", statuses: Object.values(QuoteStatus) },
+  quote: { label: "Quote", basePath: "/admin/quotes", statuses: [] },
   custom_request: { label: "Custom request", basePath: "/admin/custom-requests", statuses: Object.values(CustomRequestStatus) },
   message: { label: "Message", basePath: "/admin/messages", statuses: Object.values(MessageStatus) },
-  // Orders: the admin-editable status is the production status. Payment
-  // status is only ever set by the Stripe webhook.
-  order: { label: "Order", basePath: "/admin/orders", statuses: Object.values(ProductionStatus) },
-};
-
-export const PRODUCTION_STATUS_LABELS: Record<ProductionStatus, string> = {
-  ORDER_RECEIVED: "Order Received",
-  DESIGN_CONFIRMATION: "Design Confirmation",
-  MATERIALS_PREPARED: "Materials Prepared",
-  IN_PRODUCTION: "In Production",
-  FINISHING: "Finishing",
-  READY_FOR_DELIVERY: "Ready for Delivery",
-  COMPLETED: "Completed",
+  order: { label: "Order", basePath: "/admin/orders", statuses: [] },
+  invoice: { label: "Invoice", basePath: "/admin/invoices", statuses: [] },
+  customer: { label: "Customer", basePath: "/admin/customers", statuses: [] },
 };
 
 export function contactReasonLabel(reason: ContactReason | string): string {
   return CONTACT_REASONS.find((r) => r.value === reason)?.label ?? statusLabel(reason);
 }
 
-/** Human label for any stored status value (StatusEvent stores plain strings). */
+/** Human label for any stored status value (StatusEvent stores plain strings, e.g. "payment:PAID"). */
 export function statusLabel(value: string): string {
-  if (value in PRODUCTION_STATUS_LABELS && value !== "COMPLETED") return PRODUCTION_STATUS_LABELS[value as ProductionStatus];
-  return value
-    .toLowerCase()
-    .split("_")
-    .map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
-    .join(" ");
+  const [prefix, rest] = value.includes(":") ? value.split(":", 2) : [null, value];
+  const label = salesStatusLabel(rest!);
+  if (prefix === "payment") return `Payment: ${label}`;
+  if (prefix === "delivery") return `Delivery: ${label}`;
+  return label;
 }

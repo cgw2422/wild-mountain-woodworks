@@ -2,15 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { CustomRequestStatus, MessageStatus, ProductionStatus, QuoteStatus } from "@/generated/prisma/client";
+import type { CustomRequestStatus, MessageStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { adminAction, AdminError, fd } from "@/lib/admin/action";
 import { INBOX_KIND_META, INBOX_KINDS, statusLabel, type InboxKind } from "@/components/admin/inbox/kinds";
 
 /*
- * Generic inbox actions shared by quotes, custom requests, messages and
- * orders: internal notes and status changes (each recorded as a StatusEvent).
+ * Generic inbox actions: internal notes (quotes, custom requests, messages,
+ * orders, invoices, customers) and status changes for custom requests and
+ * messages (each recorded as a StatusEvent). Quote and order statuses follow
+ * the sales workflow and are changed by their own actions.
+ *
+ * Internal notes are never shown to customers.
  */
 
 const noteSchema = z.object({
@@ -25,11 +29,13 @@ function assertKind(kind: unknown): InboxKind {
 }
 
 /** FK column on InternalNote / StatusEvent for each kind. */
-const FK: Record<InboxKind, "quoteRequestId" | "customRequestId" | "contactMessageId" | "orderId"> = {
+const FK: Record<InboxKind, "quoteRequestId" | "customRequestId" | "contactMessageId" | "orderId" | "invoiceId" | "customerId"> = {
   quote: "quoteRequestId",
   custom_request: "customRequestId",
   message: "contactMessageId",
   order: "orderId",
+  invoice: "invoiceId",
+  customer: "customerId",
 };
 
 type TargetInfo = { label: string; status: string; readAt?: Date | null };
@@ -38,8 +44,8 @@ type TargetInfo = { label: string; status: string; readAt?: Date | null };
 async function loadTarget(kind: InboxKind, id: string): Promise<TargetInfo> {
   switch (kind) {
     case "quote": {
-      const r = await prisma.quoteRequest.findUnique({ where: { id }, select: { reference: true, status: true, readAt: true } });
-      if (r) return { label: `Quote ${r.reference}`, status: r.status, readAt: r.readAt };
+      const r = await prisma.quoteRequest.findUnique({ where: { id }, select: { reference: true, number: true, status: true, readAt: true } });
+      if (r) return { label: `Quote ${r.number ?? r.reference}`, status: r.status, readAt: r.readAt };
       break;
     }
     case "custom_request": {
@@ -55,6 +61,16 @@ async function loadTarget(kind: InboxKind, id: string): Promise<TargetInfo> {
     case "order": {
       const r = await prisma.order.findUnique({ where: { id }, select: { number: true, productionStatus: true } });
       if (r) return { label: `Order ${r.number}`, status: r.productionStatus };
+      break;
+    }
+    case "invoice": {
+      const r = await prisma.invoice.findUnique({ where: { id }, select: { number: true, status: true } });
+      if (r) return { label: `Invoice ${r.number}`, status: r.status };
+      break;
+    }
+    case "customer": {
+      const r = await prisma.customer.findUnique({ where: { id }, select: { name: true } });
+      if (r) return { label: `Customer ${r.name}`, status: "" };
       break;
     }
   }
@@ -97,8 +113,12 @@ export const deleteNoteAction = adminAction(async (admin, noteIdArg: string) => 
         ? "message"
         : note.orderId
           ? "order"
-          : null;
-  const targetId = note.quoteRequestId ?? note.customRequestId ?? note.contactMessageId ?? note.orderId ?? undefined;
+          : note.invoiceId
+            ? "invoice"
+            : note.customerId
+              ? "customer"
+              : null;
+  const targetId = note.quoteRequestId ?? note.customRequestId ?? note.contactMessageId ?? note.orderId ?? note.invoiceId ?? note.customerId ?? undefined;
   await prisma.internalNote.delete({ where: { id: noteId } });
   await logActivity("note.deleted", `${admin.name} deleted an internal note`, {
     actorId: admin.id,
@@ -116,6 +136,7 @@ export const deleteNoteAction = adminAction(async (admin, noteIdArg: string) => 
 async function applyStatus(admin: { id: string; name: string }, kindArg: InboxKind, idArg: string, statusArg: unknown) {
   const kind = assertKind(kindArg);
   const id = idSchema.parse(idArg);
+  if (INBOX_KIND_META[kind].statuses.length === 0) throw new AdminError("Change this record's status from its own page.");
   const allowed = INBOX_KIND_META[kind].statuses as [string, ...string[]];
   const { status } = z.object({ status: z.enum(allowed, { error: "Choose a valid status." }) }).parse({ status: statusArg });
   const target = await loadTarget(kind, id);
@@ -124,13 +145,6 @@ async function applyStatus(admin: { id: string; name: string }, kindArg: InboxKi
   const event = { fromStatus: target.status, toStatus: status, authorId: admin.id, [FK[kind]]: id };
   const now = new Date();
   switch (kind) {
-    case "quote":
-      await prisma.$transaction([
-        prisma.quoteRequest.update({ where: { id }, data: { status: status as QuoteStatus, readAt: target.readAt ?? now } }),
-        prisma.statusEvent.create({ data: event }),
-      ]);
-      await logActivity("quote.status_changed", `${target.label} marked ${statusLabel(status)}`, { actorId: admin.id, entityType: "quote", entityId: id });
-      break;
     case "custom_request":
       await prisma.$transaction([
         prisma.customRequest.update({ where: { id }, data: { status: status as CustomRequestStatus, readAt: target.readAt ?? now } }),
@@ -152,17 +166,8 @@ async function applyStatus(admin: { id: string; name: string }, kindArg: InboxKi
       ]);
       await logActivity("message.status_changed", `${target.label} marked ${statusLabel(status)}`, { actorId: admin.id, entityType: "message", entityId: id });
       break;
-    case "order":
-      await prisma.$transaction([
-        prisma.order.update({ where: { id }, data: { productionStatus: status as ProductionStatus } }),
-        prisma.statusEvent.create({ data: event }),
-      ]);
-      await logActivity("order.production_status_changed", `${target.label} moved to ${statusLabel(status)}`, {
-        actorId: admin.id,
-        entityType: "order",
-        entityId: id,
-      });
-      break;
+    default:
+      throw new AdminError("Change this record's status from its own page.");
   }
   revalidateInbox(kind, id);
   return { ok: true, message: `Status updated to ${statusLabel(status)}.` };

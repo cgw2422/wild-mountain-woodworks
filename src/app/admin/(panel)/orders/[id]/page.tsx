@@ -1,18 +1,28 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ProductionStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
-import { formatCents } from "@/lib/money";
-import { parseSnapshot } from "@/lib/pricing/snapshot";
-import { Card, DescriptionList, PageHeader, StatusBadge, adminButton, formatDate } from "@/components/admin/ui";
-import { CustomerCard, LongText } from "@/components/admin/inbox/CustomerCard";
+import { requirePermission } from "@/lib/auth/session";
+import { can } from "@/lib/auth/permissions";
+import { siteDateInput } from "@/lib/site-time";
+import { customerLinks } from "@/lib/sales/links";
+import { orderMoney } from "@/lib/sales/orders";
+import { DELIVERY_STATUSES, DELIVERY_STATUS_LABELS, INVOICE_KIND_LABELS, PAYMENT_METHOD_LABELS, PRODUCTION_STATUSES, PRODUCTION_STATUS_LABELS } from "@/lib/sales/status";
+import { ActionButton, ActionForm, ConfirmAction, Select, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
+import { Badge, Card, DescriptionList, PageHeader, adminButton, formatDate, table } from "@/components/admin/ui";
 import { NotesPanel } from "@/components/admin/inbox/NotesPanel";
-import { SnapshotView } from "@/components/admin/inbox/SnapshotView";
-import { StatusControl } from "@/components/admin/inbox/StatusControl";
 import { StatusHistory } from "@/components/admin/inbox/StatusHistory";
-import { PRODUCTION_STATUS_LABELS } from "@/components/admin/inbox/kinds";
-import { addNoteAction, changeStatusAction } from "../../inbox-actions";
+import { LongText } from "@/components/admin/inbox/CustomerCard";
+import { ImageField } from "@/components/admin/media/ImageField";
+import { CopyButton } from "@/components/admin/sales/CopyButton";
+import { EmailLogCard } from "@/components/admin/sales/EmailLogCard";
+import { FormDialog } from "@/components/admin/sales/FormDialog";
+import { Money } from "@/components/admin/sales/Money";
+import { RevisionLines } from "@/components/admin/sales/RevisionLines";
+import { SalesBadge } from "@/components/admin/sales/SalesBadge";
+import { cn } from "@/lib/cn";
+import { addNoteAction } from "../../inbox-actions";
+import { addSalesAttachmentAction, createOrderInvoiceAction, removeSalesAttachmentAction, setSalesAttachmentVisibilityAction, updateOrderAction } from "../../sales-actions";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -22,136 +32,255 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: o ? `Order ${o.number}` : "Order not found" };
 }
 
-/** Stripe-style address JSON → display lines (tolerant of unknown shapes). */
-function addressLines(value: unknown): string[] {
-  if (!value || typeof value !== "object") return [];
-  const a = value as Record<string, unknown>;
-  const src = (a.address && typeof a.address === "object" ? a.address : a) as Record<string, unknown>;
-  const s = (k: string) => (typeof src[k] === "string" ? (src[k] as string) : "");
-  const name = typeof a.name === "string" ? a.name : "";
-  const cityLine = [s("city"), [s("state"), s("postal_code")].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-  return [name, s("line1"), s("line2"), cityLine, s("country")].filter(Boolean);
-}
-
 export default async function OrderDetailPage({ params }: Props) {
   const { id } = await params;
-  const admin = await requireAdmin();
+  const admin = await requirePermission("sales");
+  const finance = can(admin.role, "finance");
   const order = await prisma.order.findUnique({
     where: { id },
     include: {
-      items: { orderBy: { createdAt: "asc" }, include: { product: { select: { id: true } } } },
+      items: { orderBy: { position: "asc" } },
+      quote: { select: { id: true, number: true } },
+      customer: { select: { id: true } },
+      invoices: { orderBy: { createdAt: "asc" } },
+      payments: { orderBy: { receivedAt: "asc" }, include: { invoice: { select: { number: true } } } },
       internalNotes: { orderBy: { createdAt: "desc" }, include: { author: { select: { name: true } } } },
       statusEvents: { orderBy: { createdAt: "asc" }, include: { author: { select: { name: true } } } },
+      emails: { orderBy: { createdAt: "desc" }, take: 20 },
+      files: { orderBy: { createdAt: "asc" }, include: { media: { select: { url: true, originalName: true } } } },
     },
   });
   if (!order) notFound();
-
-  const address = addressLines(order.shippingAddress);
-  const mailto = `mailto:${order.customerEmail}?subject=${encodeURIComponent(`Your Wild Mountain order ${order.number}`)}`;
-  const totals: Array<[string, number, boolean?]> = [
-    ["Subtotal", order.subtotalCents],
-    ...(order.discountCents ? ([[`Discount${order.promoCode ? ` (${order.promoCode})` : ""}`, -order.discountCents]] as Array<[string, number]>) : []),
-    ["Delivery", order.shippingCents],
-    ["Tax", order.taxCents],
-    ["Total", order.totalCents, true],
-  ];
+  const money = orderMoney(order, order.payments);
+  const live = order.invoices.filter((i) => i.status !== "VOID" && i.status !== "CANCELED");
+  const invoiced = live.reduce((s, i) => s + i.totalCents, 0);
+  const hasDepositInvoice = live.some((i) => i.kind === "DEPOSIT");
+  const canceled = order.productionStatus === "CANCELED";
+  const link = order.customerToken ? customerLinks.order(order.customerToken) : null;
 
   return (
     <>
       <PageHeader
-        breadcrumbs={[{ label: "Future Orders", href: "/admin/orders" }, { label: order.number }]}
+        breadcrumbs={[{ label: "Orders", href: "/admin/orders" }, { label: order.number }]}
         title={
           <span className="flex flex-wrap items-center gap-3">
             <span className="font-mono">{order.number}</span>
-            <StatusBadge status={order.status} />
+            <SalesBadge status={order.productionStatus} />
+            <SalesBadge status={order.paymentStatus} />
           </span>
         }
-        description={`Placed ${formatDate(order.createdAt, true)}${order.paidAt ? ` · paid ${formatDate(order.paidAt, true)}` : ""}`}
+        description={`Placed ${formatDate(order.createdAt, true)}${order.quote?.number ? ` from quote ${order.quote.number}` : ""}`}
         actions={
-          <a href={mailto} className={adminButton.primary}>
-            Email customer
-          </a>
+          <>
+            <a href={`/admin/work-order/${order.id}`} target="_blank" rel="noopener" className={adminButton.secondary}>
+              Print work order
+            </a>
+            {link ? (
+              <>
+                <CopyButton value={link} label="Copy customer link" />
+                <a href={link} target="_blank" rel="noopener noreferrer" className={adminButton.secondary}>
+                  View as customer
+                </a>
+              </>
+            ) : null}
+          </>
         }
       />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-6 lg:col-span-2">
-          <Card title={`Items (${order.items.length})`}>
-            {order.items.length === 0 ? (
-              <p className="text-sm text-neutral-500">This order has no items.</p>
+          <Card title="Production & delivery">
+            <ActionForm action={updateOrderAction.bind(null, order.id)} className="space-y-4" successMessage={null}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Select label="Production status" name="productionStatus" defaultValue={order.productionStatus} options={PRODUCTION_STATUSES.map((s) => ({ value: s, label: PRODUCTION_STATUS_LABELS[s] }))} />
+                <TextInput label="Estimated completion" name="estimatedCompletion" defaultValue={order.estimatedCompletion ?? ""} maxLength={120} />
+                <Select label="Delivery status" name="deliveryStatus" defaultValue={order.deliveryStatus} options={DELIVERY_STATUSES.map((s) => ({ value: s, label: DELIVERY_STATUS_LABELS[s] }))} />
+                <TextInput label="Delivery date" name="deliveryDate" type="date" defaultValue={order.deliveryDate ? siteDateInput(order.deliveryDate) : ""} />
+              </div>
+              <TextInput label="Delivery address" name="deliveryAddress" defaultValue={order.deliveryAddress ?? ""} maxLength={300} />
+              <TextArea label="Delivery notes (customer can see)" name="deliveryNotes" rows={2} defaultValue={order.deliveryNotes ?? ""} maxLength={1000} />
+              <TextArea label="Notes to the customer (shown on their order page)" name="customerNotes" rows={2} defaultValue={order.customerNotes ?? ""} maxLength={5000} />
+              <TextArea label="Shop notes (internal — printed on the work order)" name="productionNotes" rows={4} defaultValue={order.productionNotes ?? ""} maxLength={5000} />
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-100 pt-4">
+                <Toggle name="notifyCustomer" label="Email the customer about this update" description="Progress, delivery date or completion — only when you choose." />
+                <SubmitButton>Save order</SubmitButton>
+              </div>
+            </ActionForm>
+          </Card>
+
+          <Card title="Items" description="Copied from the accepted quote — later catalog or quote edits never change them.">
+            <RevisionLines
+              lines={order.items.map((i) => ({ id: i.id, kind: i.kind, description: i.description ?? i.productName, notes: i.notes, quantity: i.quantity, unitPriceCents: i.unitPriceCents, lineTotalCents: i.lineTotalCents }))}
+              totals={{ subtotalCents: order.subtotalCents, discountCents: order.discountCents, deliveryCents: order.shippingCents, otherChargesCents: 0, taxCents: order.taxCents, totalCents: order.totalCents, depositCents: order.depositCents, balanceCents: order.totalCents - order.depositCents }}
+            />
+          </Card>
+
+          <Card
+            title="Invoices & payments"
+            description={`${money.label}. Invoiced so far: ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(invoiced / 100)}.`}
+            actions={
+              finance && !canceled ? (
+                <div className="flex flex-wrap gap-2">
+                  {order.depositCents > 0 && !hasDepositInvoice ? (
+                    <ActionButton action={createOrderInvoiceAction.bind(null, order.id, "DEPOSIT")} variant="small">
+                      Deposit invoice
+                    </ActionButton>
+                  ) : null}
+                  {invoiced < order.totalCents && invoiced > 0 ? (
+                    <ActionButton action={createOrderInvoiceAction.bind(null, order.id, "BALANCE")} variant="small">
+                      Final balance invoice
+                    </ActionButton>
+                  ) : null}
+                  {invoiced === 0 ? (
+                    <ActionButton action={createOrderInvoiceAction.bind(null, order.id, "FULL")} variant="small">
+                      Full invoice
+                    </ActionButton>
+                  ) : null}
+                  {order.customer ? (
+                    <Link href={`/admin/invoices/new?customer=${order.customer.id}&order=${order.id}`} className={adminButton.small}>
+                      Custom invoice
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null
+            }
+            bodyClassName="p-0"
+          >
+            {order.invoices.length ? (
+              <div className="overflow-x-auto">
+                <table className={table.table}>
+                  <thead className={table.thead}>
+                    <tr>
+                      <th scope="col" className={table.th}>Invoice</th>
+                      <th scope="col" className={table.th}>Type</th>
+                      <th scope="col" className={cn(table.th, "text-right")}>Total</th>
+                      <th scope="col" className={cn(table.th, "text-right")}>Paid</th>
+                      <th scope="col" className={table.th}>Due</th>
+                      <th scope="col" className={table.th}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className={table.tbody}>
+                    {order.invoices.map((i) => (
+                      <tr key={i.id}>
+                        <td className={table.td}>
+                          {finance ? (
+                            <Link href={`/admin/invoices/${i.id}`} className="inline-block py-1 font-mono text-xs underline underline-offset-2">
+                              {i.number}
+                            </Link>
+                          ) : (
+                            <span className="font-mono text-xs">{i.number}</span>
+                          )}
+                        </td>
+                        <td className={table.td}>{INVOICE_KIND_LABELS[i.kind]}</td>
+                        <td className={cn(table.td, "text-right")}>
+                          <Money cents={i.totalCents} />
+                        </td>
+                        <td className={cn(table.td, "text-right")}>
+                          <Money cents={i.amountPaidCents} />
+                        </td>
+                        <td className={cn(table.td, "whitespace-nowrap")}>{formatDate(i.dueDate)}</td>
+                        <td className={table.td}>
+                          <SalesBadge status={i.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
-              <ul className="divide-y divide-neutral-200">
-                {order.items.map((item) => {
-                  const snapshot = parseSnapshot(item.configuration);
-                  return (
-                    <li key={item.id} className="py-5 first:pt-0 last:pb-0">
-                      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2 text-sm">
-                        <p className="font-medium text-neutral-900">
-                          {item.productName} <span className="text-neutral-500">× {item.quantity}</span>
-                        </p>
-                        <p className="tabular-nums text-neutral-700">
-                          {formatCents(item.unitPriceCents)} each · <span className="font-semibold text-neutral-900">{formatCents(item.lineTotalCents)}</span>
-                        </p>
-                      </div>
-                      {snapshot ? (
-                        <SnapshotView snapshot={snapshot} currentProductId={item.product?.id ?? null} />
-                      ) : (
-                        <p className="text-sm text-neutral-500">No configuration snapshot stored for this item.</p>
-                      )}
+              <p className="px-5 py-4 text-sm text-neutral-500">No invoices yet.</p>
+            )}
+            {order.payments.length ? (
+              <div className="border-t border-neutral-100 px-5 py-4">
+                <h3 className="mb-2 text-sm font-semibold">Payments</h3>
+                <ul className="space-y-1 text-sm">
+                  {order.payments.map((p) => (
+                    <li key={p.id} className="flex flex-wrap justify-between gap-2">
+                      <span>
+                        {formatDate(p.receivedAt)} · {PAYMENT_METHOD_LABELS[p.method]} · {p.invoice?.number}
+                        {p.reference ? ` · ${p.reference}` : ""}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <Money cents={p.amountCents} />
+                        {p.status !== "SUCCEEDED" ? <SalesBadge status={p.status} /> : null}
+                      </span>
                     </li>
-                  );
-                })}
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </Card>
+
+          <Card
+            title="Drawings & photos"
+            actions={
+              <FormDialog label="Attach" title="Attach a file" action={addSalesAttachmentAction.bind(null, "order", order.id)} submitLabel="Attach" variant="small">
+                <ImageField name="mediaId" label="Image" value={null} slot="square" compact />
+                <TextInput label="Label" name="label" maxLength={120} placeholder="e.g. Final design drawing" />
+                <Toggle label="Visible to the customer" name="customerVisible" description="Shown on their order page." />
+              </FormDialog>
+            }
+          >
+            {order.files.length ? (
+              <ul className="divide-y divide-neutral-100">
+                {order.files.map((f) => (
+                  <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                    <a href={f.media.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+                      {f.label || f.media.originalName}
+                    </a>
+                    <span className="flex items-center gap-2">
+                      <Badge tone={f.customerVisible ? "green" : "neutral"}>{f.customerVisible ? "Customer can see" : "Internal"}</Badge>
+                      <ActionButton action={setSalesAttachmentVisibilityAction.bind(null, f.id, !f.customerVisible)} variant="small">
+                        {f.customerVisible ? "Hide" : "Show to customer"}
+                      </ActionButton>
+                      <ConfirmAction action={removeSalesAttachmentAction.bind(null, f.id)} label="Remove" title="Remove this file from the order?" body="The image stays in the media library." variant="small" confirmLabel="Remove" />
+                    </span>
+                  </li>
+                ))}
               </ul>
+            ) : (
+              <p className="text-sm text-neutral-500">No files attached.</p>
             )}
           </Card>
-
-          <Card title="Totals">
-            <dl className="max-w-sm space-y-1 text-sm">
-              {totals.map(([label, cents, strong]) => (
-                <div key={label} className={strong ? "flex justify-between gap-4 border-t border-neutral-200 pt-2 font-semibold" : "flex justify-between gap-4"}>
-                  <dt className={strong ? "" : "text-neutral-500"}>{label}</dt>
-                  <dd className="tabular-nums">{formatCents(cents)}</dd>
-                </div>
-              ))}
-            </dl>
-          </Card>
-
-          {order.customerNotes ? (
-            <Card title="Notes from customer">
-              <LongText text={order.customerNotes} />
-            </Card>
-          ) : null}
-
-          <NotesPanel notes={order.internalNotes} currentAdminId={admin.id} addAction={addNoteAction.bind(null, "order", order.id)} />
         </div>
 
         <div className="min-w-0 space-y-6">
-          <CustomerCard name={order.customerName} email={order.customerEmail} phone={order.customerPhone} mailto={mailto} />
-
-          <Card title="Payment">
+          <Card
+            title="Customer"
+            actions={
+              order.customer ? (
+                <Link href={`/admin/customers/${order.customer.id}`} className={adminButton.small}>
+                  Customer page
+                </Link>
+              ) : null
+            }
+          >
+            <DescriptionList
+              className="sm:grid-cols-[5rem_1fr]"
+              items={[
+                { label: "Name", value: order.customerName },
+                { label: "Email", value: <a href={`mailto:${order.customerEmail}`} className="underline underline-offset-2">{order.customerEmail}</a> },
+                { label: "Phone", value: order.customerPhone },
+                { label: "Address", value: order.deliveryAddress ? <LongText text={order.deliveryAddress} /> : null },
+              ]}
+            />
+          </Card>
+          <Card title="Money">
             <DescriptionList
               className="sm:grid-cols-[7rem_1fr]"
               items={[
-                { label: "Payment", value: <StatusBadge status={order.paymentStatus} /> },
-                { label: "Order", value: <StatusBadge status={order.status} /> },
-                { label: "Stripe session", value: order.stripeCheckoutSessionId ? <code className="text-xs">{order.stripeCheckoutSessionId}</code> : null },
-                { label: "Payment intent", value: order.stripePaymentIntentId ? <code className="text-xs">{order.stripePaymentIntentId}</code> : null },
-                { label: "Ship to", value: address.length ? <span className="block">{address.map((l, i) => <span key={i} className="block">{l}</span>)}</span> : null },
+                { label: "Order total", value: <Money cents={order.totalCents} /> },
+                { label: "Deposit", value: <Money cents={order.depositCents} /> },
+                { label: "Paid", value: <Money cents={money.paidCents} /> },
+                { label: "Balance", value: <Money cents={money.balanceCents} className="font-semibold" /> },
               ]}
             />
-            <p className="mt-3 text-xs text-neutral-500">Payment status is updated automatically by Stripe and can&apos;t be edited here.</p>
           </Card>
-
-          <Card title="Production">
-            <StatusControl
-              action={changeStatusAction.bind(null, "order", order.id)}
-              current={order.productionStatus}
-              label="Production status"
-              options={Object.values(ProductionStatus).map((s) => ({ value: s, label: PRODUCTION_STATUS_LABELS[s] }))}
-            />
-            <h3 className="mb-3 mt-6 text-sm font-semibold text-neutral-900">History</h3>
-            <StatusHistory events={order.statusEvents} originLabel="Created at checkout" />
+          <Card title="History">
+            <StatusHistory events={order.statusEvents} originLabel="Created from the accepted quote" />
           </Card>
+          <NotesPanel notes={order.internalNotes} currentAdminId={admin.id} addAction={addNoteAction.bind(null, "order", order.id)} />
+          <EmailLogCard emails={order.emails} />
         </div>
       </div>
     </>

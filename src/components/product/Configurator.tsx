@@ -696,15 +696,17 @@ function RequestPanel({
           <TextField label="Email" name="email" type="email" autoComplete="email" required error={fieldErrors.email} maxLength={254} />
           <TextField label="Phone" name="phone" type="tel" autoComplete="tel" error={fieldErrors.phone} maxLength={30} />
           <TextField label="ZIP code" name="zipCode" inputMode="numeric" autoComplete="postal-code" required error={fieldErrors.zipCode} maxLength={10} hint="For delivery planning." />
+          <TextField label="Quantity" name="quantity" type="number" inputMode="numeric" min={1} max={20} defaultValue={1} required error={fieldErrors.quantity} hint="How many of this piece." />
         </div>
+        <TextField label="Delivery address" name="address" autoComplete="street-address" error={fieldErrors.address} maxLength={300} hint="Helps us quote delivery accurately." />
         <SelectField label="Desired timeline" name="timeline" options={TIMELINE_OPTIONS.map((t) => ({ value: t, label: t }))} error={fieldErrors.timeline} />
         <TextAreaField label="Notes" name="notes" rows={4} maxLength={4000} error={fieldErrors.notes} placeholder="Anything else we should know — room size, questions, special requests." />
         <ReferenceImagesField files={files} onChange={setFiles} error={fieldErrors.attachments} />
         <SubmitButton pending={pending} className="w-full" pendingLabel="Sending request…">
-          Send Request
+          Request Quote
         </SubmitButton>
         <p className="text-xs text-muted">
-          No payment is required. We&apos;ll use your details only to respond to this request — see our{" "}
+          No payment is required now. We&apos;ll review your request and send a personal quote you can accept online. We&apos;ll use your details only to respond to this request — see our{" "}
           <Link href="/privacy" className="link-quiet">
             privacy policy
           </Link>

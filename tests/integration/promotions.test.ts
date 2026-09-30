@@ -23,7 +23,6 @@ const {
   countSaleProducts,
 } = await import("@/lib/catalog/queries");
 const { createConfigurationQuote } = await import("@/lib/services/submissions");
-const { priceCart } = await import("@/lib/commerce/cart");
 const { getActiveAnnouncement } = await import("@/lib/promotions/queries");
 const { withDismissed, dismissKey } =
   await import("@/lib/promotions/announcement");
@@ -153,6 +152,8 @@ describe.skipIf(!hasTestDb)("scheduled sales and announcements", () => {
       zipCode: "43215",
       timeline: null,
       notes: "",
+      quantity: 1,
+      address: null,
     };
 
     at(BEFORE);
@@ -175,21 +176,38 @@ describe.skipIf(!hasTestDb)("scheduled sales and announcements", () => {
         })
       ).estimatedTotalCents,
     ).toBe(84000);
-    // The cart has no price field at all: a browser-sent price can't be used.
-    const tampered = {
+    // A browser-sent price is ignored: the quote is re-priced from the database.
+    const tampered = await createConfigurationQuote({
+      ...customer,
       productId: product.id,
       selection,
-      quantity: 1,
       unitPriceCents: 1,
-    } as Parameters<typeof priceCart>[0][number];
-    const cart = await priceCart([tampered]);
-    expect(cart.subtotalCents).toBe(84000);
-    expect(cart.lines[0]!.snapshot.sale).toMatchObject({
+      estimatedTotalCents: 1,
+    } as Parameters<typeof createConfigurationQuote>[0]);
+    expect(tampered.estimatedTotalCents).toBe(84000);
+    expect((tampered.configuration as { sale: unknown }).sale).toMatchObject({
       regularBasePriceCents: 120000,
       savingsCents: 36000,
     });
+    // The first draft revision shows the regular price and the sale as a discount line.
+    const lines = await prisma.quoteLineItem.findMany({
+      where: { revisionId: tampered.currentRevisionId! },
+      orderBy: { position: "asc" },
+    });
+    expect(lines.map((l) => [l.kind, l.lineTotalCents])).toEqual([
+      ["PRODUCT", 120000],
+      ["DISCOUNT", -36000],
+    ]);
     at(AFTER);
-    expect((await priceCart([tampered])).subtotalCents).toBe(120000);
+    expect(
+      (
+        await createConfigurationQuote({
+          ...customer,
+          productId: product.id,
+          selection,
+        })
+      ).estimatedTotalCents,
+    ).toBe(120000);
   });
 
   it("advertises a percent sale's entered percentage everywhere, priced at the rounded amount", async () => {
@@ -206,6 +224,8 @@ describe.skipIf(!hasTestDb)("scheduled sales and announcements", () => {
       zipCode: "43215",
       timeline: null,
       notes: "",
+      quantity: 1,
+      address: null,
     };
     at(DURING);
     const cases = [
@@ -248,9 +268,10 @@ describe.skipIf(!hasTestDb)("scheduled sales and announcements", () => {
         selection,
       });
       expect(quote.estimatedTotalCents).toBe(price);
-      const snapshot = (
-        await priceCart([{ productId: product.id, selection, quantity: 1 }])
-      ).lines[0]!.snapshot;
+      const snapshot = quote.configuration as {
+        basePriceCents: number;
+        sale: unknown;
+      };
       expect(snapshot.basePriceCents).toBe(price);
       expect(snapshot.sale).toMatchObject({
         regularBasePriceCents: regular,

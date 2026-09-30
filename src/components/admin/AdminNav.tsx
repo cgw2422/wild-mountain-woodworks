@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { Logo } from "@/components/brand/Logo";
 import { can, type Permission, type Role } from "@/lib/auth/permissions";
 
-export type NavCounts = { quotes: number; customRequests: number; messages: number };
+export type NavCounts = { quotes: number; customRequests: number; messages: number; invoices: number };
 
 type NavItem = { href: string; label: string; count?: keyof NavCounts; permission: Permission | "admin" };
 
@@ -15,9 +15,18 @@ type NavItem = { href: string; label: string; count?: keyof NavCounts; permissio
 const GROUPS: Array<{ label: string; items: NavItem[] }> = [
   { label: "Overview", items: [{ href: "/admin", label: "Dashboard", permission: "dashboard" }] },
   {
+    label: "Sales",
+    items: [
+      { href: "/admin/quotes", label: "Quotes", count: "quotes", permission: "sales" },
+      { href: "/admin/orders", label: "Orders", permission: "sales" },
+      { href: "/admin/invoices", label: "Invoices", count: "invoices", permission: "finance" },
+      { href: "/admin/payments", label: "Payments", permission: "finance" },
+      { href: "/admin/customers", label: "Customers", permission: "sales" },
+    ],
+  },
+  {
     label: "Inbox",
     items: [
-      { href: "/admin/quotes", label: "Quotes", count: "quotes", permission: "inbox" },
       { href: "/admin/custom-requests", label: "Custom Requests", count: "customRequests", permission: "inbox" },
       { href: "/admin/messages", label: "Messages", count: "messages", permission: "inbox" },
     ],
@@ -48,8 +57,8 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: "/admin/pricing-calculator", label: "Pricing Calculator", permission: "catalog" },
       { href: "/admin/settings", label: "Settings", permission: "settings" },
+      { href: "/admin/settings/emails", label: "Emails", permission: "settings" },
       { href: "/admin/security", label: "Security", permission: "own_account" },
-      { href: "/admin/orders", label: "Future Orders", permission: "inbox" },
     ],
   },
 ];
@@ -64,7 +73,10 @@ export function AdminNav({ counts, userName, role, logout }: { counts: NavCounts
     setOpen(false);
   }
 
-  const isActive = (href: string) => (href === "/admin" ? pathname === "/admin" : pathname === href || pathname.startsWith(href + "/"));
+  const matches = (href: string) => (href === "/admin" ? pathname === "/admin" : pathname === href || pathname.startsWith(href + "/"));
+  // The most specific match wins (e.g. Emails over Settings on /admin/settings/emails).
+  const allHrefs = GROUPS.flatMap((g) => g.items.map((i) => i.href));
+  const isActive = (href: string) => matches(href) && !allHrefs.some((h) => h.length > href.length && h.startsWith(href) && matches(h));
 
   const nav = (
     <nav aria-label="Admin" className="flex-1 overflow-y-auto px-3 py-4">
@@ -89,7 +101,7 @@ export function AdminNav({ counts, userName, role, logout }: { counts: NavCounts
                   >
                     <span>{item.label}</span>
                     {count > 0 ? (
-                      <span className="ml-2 rounded-full bg-bronze-light px-1.5 text-[0.7rem] font-semibold leading-5 text-charcoal" aria-label={`${count} new`}>
+                      <span className="ml-2 rounded-full bg-bronze-light px-1.5 text-[0.7rem] font-semibold leading-5 text-charcoal" aria-label={item.count === "invoices" ? `${count} past due` : `${count} new`}>
                         {count}
                       </span>
                     ) : null}

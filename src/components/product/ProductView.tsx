@@ -1,6 +1,6 @@
 import { getPageContent } from "@/lib/cms/queries";
 import type { getProductPage } from "@/lib/catalog/queries";
-import { commerceState, getSettings } from "@/lib/settings";
+import { getSettings, salesFlags } from "@/lib/settings";
 import { siteUrl } from "@/lib/site-url";
 import { Container } from "@/components/ui/Container";
 import { ButtonLink } from "@/components/ui/Button";
@@ -24,7 +24,7 @@ type Data = NonNullable<Awaited<ReturnType<typeof getProductPage>>>;
 export async function ProductView({ data }: { data: Data }) {
   const [settings, shared, quotePage] = await Promise.all([getSettings(), getPageContent("product"), getPageContent("request-quote")]);
   const { product, images, videos, configurable, pricesVisible, startingPriceCents, regularPriceCents, sale, saleEndsAt, related, faqs } = data;
-  const flags = commerceState(settings);
+  const flags = salesFlags(settings);
   // Sales are quote-based: every configuration becomes a quote request (no cart/checkout).
   const mode: PurchaseMode = flags.quotes ? "quote" : "contact";
 

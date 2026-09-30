@@ -26,7 +26,7 @@ export async function SiteAdminBar() {
     ...(can(r, "media") ? [{ label: "Media", href: "/admin/media" }] : []),
     ...(can(r, "navigation") ? [{ label: "Navigation", href: "/admin/navigation" }] : []),
     ...(can(r, "promotions") ? [{ label: "Promotions", href: "/admin/promotions" }] : []),
-    ...(can(r, "inbox") ? [{ label: "Quotes", href: "/admin/quotes" }] : []),
+    ...(can(r, "sales") ? [{ label: "Quotes", href: "/admin/quotes" }, { label: "Orders", href: "/admin/orders" }] : []),
   ];
   const addNew: BarLink[] = [
     ...(can(r, "catalog") ? [{ label: "Product", href: "/admin/products/new" }] : []),
@@ -38,6 +38,7 @@ export async function SiteAdminBar() {
         ]
       : []),
     ...(can(r, "promotions") ? [{ label: "Promotion", href: "/admin/promotions" }] : []),
+    ...(can(r, "sales") && can(r, "finance") ? [{ label: "Quote", href: "/admin/quotes/new" }] : []),
   ];
   return (
     <AdminBar

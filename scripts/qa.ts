@@ -4,6 +4,7 @@
  *   QA_BASE_URL=http://localhost:3000 npm run qa
  *   QA_SCREENSHOTS=./qa-shots npm run qa      # also save screenshots
  *   QA_ADMIN_COOKIE="$(npx tsx scripts/dev-session.ts)"   # also check admin pages (dev only)
+ *   QA_EXTRA_PATHS="/quote/<token>,/admin/quotes/<id>"      # also check record pages (comma-separated)
  *
  * Crawls public pages (starting from a seed list + discovered links) and,
  * at desktop / laptop / tablet / phone widths, checks:
@@ -51,6 +52,10 @@ const ADMIN_PATHS = [
   "/admin/add-ons",
   "/admin/portfolio",
   "/admin/quotes",
+  "/admin/quotes/new",
+  "/admin/invoices",
+  "/admin/payments",
+  "/admin/customers",
   "/admin/custom-requests",
   "/admin/messages",
   "/admin/faqs",
@@ -64,9 +69,19 @@ const ADMIN_PATHS = [
   "/admin/orders",
   "/admin/pricing-calculator",
   "/admin/settings/pricing",
+  "/admin/settings/emails",
+  "/admin/settings/emails/quote_sent",
   "/admin/security",
   "/admin/security/audit",
 ];
+
+// Record pages (quotes, orders, invoices, customer links) need real ids/tokens.
+const EXTRA_PATHS = (process.env.QA_EXTRA_PATHS ?? "")
+  .split(",")
+  .map((p) => p.trim())
+  .filter((p) => p.startsWith("/"));
+SEED_PATHS.push(...EXTRA_PATHS.filter((p) => !p.startsWith("/admin")));
+ADMIN_PATHS.push(...EXTRA_PATHS.filter((p) => p.startsWith("/admin")));
 
 type Problem = { path: string; width?: number; kind: string; detail: string };
 const problems: Problem[] = [];

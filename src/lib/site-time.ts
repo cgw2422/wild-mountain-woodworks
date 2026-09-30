@@ -97,3 +97,8 @@ export function siteLongDateLabel(at: Date, tz = siteTimeZone(), now = new Date(
   const sameYear = siteDateInput(at, tz).slice(0, 4) === siteDateInput(now, tz).slice(0, 4);
   return new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "long", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) }).format(at);
 }
+
+/** "October 14, 2026" in the site time zone. */
+export function siteDateLong(at: Date, tz = siteTimeZone()): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "long", day: "numeric", year: "numeric" }).format(at);
+}

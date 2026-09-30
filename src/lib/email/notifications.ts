@@ -6,6 +6,9 @@ import { siteUrl } from "@/lib/site-url";
 import { sendEmailSafely } from "./provider";
 
 /**
+ * Custom-request and contact-message emails. Quote, invoice, payment and
+ * order emails use the editable templates in src/lib/email/send.ts.
+ *
  * Business notification emails. Every function is fire-and-forget safe:
  * failures are logged, never surfaced to the customer, because the
  * submission itself is already stored and visible in admin.
@@ -42,59 +45,6 @@ export function describeSnapshot(s: ConfigurationSnapshot, showPrices: boolean):
 async function adminRecipient() {
   const s = await getSettings();
   return s.notificationEmail || s.email || process.env.ADMIN_NOTIFICATION_EMAIL || null;
-}
-
-export async function notifyNewQuote(q: {
-  id: string;
-  reference: string;
-  name: string;
-  email: string;
-  phone: string | null;
-  zipCode: string;
-  snapshot: ConfigurationSnapshot | null;
-  notes: string | null;
-}) {
-  const to = await adminRecipient();
-  if (!to) return;
-  const lines = [
-    `Reference: ${q.reference}`,
-    `From: ${q.name} <${q.email}>${q.phone ? `, ${q.phone}` : ""}`,
-    `ZIP: ${q.zipCode}`,
-    "",
-    ...(q.snapshot ? describeSnapshot(q.snapshot, true) : ["General quote request"]),
-    ...(q.notes ? ["", `Notes: ${q.notes}`] : []),
-    "",
-    `Open in admin: ${siteUrl(`/admin/quotes/${q.id}`)}`,
-  ];
-  await sendEmailSafely({
-    to,
-    replyTo: q.email,
-    subject: `New quote request ${q.reference}`,
-    text: lines.join("\n"),
-    html: layout("New quote request", lines),
-  });
-}
-
-export async function sendQuoteConfirmation(q: { reference: string; name: string; email: string; snapshot: ConfigurationSnapshot | null }) {
-  const settings = await getSettings();
-  const lines = [
-    `Hi ${q.name.split(" ")[0]},`,
-    "",
-    settings.quoteConfirmationText ||
-      "Thank you for your request. We review every request personally and will be in touch soon.",
-    "",
-    `Your reference number is ${q.reference}.`,
-    ...(q.snapshot ? ["", ...describeSnapshot(q.snapshot, settings.showPrices && q.snapshot.priceShownToCustomer)] : []),
-    "",
-    settings.businessName,
-  ];
-  await sendEmailSafely({
-    to: q.email,
-    replyTo: settings.email ?? undefined,
-    subject: `We received your request — ${q.reference}`,
-    text: lines.join("\n"),
-    html: layout("Thank you for your request", lines),
-  });
 }
 
 export async function notifyCustomRequest(r: {
@@ -144,18 +94,4 @@ export async function sendContactConfirmation(m: { name: string; email: string }
   const settings = await getSettings();
   const lines = [`Hi ${m.name.split(" ")[0]},`, "", "Thanks for reaching out. We've received your message and will reply soon.", "", settings.businessName];
   await sendEmailSafely({ to: m.email, replyTo: settings.email ?? undefined, subject: "We received your message", text: lines.join("\n"), html: layout("Thanks for reaching out", lines) });
-}
-
-/** Future: sent from the Stripe webhook once an order is paid. */
-export async function sendOrderConfirmation(o: { number: string; customerName: string; customerEmail: string; totalCents: number }) {
-  const settings = await getSettings();
-  const lines = [
-    `Hi ${o.customerName.split(" ")[0]},`,
-    "",
-    `Thank you for your order ${o.number}. Total paid: ${formatCents(o.totalCents)}.`,
-    "We'll be in touch to confirm the details before your piece goes into production.",
-    "",
-    settings.businessName,
-  ];
-  await sendEmailSafely({ to: o.customerEmail, subject: `Order confirmation — ${o.number}`, text: lines.join("\n"), html: layout("Thank you for your order", lines) });
 }

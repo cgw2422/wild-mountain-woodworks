@@ -23,7 +23,7 @@ function r2RemotePattern() {
 
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://js.stripe.com`,
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   // Product videos: R2 public URL (https) or local /media-files; blob: for
@@ -31,9 +31,10 @@ const csp = [
   "media-src 'self' blob: https:",
   "font-src 'self' data:",
   "connect-src 'self'" + (isDev ? " ws: wss:" : ""),
-  "frame-src 'self' https://checkout.stripe.com https://js.stripe.com",
+  // Payments happen on Stripe-hosted invoice pages (plain links), never embedded.
+  "frame-src 'self'",
   "frame-ancestors 'none'",
-  "form-action 'self' https://checkout.stripe.com",
+  "form-action 'self'",
   "base-uri 'self'",
   "object-src 'none'",
 ].join("; ");
@@ -44,7 +45,7 @@ const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(self \"https://checkout.stripe.com\")" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
   ...(isDev ? [] : [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }]),
 ];
 
@@ -76,6 +77,16 @@ const nextConfig: NextConfig = {
         ],
       },
       { source: "/api/admin/:path*", headers: [{ key: "Cache-Control", value: "private, no-store, max-age=0" }] },
+      // Customer quote/invoice/order links: the token is the only key, so
+      // never cache, index or leak it to other sites via the Referer header.
+      ...["/quote/:path*", "/invoice/:path*", "/order/:path*"].map((source) => ({
+        source,
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Cache-Control", value: "private, no-store, max-age=0" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      })),
     ];
   },
 };

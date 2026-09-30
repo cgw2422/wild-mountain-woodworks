@@ -4,9 +4,9 @@
 
 The website and business admin for Wild Mountain Woodworks, a handcrafted furniture company in Ohio.
 
-It launches as a **quote-first furniture catalog**. Customers browse pieces, configure them (size, wood, finish, base, add-ons) and send **Request This Configuration**. Every request lands in the admin with an exact, immutable record of what was chosen.
+Wild Mountain sells custom furniture through **quotes, not a shopping cart**. Customers browse pieces, configure them (size, wood, finish, base, add-ons, quantity) and **request a quote**. Wild Mountain prices and sends the quote, the customer accepts it on a secure page, and the sale continues as **invoices → payments → an order in production → delivery**.
 
-It is built as an **e-commerce platform with purchasing turned off**. Server-side pricing, cart pricing, orders, Stripe Checkout and the webhook already exist behind feature flags. Turning on online sales later won't require rebuilding the catalog or the database.
+Wild Mountain owns the whole quote workflow. Stripe is optional and is only used for **invoices and hosted payment** (no Stripe Quotes, no Checkout, no cart).
 
 ---
 
@@ -20,7 +20,7 @@ It is built as an **e-commerce platform with purchasing turned off**. Server-sid
 6. [Images, media library and cropping](#images-media-library-and-cropping)
 7. [Products, options, add-ons and pricing](#products-options-add-ons-and-pricing)
 8. [Quotes and historical snapshots](#quotes-and-historical-snapshots)
-9. [Feature flags and future e-commerce](#feature-flags-and-future-e-commerce)
+9. [Sales: quotes, invoices, payments and orders](#sales-quotes-invoices-payments-and-orders)
 10. [Email notifications](#email-notifications)
 11. [Environment variables](#environment-variables)
 12. [Deploying to Railway](#deploying-to-railway)
@@ -205,7 +205,7 @@ src/lib/                domain logic:
   media/                upload validation, processing, usage tracking, image slots
   storage/              object storage abstraction (R2 / local)
   services/             quote, custom request and contact submission services
-  commerce/             Stripe provider (dormant; being replaced by quote → invoice sales)
+  sales/                quotes, revisions, invoices, payments, orders, Stripe invoicing, customer views
   navigation/           menu locations and public menu resolver
   auth/permissions.ts   role → permission matrix
   email/                provider abstraction + notification templates
@@ -309,52 +309,63 @@ When a customer sends a configuration request, the server:
 
 Editing or deleting the product later never changes what the customer asked for. Future order items use the same snapshot format.
 
-Reference numbers look like `WM-Q-260927-7KD4` (quotes) and `WM-C-…` (custom requests).
+Quotes are numbered `WMQ-1001…` (older quotes keep their `WM-Q-…` reference too), invoices `WMI-…`, orders `WMO-…`, custom requests `WM-C-…`.
 
-## Feature flags and future e-commerce
+## Sales: quotes, invoices, payments and orders
+
+The flow (all in `src/lib/sales/`):
+
+1. **Request.** A configured request (or the general quote form) creates a quote numbered `WMQ-1001…`. It gets a customer record (matched by exact email only), a secure customer token and a **draft revision 1**. The draft is prefilled from the configuration snapshot: the piece at its regular price, the sale as a separate discount line, and add-ons.
+2. **Edit** (Admin → Quotes). Lines are free-form: product, add-on, custom, discount, delivery, installation or fee. You can add, remove, reorder and duplicate them. Prices no longer follow the catalog. The deposit can be none, a percentage or a fixed amount; tax stays off until enabled. The server recomputes totals on every save, and price changes are written to the audit log.
+3. **Send.** The revision becomes read-only and the customer is emailed a link to `/quote/<token>`. Changes need **Create revision**; sending revision 2 supersedes revision 1, which can no longer be accepted.
+4. **Customer page.** The customer sees the current sent revision only, never drafts, internal notes, costs or ids. The first view marks the quote *Viewed*. Expired quotes stay viewable but can't be accepted (admin can **Extend**).
+5. **Accept or decline.** Accepting requires a typed name and two confirmations. It stores the timestamp, IP, browser and a frozen copy of everything accepted, creates the order `WMO-1001…`, and drafts the deposit invoice `WMI-1001…`. Staff can also **Record acceptance** for phone or in-person approvals.
+6. **Invoices** (Admin → Invoices): deposit, final balance (total minus everything already invoiced), full, or custom. Drafts are editable; sent invoices are never edited (void and re-issue instead).
+7. **Payments.** Payments come from Stripe webhooks or from **Record payment** (cash, check, bank transfer or other), and several payments per invoice are fine. Invoice and order payment status is always *derived* from payment records. Payments are never deleted: a mistaken manual entry is voided, and refunds are recorded.
+8. **Order** (Admin → Orders). Production status (quote accepted → awaiting deposit → … → completed), payment status and delivery status are separate. Paying the deposit moves the order to *Deposit paid* automatically. Other tools: a printable work order, and optional customer emails for progress, delivery date and completion. The customer's page is `/order/<token>`.
+
+**Customer links** (`/quote`, `/invoice`, `/order`) use 256-bit random tokens. They are `noindex`, `no-store` and `Referrer-Policy: no-referrer`, and are disallowed in `robots.txt`.
+
+**Permissions:** *sales* covers quotes, customers and orders; *finance* covers quote pricing, invoices, payments and refunds. Owners and admins have both; editors have neither. Every action checks on the server.
 
 **Settings → Features:**
 
 | Flag | Launch value | Effect |
 | --- | --- | --- |
 | Show prices | on | Show "From" prices and live estimates |
-| Quotes enabled | on | "Request This Configuration" and `/request-quote`. When off, customers are pointed to Contact |
-| Custom orders enabled | on | Custom build form |
-| E-commerce enabled | **off** | See below |
+| Quote requests | on | Configurator "Request Quote" and `/request-quote` |
+| Custom orders | on | Custom build form |
+| Tax on quotes and invoices | **off** | Adds a tax field to quotes when on (no automatic tax rules) |
+| Stripe invoicing | **off** | Effective only when the switch is on **and** `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` are set |
 
-E-commerce is only **effective** when all three of these are true. Until then the site stays in quote mode, so turning the switch on early can never expose a half-built checkout.
-1. The Settings switch is on.
-2. The Stripe keys are configured.
-3. The cart and checkout pages have shipped: `CHECKOUT_UI_READY` in `src/lib/commerce/config.ts`.
+**Settings → Quotes & invoices** holds these defaults:
+- how long quotes are valid, invoice due days, and when to flag unanswered requests;
+- the default deposit;
+- default terms;
+- offline payment instructions;
+- who emails Stripe invoices: Wild Mountain's branded email with the hosted link (option B, the default) or Stripe itself (option A).
 
-**Already built for commerce:**
-- `Order`, `OrderItem` (with snapshots), status and production-status history, and the admin order screens.
-- `priceCart()`, which re-prices every line from the database.
-- `startCheckout()`, which creates a `PENDING_PAYMENT` order and hands off to Stripe-hosted Checkout.
-- `StripeCheckoutProvider`: guest checkout, no Stripe Customer, and **no `setup_future_usage`, so cards are never saved**.
-- A signature-verified webhook at `/api/stripe/webhook`. It is inert without `STRIPE_WEBHOOK_SECRET`, and it is the only thing that can mark an order PAID.
+### Turning on Stripe invoicing
 
-**To launch online sales later:**
-1. Build the cart and checkout pages that call `priceCart` / `startCheckout`, then set `CHECKOUT_UI_READY = true`.
-2. Set `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` and `STRIPE_WEBHOOK_SECRET`, and point a Stripe webhook at `/api/stripe/webhook` for `checkout.session.completed`.
-3. Decide on tax (e.g. Stripe Tax) and delivery charges in `startCheckout`.
-4. Turn on **Settings → E-commerce**. Product buttons switch from "Request This Configuration" to "Add to Cart" automatically.
+1. In Stripe, create a restricted or secret key with access to Customers and Invoices. Add a webhook endpoint `https://<your-domain>/api/stripe/webhook` for these events:
+   - `invoice.finalized`, `invoice.sent`, `invoice.updated`
+   - `invoice.paid`, `invoice.payment_succeeded`, `invoice.payment_failed`
+   - `invoice.voided`, `invoice.marked_uncollectible`
+   - `charge.refunded`
+2. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` on Railway and redeploy.
+3. Turn on **Settings → Features → Stripe invoicing**.
 
-Card numbers never touch this application.
+After that, **Send invoice** creates the Stripe customer, invoice and items, then finalizes it. Every call uses an idempotency key, so a double-click or retry can't create duplicates. Only verified, de-duplicated webhooks (the `StripeEvent` table) mark invoices paid. If Stripe fails, the invoice stays a draft. Card details only ever go to Stripe's hosted page.
 
 ## Email notifications
 
-`src/lib/email/` separates the email provider from the notification templates. It includes:
-- A new-quote notification to you, and a quote confirmation to the customer.
-- A custom-request notification to you, and a confirmation to the customer.
-- A contact-message notification to you, and a confirmation to the customer.
-- A future order confirmation.
+`src/lib/email/` keeps the provider (`provider.ts`: Resend, Postmark or log-only) separate from the content.
 
-Supported providers are **Resend** and **Postmark** (via HTTP, no SDK), selected with `EMAIL_PROVIDER`. Without a provider, emails are only logged.
+- **Templates.** Quote, invoice, payment and order emails are **editable templates** (Admin → Emails): subject, heading, message with `{{placeholders}}`, button text, and an on/off switch. The branded layout and logo are added automatically, and every value is HTML-escaped. Starting text lives in `src/lib/email/template-definitions.ts` and is inserted once by the deploy seed; your edits are never overwritten.
+- **Logging and resend.** Every email is saved to `EmailLog` *before* sending. A provider outage never loses a quote or invoice: failures show on the record and on Admin → Emails with a **Resend** button.
+- **Other forms.** Custom-request and contact-message emails use `notifications.ts`.
 
-**Submissions are always stored first and are visible in admin whether or not email is configured.** Email failures are logged and never shown to customers.
-
-Notifications go to Settings → Notification email, or else Settings → Email, or else `ADMIN_NOTIFICATION_EMAIL`.
+Notifications go to Settings → Notification email, else Settings → Email, else `ADMIN_NOTIFICATION_EMAIL`.
 
 ## Environment variables
 
@@ -379,7 +390,7 @@ See `.env.example` for a commented template.
 | `EMAIL_FROM` | with email | e.g. `Wild Mountain Woodworks <hello@yourdomain.com>` |
 | `RESEND_API_KEY` / `POSTMARK_SERVER_TOKEN` | with email | Keep secret |
 | `ADMIN_NOTIFICATION_EMAIL` | no | Fallback recipient for notifications |
-| `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | no (future) | **Not needed now.** The site runs fully without them |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | no | Only for Stripe invoicing. The site, quotes and offline invoices run fully without them |
 | `LOG_LEVEL` | no | `debug` / `info` / `warn` / `error` |
 | `DATABASE_POOL_SIZE` | no | Default 10 |
 | `TEST_DATABASE_URL` | tests | A separate database for integration tests. Never your real data |

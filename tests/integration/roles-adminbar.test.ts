@@ -92,8 +92,8 @@ describe.skipIf(!hasTestDb)("roles and the admin bar", () => {
     jar.clear();
     await createSignedInAdmin({ role: "OWNER", email: "owner@example.com" });
     const ownerBar = (await SiteAdminBar()) as { props: { links: Array<{ label: string }>; addNew: Array<{ label: string }> } };
-    expect(ownerBar.props.links.map((l) => l.label)).toEqual(["Dashboard", "Products", "Pages", "Media", "Navigation", "Promotions", "Quotes"]);
-    expect(ownerBar.props.addNew.map((l) => l.label)).toEqual(["Product", "Page", "Portfolio Project", "FAQ", "Promotion"]);
+    expect(ownerBar.props.links.map((l) => l.label)).toEqual(["Dashboard", "Products", "Pages", "Media", "Navigation", "Promotions", "Quotes", "Orders"]);
+    expect(ownerBar.props.addNew.map((l) => l.label)).toEqual(["Product", "Page", "Portfolio Project", "FAQ", "Promotion", "Quote"]);
   });
 
   it("links the admin bar's Edit button to the right record", async () => {

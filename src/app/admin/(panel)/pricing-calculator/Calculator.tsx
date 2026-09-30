@@ -21,7 +21,7 @@ import {
 } from "@/lib/pricing/estimator";
 import { ActionForm, Dialog, SubmitButton, TextArea, TextInput, useAdminForm } from "@/components/admin/forms";
 import { adminButton, Card } from "@/components/admin/ui";
-import { convertEstimateToQuote, saveEstimate, updateProductPricing } from "./actions";
+import { attachEstimateToQuote, convertEstimateToQuote, saveEstimate, updateProductPricing } from "./actions";
 
 /* -------------------------------------------------------------------------- */
 /* UI state: numbers are kept as the strings the admin typed                  */
@@ -744,7 +744,7 @@ export function Calculator({
                     </Link>
                   ) : (
                     <button type="button" className={adminButton.secondary} onClick={() => setDialog("convert")} disabled={dirty} title={dirty ? "Save your changes first" : undefined}>
-                      Convert to quote
+                      Create or attach quote
                     </button>
                   )
                 ) : null}
@@ -1062,7 +1062,7 @@ function Results({ result, ui, thresholds, product, set }: { result: EstimateRes
 function ConvertDialog({ open, onClose, estimate, priceCents }: { open: boolean; onClose: () => void; estimate: CalculatorEstimate; priceCents: number | null }) {
   const router = useRouter();
   return (
-    <Dialog open={open} onClose={onClose} title="Convert estimate into a quote">
+    <Dialog open={open} onClose={onClose} title="Create a quote from this estimate">
       <ActionForm
         action={(fd) => convertEstimateToQuote(estimate.id, fd)}
         successMessage={null}
@@ -1072,8 +1072,8 @@ function ConvertDialog({ open, onClose, estimate, priceCents }: { open: boolean;
         }}
       >
         <p className="mb-4 text-sm text-neutral-600">
-          Creates a quote in the Quotes inbox with status <strong>Quoted</strong> at {priceCents ? <strong>{formatCents(priceCents, { showZeroCents: true })}</strong> : "the saved price"}. The cost
-          breakdown is added as an internal note. Nothing is sent to the customer.
+          Creates a <strong>draft</strong> quote with one line at {priceCents ? <strong>{formatCents(priceCents, { showZeroCents: true })}</strong> : "the saved price"} and this estimate&apos;s deposit.
+          The cost breakdown is added as an internal note — customers never see costs or margins. Nothing is sent until you review and send the quote.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <TextInput label="Customer name" name="name" required defaultValue={estimate.customerName ?? ""} />
@@ -1086,6 +1086,24 @@ function ConvertDialog({ open, onClose, estimate, priceCents }: { open: boolean;
             Cancel
           </button>
           <SubmitButton pendingLabel="Creating…">Create quote</SubmitButton>
+        </div>
+      </ActionForm>
+      <ActionForm
+        action={(fd) => attachEstimateToQuote(estimate.id, fd)}
+        className="mt-6 border-t border-neutral-200 pt-5"
+        successMessage={null}
+        onSuccess={(res) => {
+          onClose();
+          if (res.id) router.push(`/admin/quotes/${res.id}`);
+        }}
+      >
+        <p className="mb-3 text-sm font-medium text-neutral-900">Or attach it to an existing quote</p>
+        <p className="mb-3 text-sm text-neutral-600">Links this estimate to the quote as internal pricing backup. The quote&apos;s lines don&apos;t change.</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <TextInput label="Quote number" name="quoteNumber" placeholder="WMQ-1004" wrapperClassName="w-48" />
+          <SubmitButton variant="secondary" pendingLabel="Attaching…">
+            Attach estimate
+          </SubmitButton>
         </div>
       </ActionForm>
     </Dialog>

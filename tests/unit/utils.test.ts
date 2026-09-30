@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { centsToDollarInput, formatCents, formatModifier, parseDollarsToCents } from "@/lib/money";
 import { isValidSlug, slugify, uniqueSlug } from "@/lib/slug";
 import { generateReference } from "@/lib/references";
-import { verifyStripeWebhook } from "@/lib/commerce/payments/stripe";
+import { verifyStripeWebhook } from "@/lib/sales/stripe";
 import { verifyPassword } from "better-auth/crypto";
 import { hashAdminPassword, validatePasswordStrength } from "@/lib/auth/password";
 import { clientIpFromHeaders } from "@/lib/auth/client-ip";

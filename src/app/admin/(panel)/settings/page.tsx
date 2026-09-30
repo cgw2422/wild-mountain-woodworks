@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth/session";
-import { commerceState, getSettings } from "@/lib/settings";
+import { getSettings, salesFlags } from "@/lib/settings";
+import { centsToDollarInput } from "@/lib/money";
+import { formatBps } from "@/lib/sales/totals";
 import { getStorage } from "@/lib/storage";
-import { ActionForm, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
+import { ActionForm, Select, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { ImageField } from "@/components/admin/media/ImageField";
 import { CountedField } from "@/components/admin/content/CountedField";
 import {
@@ -43,7 +45,7 @@ export default async function SettingsPage() {
   await requireAdmin();
   await getSettings(); // ensures the row exists
   const settings = await prisma.siteSetting.findUniqueOrThrow({ where: { id: "default" }, include: { defaultOgImage: { select: editorMediaSelect } } });
-  const commerce = commerceState(settings);
+  const flags = salesFlags(settings);
   const storage = storageStatus();
   const email = emailStatus();
   const s = (v: string | null) => v ?? "";
@@ -62,6 +64,7 @@ export default async function SettingsPage() {
           ["social", "Social"],
           ["seo", "SEO"],
           ["quotes", "Pricing & quotes"],
+          ["sales", "Quotes & invoices"],
           ["features", "Features"],
           ["security", "Security"],
           ["system", "System status"],
@@ -152,6 +155,46 @@ export default async function SettingsPage() {
           </ActionForm>
         </Card>
 
+        <Card id="sales" title="Quotes & invoices" description="Defaults for new quotes and invoices. Each quote can still be changed individually.">
+          <ActionForm action={saveSettings.bind(null, "sales")} className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <TextInput name="quoteValidDays" label="Quotes valid for (days)" type="number" min={1} max={365} required defaultValue={settings.quoteValidDays} />
+              <TextInput name="invoiceDueDays" label="Invoices due after (days)" type="number" min={0} max={365} required defaultValue={settings.invoiceDueDays} />
+              <TextInput name="quoteAlertDays" label="Flag new requests after (days)" type="number" min={1} max={60} required defaultValue={settings.quoteAlertDays} help="Dashboard reminder for unanswered requests." />
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Select
+                name="defaultDepositType"
+                label="Default deposit"
+                defaultValue={settings.defaultDepositType}
+                options={[
+                  { value: "PERCENTAGE", label: "Percentage of total" },
+                  { value: "FIXED_AMOUNT", label: "Fixed amount" },
+                  { value: "NONE", label: "No deposit" },
+                ]}
+              />
+              <TextInput name="defaultDepositPercent" label="Deposit %" inputMode="decimal" defaultValue={formatBps(settings.defaultDepositPercentBps).replace("%", "")} help="Used when the default is a percentage." />
+              <TextInput name="defaultDepositAmount" label="Deposit amount ($)" inputMode="decimal" defaultValue={centsToDollarInput(settings.defaultDepositAmountCents)} help="Used when the default is a fixed amount." />
+            </div>
+            <Select
+              name="invoiceEmailMode"
+              label="Who emails Stripe invoices?"
+              defaultValue={settings.invoiceEmailMode}
+              options={[
+                { value: "WILD_MOUNTAIN", label: "Wild Mountain — our branded email with the Stripe payment link (recommended)" },
+                { value: "STRIPE", label: "Stripe — Stripe's own invoice email" },
+              ]}
+              help="Only applies when Stripe invoicing is on. Without Stripe, Wild Mountain always sends the invoice email."
+            />
+            <TextArea name="defaultQuoteTerms" label="Default quote terms" rows={7} defaultValue={s(settings.defaultQuoteTerms)} maxLength={20000} help="Copied onto every new quote; editable per quote. Customers see these." />
+            <TextArea name="paymentInstructions" label="Offline payment instructions" rows={4} defaultValue={s(settings.paymentInstructions)} maxLength={2000} help="Shown on invoices and invoice emails when Stripe invoicing is off, e.g. who to make checks payable to, or bank transfer details." />
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-100 pt-4">
+              <AdminLinkButton href="/admin/settings/emails">Edit email templates</AdminLinkButton>
+              <SubmitButton>Save quote &amp; invoice defaults</SubmitButton>
+            </div>
+          </ActionForm>
+        </Card>
+
         <Card id="features" title="Features" description="Switch parts of the site on or off. Changes take effect immediately.">
           <ActionForm action={saveSettings.bind(null, "features")} className="space-y-5">
             <Toggle
@@ -172,42 +215,37 @@ export default async function SettingsPage() {
               defaultChecked={settings.customOrdersEnabled}
               description="Accept custom furniture requests through the Custom Furniture page form."
             />
+            <Toggle
+              name="taxEnabled"
+              label="Tax on quotes and invoices"
+              defaultChecked={settings.taxEnabled}
+              description="Off until your tax rules are configured. When on, a tax amount can be entered on quotes; it is added to the total."
+            />
             <div className="rounded border border-neutral-200 p-4">
               <Toggle
-                name="ecommerceEnabled"
-                label="E-commerce (online checkout)"
-                defaultChecked={settings.ecommerceEnabled}
-                description="Allow customers to buy eligible products online with Stripe Checkout instead of requesting a quote."
+                name="stripeInvoicingEnabled"
+                label="Stripe invoicing (online payment)"
+                defaultChecked={settings.stripeInvoicingEnabled}
+                description="Send invoices through Stripe so customers can pay on Stripe's secure hosted invoice page. Quotes stay entirely in Wild Mountain; there is no cart or checkout. Manual payments (cash, check, bank transfer) always work."
               />
               <div className="mt-4 rounded bg-neutral-50 p-3 text-sm" role="note">
                 <p className="font-medium text-neutral-900">
-                  Online checkout is currently{" "}
-                  {commerce.ecommerce ? <Badge tone="green">ON for visitors</Badge> : <Badge tone="neutral">OFF for visitors</Badge>}
+                  Stripe invoicing is currently {flags.stripeInvoicing ? <Badge tone="green">ON</Badge> : <Badge tone="neutral">OFF</Badge>}
                 </p>
-                <p className="mt-1 text-neutral-600">It only turns on when all three of these are true. Turning the switch on without the others changes nothing on the public site.</p>
+                <p className="mt-1 text-neutral-600">It only turns on when both of these are true. Until then, invoices are sent by email and paid offline.</p>
                 <ul className="mt-3 space-y-2">
-                  <Condition ok={commerce.ecommerceFlag} label="E-commerce switch above is on" detail={commerce.ecommerceFlag ? "On" : "Off"} />
+                  <Condition ok={flags.stripeInvoicingFlag} label="Stripe invoicing switch above is on" detail={flags.stripeInvoicingFlag ? "On" : "Off"} />
                   <Condition
-                    ok={commerce.stripeConfigured}
+                    ok={flags.stripeConfigured}
                     label="Stripe keys configured"
                     detail={
-                      commerce.stripeConfigured ? (
+                      flags.stripeConfigured ? (
                         "Configured"
                       ) : (
                         <>
-                          Not configured. Your developer sets these environment variables: <code className="text-xs">STRIPE_SECRET_KEY</code>,{" "}
-                          <code className="text-xs">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> and <code className="text-xs">STRIPE_WEBHOOK_SECRET</code>.
+                          Not configured. Your developer sets <code className="text-xs">STRIPE_SECRET_KEY</code> and <code className="text-xs">STRIPE_WEBHOOK_SECRET</code> (and the webhook endpoint in Stripe).
                         </>
                       )
-                    }
-                  />
-                  <Condition
-                    ok={commerce.checkoutUiReady}
-                    label="Cart & checkout pages released"
-                    detail={
-                      commerce.checkoutUiReady
-                        ? "Released"
-                        : "Not yet released — the cart and checkout pages are built but held back until payments are finalized (CHECKOUT_UI_READY)."
                     }
                   />
                 </ul>
@@ -229,9 +267,9 @@ export default async function SettingsPage() {
             <StatusItem label="Email delivery" value={email.label} tone={email.tone} note={email.note} />
             <StatusItem
               label="Stripe payments"
-              value={commerce.stripeConfigured ? "Configured" : "Not configured"}
-              tone={commerce.stripeConfigured ? "green" : "neutral"}
-              note={commerce.stripeConfigured ? "Keys are present (values are never shown here)." : "Only needed if you enable online checkout."}
+              value={flags.stripeConfigured ? "Configured" : "Not configured"}
+              tone={flags.stripeConfigured ? "green" : "neutral"}
+              note={flags.stripeConfigured ? "Keys are present (values are never shown here)." : "Only needed for Stripe invoicing (online payment)."}
             />
           </dl>
         </Card>

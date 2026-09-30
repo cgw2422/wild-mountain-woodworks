@@ -13,7 +13,7 @@ import { estimateInputsSchema, estimateMetaSchema } from "@/lib/pricing/estimate
 import { pricingThresholds } from "@/lib/pricing/defaults";
 import { getSettings } from "@/lib/settings";
 import { revalidateSite } from "@/lib/revalidate";
-import { withUniqueReference } from "@/lib/services/submissions";
+import { createManualQuote } from "@/lib/sales/quotes";
 
 /**
  * Internal pricing calculator actions. Estimates are decision support only:
@@ -155,28 +155,12 @@ export const setEstimateArchived = adminAction(async (admin, estimateId: string,
   return { ok: true, message: archived ? "Estimate archived." : "Estimate restored." };
 });
 
-const convertSchema = z.object({
-  name: z.string().trim().min(2, "Enter the customer's name.").max(120),
-  email: z.string().trim().toLowerCase().max(254).pipe(z.email("Enter a valid email address.")),
-  phone: z.string().trim().max(30).transform((v) => v || null),
-  zipCode: z.string().trim().max(10),
-});
+type EstimateRow = Prisma.PriceEstimateGetPayload<object>;
 
-/**
- * Turn a saved estimate into a quote in the Quotes inbox (status "Quoted"),
- * using the chosen final price. The breakdown is recorded as an internal note.
- */
-export const convertEstimateToQuote = adminAction(async (admin, estimateId: string, data: FormData) => {
-  const e = await prisma.priceEstimate.findUnique({ where: { id: estimateId }, include: { product: { select: { id: true, name: true } } } });
-  if (!e) throw new AdminError("That estimate no longer exists.");
-  if (e.quoteRequestId) throw new AdminError("This estimate has already been converted into a quote.");
-  const price = e.finalPriceCents;
-  if (!price) throw new AdminError("Save the estimate with a selling price first.");
-  const c = convertSchema.parse({ name: fd.str(data, "name"), email: fd.str(data, "email"), phone: fd.str(data, "phone"), zipCode: fd.str(data, "zipCode") });
-
-  // Internal note only — customers never see costs, margins or formulas.
-  const summary = [
-    `Created from price estimate "${e.name}".`,
+/** Internal note only — customers never see costs, margins or formulas. */
+function estimateSummary(e: EstimateRow, price: number) {
+  return [
+    `Price estimate "${e.name}".`,
     [e.productType, e.woodSpecies, e.dimensions].filter(Boolean).join(" · "),
     `Quoted price: ${formatCents(price)}${e.manualPrice ? " (manual price)" : " (recommended price)"}`,
     `30% pricing floor ${formatCents(e.floorCents)} · Detailed price ${e.detailedPriceCents != null ? formatCents(e.detailedPriceCents) : "—"} · Base recommended ${formatCents(e.baseRecommendedCents)}${e.valueAdjustmentCents ? ` · Value adjustments +${formatCents(e.valueAdjustmentCents)}` : ""}`,
@@ -187,40 +171,93 @@ export const convertEstimateToQuote = adminAction(async (admin, estimateId: stri
   ]
     .filter(Boolean)
     .join("\n");
+}
 
-  const quote = await withUniqueReference("Q", (reference) =>
-    prisma.quoteRequest.create({
-      data: {
-        reference,
-        source: "GENERAL",
-        status: "QUOTED",
+const convertSchema = z.object({
+  name: z.string().trim().min(2, "Enter the customer's name.").max(120),
+  email: z.string().trim().toLowerCase().max(254).pipe(z.email("Enter a valid email address.")),
+  phone: z.string().trim().max(30).transform((v) => v || null),
+  zipCode: z.string().trim().max(10),
+});
+
+/**
+ * "Create quote from estimate": a new DRAFT quote with one line at the
+ * estimate's selling price and its deposit percentage. The cost breakdown is
+ * recorded as an internal note — customers never see costs or margins.
+ */
+export const convertEstimateToQuote = adminAction(async (admin, estimateId: string, data: FormData) => {
+  const e = await prisma.priceEstimate.findUnique({ where: { id: estimateId }, include: { product: { select: { id: true, name: true } } } });
+  if (!e) throw new AdminError("That estimate no longer exists.");
+  if (e.quoteRequestId) throw new AdminError("This estimate has already been converted into a quote.");
+  const price = e.finalPriceCents;
+  if (!price) throw new AdminError("Save the estimate with a selling price first.");
+  const c = convertSchema.parse({ name: fd.str(data, "name"), email: fd.str(data, "email"), phone: fd.str(data, "phone"), zipCode: fd.str(data, "zipCode") });
+
+  const summary = estimateSummary(e, price);
+
+  // The customer-facing line is just the piece and its price; costs,
+  // margins and formulas stay in the internal note.
+  const description = e.product?.name ?? e.productType ?? e.name;
+  const details = [e.dimensions, e.woodSpecies].filter(Boolean).join(" · ") || null;
+  const depositBps = Math.round((e.depositPct ?? 0) * 100);
+  const quote = await prisma.$transaction(async (tx) => {
+    const q = await createManualQuote(
+      admin,
+      {
+        source: "ESTIMATE",
         name: c.name,
         email: c.email,
         phone: c.phone,
         zipCode: c.zipCode,
+        address: null,
+        notes: e.notes,
         productId: e.product?.id ?? null,
-        productName: e.product?.name ?? e.productType ?? e.name,
+        productName: description,
         requestedDimensions: e.dimensions,
         estimatedTotalCents: price,
-        notes: e.notes,
-        readAt: new Date(),
-        statusEvents: { create: { toStatus: "QUOTED", authorId: admin.id } },
-        internalNotes: { create: { body: summary, authorId: admin.id } },
+        lines: [{ kind: "CUSTOM", description, notes: details, quantity: 1, unitPriceCents: price, taxable: true, productId: e.product?.id ?? null, configuration: null }],
+        deposit: depositBps > 0 ? { depositType: "PERCENTAGE", depositPercentBps: Math.min(10000, depositBps), depositAmountCents: null } : { depositType: "NONE", depositPercentBps: null, depositAmountCents: null },
       },
-    }),
-  );
-  await prisma.priceEstimate.update({
-    where: { id: e.id },
-    data: { quoteRequestId: quote.id, customerName: c.name, customerEmail: c.email, customerPhone: c.phone, customerZip: c.zipCode || null },
+      tx,
+    );
+    await tx.internalNote.create({ data: { body: summary, authorId: admin.id, quoteRequestId: q.id } });
+    await tx.priceEstimate.update({
+      where: { id: e.id },
+      data: { quoteRequestId: q.id, customerName: c.name, customerEmail: c.email, customerPhone: c.phone, customerZip: c.zipCode || null },
+    });
+    return q;
   });
-  await logActivity("estimate.converted", `${admin.name} converted estimate "${e.name}" into quote ${quote.reference}`, {
+  await logActivity("estimate.converted", `${admin.name} converted estimate "${e.name}" into quote ${quote.number}`, {
     actorId: admin.id,
     entityType: "quote",
     entityId: quote.id,
   });
   refresh(e.id);
   revalidatePath("/admin/quotes");
-  return { ok: true, id: quote.id, message: `Quote ${quote.reference} created.` };
+  return { ok: true, id: quote.id, message: `Quote ${quote.number} created as a draft — review and send it from Quotes.` };
+});
+
+/**
+ * "Attach estimate": link a saved estimate to an existing quote (by its
+ * number, e.g. WMQ-1004) as internal pricing backup. The quote's lines are
+ * not changed, and the breakdown is only ever visible in admin.
+ */
+export const attachEstimateToQuote = adminAction(async (admin, estimateId: string, data: FormData) => {
+  const e = await prisma.priceEstimate.findUnique({ where: { id: estimateId } });
+  if (!e) throw new AdminError("That estimate no longer exists.");
+  if (e.quoteRequestId) throw new AdminError("This estimate is already linked to a quote.");
+  const number = fd.str(data, "quoteNumber").toUpperCase();
+  if (!/^WMQ-\d{4,}$/.test(number)) throw new AdminError("Enter a quote number like WMQ-1004.", { quoteNumber: "Enter a quote number like WMQ-1004." });
+  const quote = await prisma.quoteRequest.findUnique({ where: { number }, select: { id: true, number: true } });
+  if (!quote) throw new AdminError("No quote has that number.", { quoteNumber: "No quote has that number." });
+  await prisma.$transaction([
+    prisma.priceEstimate.update({ where: { id: e.id }, data: { quoteRequestId: quote.id } }),
+    prisma.internalNote.create({ data: { body: estimateSummary(e, e.finalPriceCents ?? e.baseRecommendedCents), authorId: admin.id, quoteRequestId: quote.id } }),
+  ]);
+  await logActivity("estimate.converted", `${admin.name} attached estimate "${e.name}" to quote ${quote.number}`, { actorId: admin.id, entityType: "quote", entityId: quote.id });
+  refresh(e.id);
+  revalidatePath(`/admin/quotes/${quote.id}`);
+  return { ok: true, id: quote.id, message: `Estimate attached to ${quote.number}.` };
 });
 
 /**

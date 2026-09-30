@@ -1,4 +1,4 @@
-import { getSettings, commerceState } from "@/lib/settings";
+import { getSettings, salesFlags } from "@/lib/settings";
 import { getMenu } from "@/lib/navigation/menus";
 import { getActiveAnnouncement } from "@/lib/promotions/queries";
 import { AnnouncementBar } from "./AnnouncementBar";
@@ -17,7 +17,7 @@ export async function SiteChrome({ children, banner }: { children: React.ReactNo
     getMenu("CUSTOMER_CARE"),
     getMenu("LEGAL"),
   ]);
-  const flags = commerceState(settings);
+  const flags = salesFlags(settings);
   const cta = flags.quotes ? { label: "Request a Quote", href: "/request-quote" } : { label: "Contact Us", href: "/contact" };
   return (
     <>

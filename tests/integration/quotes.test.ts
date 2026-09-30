@@ -20,7 +20,9 @@ describe.skipIf(!hasTestDb)("quote requests", () => {
       productId: product.id,
       selection: { options: { [ids.size]: ids.s84, [ids.wood]: ids.walnut }, addOns: { [ids.bench]: 2 }, customDetails: {} },
     });
-    expect(quote.reference).toMatch(/^WM-Q-/);
+    expect(quote.number).toBe("WMQ-1001");
+    expect(quote.reference).toBe("WMQ-1001");
+    expect(quote.customerToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(quote.status).toBe("NEW");
     // 1200 + 300 + 600 (product override, not the global 800) + 2×350
     expect(quote.estimatedTotalCents).toBe(120000 + 30000 + 60000 + 70000);

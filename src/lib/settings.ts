@@ -2,7 +2,6 @@ import "server-only";
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import type { SiteSetting } from "@/generated/prisma/client";
-import { CHECKOUT_UI_READY } from "@/lib/commerce/config";
 
 export type SiteSettings = SiteSetting & {
   defaultOgImage: { url: string; width: number; height: number; alt: string } | null;
@@ -22,19 +21,22 @@ export const getSettings = cache(async (): Promise<SiteSettings> => {
 });
 
 /**
- * Commerce feature flags. E-commerce is only effective when the flag is on
- * AND Stripe is configured AND the checkout UI has shipped
- * (src/lib/commerce/config.ts), so flipping the flag can never expose a
- * broken or unfinished checkout.
+ * Sales feature flags. Wild Mountain sells through quotes → invoices; there is
+ * no cart or checkout.
+ *
+ * Stripe invoicing is only effective when the Settings flag is on AND the
+ * Stripe secret key and webhook secret are configured, so flipping the switch
+ * early can never send a customer to a broken payment page. Manual payments
+ * (cash, check, bank transfer) always work, with or without Stripe.
  */
-export function commerceState(settings: Pick<SiteSetting, "ecommerceEnabled" | "quotesEnabled" | "customOrdersEnabled">) {
-  const stripeConfigured = Boolean(process.env.STRIPE_SECRET_KEY && process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
+export function salesFlags(settings: Pick<SiteSetting, "stripeInvoicingEnabled" | "quotesEnabled" | "customOrdersEnabled" | "taxEnabled">) {
+  const stripeConfigured = Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET);
   return {
-    ecommerce: settings.ecommerceEnabled && stripeConfigured && CHECKOUT_UI_READY,
-    checkoutUiReady: CHECKOUT_UI_READY,
-    ecommerceFlag: settings.ecommerceEnabled,
-    stripeConfigured,
     quotes: settings.quotesEnabled,
     customOrders: settings.customOrdersEnabled,
+    stripeInvoicing: settings.stripeInvoicingEnabled && stripeConfigured,
+    stripeInvoicingFlag: settings.stripeInvoicingEnabled,
+    stripeConfigured,
+    tax: settings.taxEnabled,
   };
 }

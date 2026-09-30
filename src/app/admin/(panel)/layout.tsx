@@ -15,19 +15,18 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // Any staff role may see the shell; every page and action checks its own
   // permission (layouts don't re-run on client-side navigation).
   const admin = await requireStaff();
-  const [quotes, customRequests, messages] = can(admin.role, "inbox")
-    ? await Promise.all([
-        prisma.quoteRequest.count({ where: { status: "NEW" } }),
-        prisma.customRequest.count({ where: { status: "NEW" } }),
-        prisma.contactMessage.count({ where: { status: "UNREAD" } }),
-      ])
-    : [0, 0, 0];
+  const [quotes, customRequests, messages, invoices] = await Promise.all([
+    can(admin.role, "sales") ? prisma.quoteRequest.count({ where: { status: "NEW", archivedAt: null } }) : 0,
+    can(admin.role, "inbox") ? prisma.customRequest.count({ where: { status: "NEW" } }) : 0,
+    can(admin.role, "inbox") ? prisma.contactMessage.count({ where: { status: "UNREAD" } }) : 0,
+    can(admin.role, "finance") ? prisma.invoice.count({ where: { status: "PAST_DUE" } }) : 0,
+  ]);
   return (
     <div className="min-h-dvh bg-neutral-50 font-sans text-neutral-900">
       <a href="#admin-main" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:bg-white focus:px-3 focus:py-2">
         Skip to content
       </a>
-      <AdminNav counts={{ quotes, customRequests, messages }} userName={admin.name} role={admin.role} logout={logoutAction} />
+      <AdminNav counts={{ quotes, customRequests, messages, invoices }} userName={admin.name} role={admin.role} logout={logoutAction} />
       <main id="admin-main" className="lg:pl-64">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-10 lg:py-8">{children}</div>
       </main>

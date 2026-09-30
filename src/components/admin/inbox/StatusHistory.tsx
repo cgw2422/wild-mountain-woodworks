@@ -8,6 +8,8 @@ export type StatusEventView = {
   toStatus: string;
   createdAt: Date;
   author: { name: string } | null;
+  /** Set when a person made the change; null for automatic (workflow/payment) changes. */
+  authorId?: string | null;
 };
 
 /** Chronological status timeline (oldest first, like a history log). */
@@ -35,12 +37,12 @@ export function StatusHistory({
               </>
             ) : (
               <>
-                Received as <span className="font-medium">{label(e.toStatus)}</span>
+                Started as <span className="font-medium">{label(e.toStatus)}</span>
               </>
             )}
           </p>
           <p className="mt-0.5 text-xs text-neutral-500">
-            {e.author ? e.author.name : e.fromStatus ? "Removed admin user" : originLabel} · <RelativeTime date={e.createdAt} />{" "}
+            {e.author ? e.author.name : e.authorId ? "Removed admin user" : e.fromStatus ? "Automatic" : originLabel} · <RelativeTime date={e.createdAt} />{" "}
             <span className="sr-only">({formatDate(e.createdAt, true)})</span>
           </p>
         </li>

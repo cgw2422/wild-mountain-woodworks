@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clientRules } from "@/lib/validation/shared";
-import { contactSchema, customRequestSchema, generalQuoteSchema } from "@/lib/validation/forms";
+import { acceptQuoteSchema, configurationQuoteSchema, contactSchema, customRequestSchema, declineQuoteSchema, generalQuoteSchema } from "@/lib/validation/forms";
 
 /**
  * The browser uses lightweight validators (to keep Zod out of the client
@@ -41,5 +41,23 @@ describe("client validators match the server schemas", () => {
   });
   it("general quote", () => {
     agree(clientRules.generalQuote, generalQuoteSchema, { interest: "Bench" });
+  });
+  it("configuration quote (quantity and optional delivery address)", () => {
+    const extra = { productId: "p1", selection: "{}" };
+    agree(clientRules.configurationQuote, configurationQuoteSchema, extra);
+    for (const quantity of ["", "1", "20", "0", "21", "2.5", "abc"]) agree(clientRules.configurationQuote, configurationQuoteSchema, { ...extra, quantity });
+    agree(clientRules.configurationQuote, configurationQuoteSchema, { ...extra, address: "x".repeat(301) });
+  });
+  it("accept and decline quote", () => {
+    const ok = { revision: "2", name: "Jamie Rivers", agreeTerms: "on", agreeDeposit: "on" };
+    for (const input of [ok, { ...ok, name: "J" }, { ...ok, agreeTerms: "" }, { ...ok, agreeDeposit: "" }, { ...ok, agreeTerms: "", agreeDeposit: "", name: "" }]) {
+      const server = acceptQuoteSchema.safeParse(input);
+      const serverFields = server.success ? [] : [...new Set(server.error.issues.map((i) => String(i.path[0])))].sort();
+      expect(Object.keys(clientRules.acceptQuote(input) ?? {}).sort()).toEqual(serverFields);
+    }
+    for (const reason of ["", "Went another way", "x".repeat(1001)]) {
+      const server = declineQuoteSchema.safeParse({ revision: "1", reason });
+      expect(Boolean(clientRules.declineQuote({ reason }))).toBe(!server.success);
+    }
   });
 });

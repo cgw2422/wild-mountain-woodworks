@@ -1,133 +1,59 @@
 import type { Metadata } from "next";
-import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
+import type { OrderPaymentStatus, Prisma, ProductionStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
+import { requirePermission } from "@/lib/auth/session";
 import { cn } from "@/lib/cn";
-import { formatCents } from "@/lib/money";
-import { commerceState, getSettings } from "@/lib/settings";
-import { Badge, Card, EmptyState, PageHeader, StatusBadge, formatDate, table } from "@/components/admin/ui";
-import { PAGE_SIZE, Pagination, listHref, pageParam } from "@/components/admin/inbox/ListControls";
-import { PRODUCTION_STATUS_LABELS, statusLabel } from "@/components/admin/inbox/kinds";
+import { PRODUCTION_ACTIVE } from "@/lib/sales/status";
+import { EmptyState, PageHeader, formatDate, table } from "@/components/admin/ui";
+import { FilterTabs, PAGE_SIZE, Pagination, SearchBox, listHref, pageParam, param } from "@/components/admin/inbox/ListControls";
+import { Money } from "@/components/admin/sales/Money";
+import { SalesBadge } from "@/components/admin/sales/SalesBadge";
 
-export const metadata: Metadata = { title: "Future Orders" };
+export const metadata: Metadata = { title: "Orders" };
 
 const BASE = "/admin/orders";
-
-function Condition({ ok, label, detail }: { ok: boolean; label: string; detail: React.ReactNode }) {
-  return (
-    <li className="flex items-start gap-3">
-      <span
-        className={cn(
-          "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold",
-          ok ? "bg-emerald-100 text-emerald-800" : "bg-neutral-200 text-neutral-600",
-        )}
-        aria-hidden="true"
-      >
-        {ok ? "✓" : "–"}
-      </span>
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-neutral-900">
-          {label}: <span className={ok ? "text-emerald-700" : "text-neutral-600"}>{ok ? "Yes" : "No"}</span>
-        </p>
-        <p className="text-xs text-neutral-500">{detail}</p>
-      </div>
-    </li>
-  );
-}
+const TABS: Array<{ key: string; label: string; where?: Prisma.OrderWhereInput }> = [
+  { key: "", label: "All", where: { productionStatus: { not: "CANCELED" } } },
+  { key: "deposit", label: "Awaiting deposit", where: { productionStatus: { in: ["QUOTE_ACCEPTED", "AWAITING_DEPOSIT"] as ProductionStatus[] } } },
+  { key: "production", label: "In the shop", where: { productionStatus: { in: PRODUCTION_ACTIVE } } },
+  { key: "delivery", label: "Ready / delivery", where: { productionStatus: { in: ["READY_FOR_DELIVERY", "DELIVERY_SCHEDULED"] as ProductionStatus[] } } },
+  { key: "balance", label: "Balance due", where: { paymentStatus: { in: ["PARTIALLY_PAID", "DEPOSIT_DUE", "UNPAID"] as OrderPaymentStatus[] }, productionStatus: { notIn: ["CANCELED"] } } },
+  { key: "completed", label: "Completed", where: { productionStatus: "COMPLETED" } },
+  { key: "canceled", label: "Canceled", where: { productionStatus: "CANCELED" } },
+];
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  await requireAdmin();
+  await requirePermission("sales");
   const sp = await searchParams;
+  const key = TABS.find((t) => t.key === param(sp, "status"))?.key ?? "";
+  const tab = TABS.find((t) => t.key === key)!;
+  const q = param(sp, "q").slice(0, 100);
   const page = pageParam(sp);
-  const state = commerceState(await getSettings());
-
-  const [orders, total] = await Promise.all([
+  const search: Prisma.OrderWhereInput = q
+    ? { OR: [{ number: { contains: q, mode: "insensitive" } }, { customerName: { contains: q, mode: "insensitive" } }, { customerEmail: { contains: q, mode: "insensitive" } }, { quote: { number: { contains: q, mode: "insensitive" } } }] }
+    : {};
+  const where: Prisma.OrderWhereInput = { AND: [search, tab.where ?? {}] };
+  const [rows, total, counts] = await Promise.all([
     prisma.order.findMany({
+      where,
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
-      select: {
-        id: true,
-        number: true,
-        customerName: true,
-        customerEmail: true,
-        totalCents: true,
-        paymentStatus: true,
-        productionStatus: true,
-        createdAt: true,
-      },
+      include: { quote: { select: { number: true } }, items: { select: { description: true, productName: true, kind: true }, orderBy: { position: "asc" }, take: 2 } },
     }),
-    prisma.order.count(),
+    prisma.order.count({ where }),
+    Promise.all(TABS.map((t) => prisma.order.count({ where: { AND: [search, t.where ?? {}] } }))),
   ]);
-
   return (
     <>
-      <PageHeader
-        title="Future Orders"
-        description="Online checkout is prepared but switched off. Customers currently request quotes; orders will appear here once checkout is enabled."
-      />
-
-      <Card
-        title="Online checkout status"
-        actions={state.ecommerce ? <Badge tone="green">Checkout live</Badge> : <Badge tone="neutral">Checkout off — quote requests only</Badge>}
-        className="mb-6"
-      >
-        <div className="grid gap-8 lg:grid-cols-2">
-          <div>
-            <p className="mb-3 text-sm text-neutral-700">Online purchasing only turns on when all three conditions are met:</p>
-            <ul className="space-y-3">
-              <Condition
-                ok={state.ecommerceFlag}
-                label="E-commerce switched on in Settings"
-                detail={
-                  <>
-                    Controlled from{" "}
-                    <Link href="/admin/settings" className="underline underline-offset-2">
-                      Settings
-                    </Link>
-                    .
-                  </>
-                }
-              />
-              <Condition
-                ok={state.stripeConfigured}
-                label="Stripe keys configured"
-                detail="STRIPE_SECRET_KEY and NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY are set on the server."
-              />
-              <Condition
-                ok={state.checkoutUiReady}
-                label="Cart & checkout pages released"
-                detail="The customer-facing cart and checkout screens are shipped by a developer (CHECKOUT_UI_READY)."
-              />
-            </ul>
-            <p className="mt-4 text-sm text-neutral-600">
-              {state.ecommerce
-                ? "All conditions are met: products marked purchasable show “Add to Cart”."
-                : "Until then, every product shows “Request a Quote” and nothing here is visible to customers."}
-            </p>
-          </div>
-          <div className="text-sm text-neutral-700">
-            <h3 className="mb-2 font-semibold text-neutral-900">What enabling checkout involves</h3>
-            <ul className="list-disc space-y-1.5 pl-5">
-              <li>Payment happens on Stripe-hosted Checkout — customers leave the site briefly to pay securely.</li>
-              <li>Guest checkout: customers don&apos;t need an account.</li>
-              <li>No card details are ever stored here — only Stripe reference IDs.</li>
-              <li>Orders are confirmed as paid only by Stripe&apos;s verified webhook, never by the browser.</li>
-              <li>Each order keeps an immutable snapshot of the configuration and price that was purchased.</li>
-              <li>
-                Server environment variables: <code className="rounded bg-neutral-100 px-1 text-xs">STRIPE_SECRET_KEY</code>,{" "}
-                <code className="rounded bg-neutral-100 px-1 text-xs">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code>,{" "}
-                <code className="rounded bg-neutral-100 px-1 text-xs">STRIPE_WEBHOOK_SECRET</code>.
-              </li>
-              <li>Taxes, delivery charges and deposits need to be decided before launch.</li>
-            </ul>
-          </div>
-        </div>
-      </Card>
-
-      <h2 className="mb-3 text-base font-semibold text-neutral-900">Orders</h2>
-      {orders.length === 0 ? (
-        <EmptyState title="No orders yet" description="No orders yet — orders will appear here once online checkout is enabled." />
+      <PageHeader title="Orders" description="Created automatically when a customer accepts a quote. Track production, delivery and payments here." />
+      <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <FilterTabs active={key} tabs={TABS.map((t, i) => ({ key: t.key, label: t.label, count: counts[i], href: listHref(BASE, { status: t.key, q }) }))} />
+        <SearchBox action={BASE} q={q} placeholder="Order, quote, name or email" hidden={{ status: key }} />
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState title={q || key ? "No matching orders" : "No orders yet"} description={q || key ? "Try a different search or filter." : "When a customer accepts a quote, its order appears here."} />
       ) : (
         <>
           <div className={table.wrap}>
@@ -136,40 +62,46 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <tr>
                   <th scope="col" className={table.th}>Order</th>
                   <th scope="col" className={table.th}>Customer</th>
+                  <th scope="col" className={table.th}>Piece</th>
                   <th scope="col" className={cn(table.th, "text-right")}>Total</th>
-                  <th scope="col" className={table.th}>Payment</th>
                   <th scope="col" className={table.th}>Production</th>
-                  <th scope="col" className={table.th}>Date</th>
+                  <th scope="col" className={table.th}>Payment</th>
+                  <th scope="col" className={table.th}>Delivery</th>
                 </tr>
               </thead>
               <tbody className={table.tbody}>
-                {orders.map((o) => (
+                {rows.map((o) => (
                   <tr key={o.id} className={table.tr}>
                     <td className={cn(table.td, "whitespace-nowrap")}>
-                      <Link href={`${BASE}/${o.id}`} className="font-mono text-xs font-medium hover:underline">
+                      <Link href={`${BASE}/${o.id}`} className="inline-block py-1 font-mono text-xs font-semibold hover:underline">
                         {o.number}
                       </Link>
+                      <p className="text-xs text-neutral-500">
+                        {formatDate(o.createdAt)}
+                        {o.quote?.number ? ` · ${o.quote.number}` : ""}
+                      </p>
                     </td>
                     <td className={table.td}>
                       <p className="font-medium">{o.customerName}</p>
                       <p className="text-xs text-neutral-500">{o.customerEmail}</p>
                     </td>
-                    <td className={cn(table.td, "whitespace-nowrap text-right tabular-nums")}>{formatCents(o.totalCents)}</td>
+                    <td className={table.td}>{o.items.find((i) => i.kind === "PRODUCT" || i.kind === "CUSTOM")?.description ?? o.items[0]?.productName ?? "—"}</td>
+                    <td className={cn(table.td, "text-right")}>
+                      <Money cents={o.totalCents} />
+                    </td>
                     <td className={table.td}>
-                      <StatusBadge status={o.paymentStatus} />
+                      <SalesBadge status={o.productionStatus} />
                     </td>
-                    <td className={cn(table.td, "whitespace-nowrap")}>
-                      <Badge tone={o.productionStatus === "COMPLETED" ? "dark" : "neutral"}>
-                        {PRODUCTION_STATUS_LABELS[o.productionStatus] ?? statusLabel(o.productionStatus)}
-                      </Badge>
+                    <td className={table.td}>
+                      <SalesBadge status={o.paymentStatus} />
                     </td>
-                    <td className={cn(table.td, "whitespace-nowrap text-neutral-600")}>{formatDate(o.createdAt)}</td>
+                    <td className={cn(table.td, "whitespace-nowrap text-neutral-600")}>{o.deliveryDate ? formatDate(o.deliveryDate) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <Pagination page={page} total={total} href={(p) => listHref(BASE, { page: p })} />
+          <Pagination page={page} total={total} href={(p) => listHref(BASE, { status: key, q, page: p })} />
         </>
       )}
     </>

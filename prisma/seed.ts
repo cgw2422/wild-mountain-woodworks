@@ -6,7 +6,7 @@
  *
  * Always (idempotent, never overwrites edits):
  *   - site settings row with launch feature flags
- *     (E-commerce OFF, Quotes ON, Custom Orders ON)
+ *     (Stripe invoicing OFF, Tax OFF, Quotes ON, Custom Orders ON)
  *   - every CMS page and section defined in code
  *   - an owner account from ADMIN_EMAIL / ADMIN_PASSWORD, if provided and
  *     no admin with that email exists
@@ -23,7 +23,14 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { createStorageFromEnv } from "../src/lib/storage/factory";
 import { validatePasswordStrength } from "../src/lib/auth/password";
 import { createPasswordAdmin } from "../src/lib/auth/accounts";
-import { ensureMenus, ensurePages as ensureRequiredPages, ensureSettings as ensureRequiredSettings, ensureStarterAnnouncement } from "../src/lib/seed/defaults";
+import {
+  ensureEmailTemplates,
+  ensureMenus,
+  ensurePages as ensureRequiredPages,
+  ensureSalesDefaults,
+  ensureSettings as ensureRequiredSettings,
+  ensureStarterAnnouncement,
+} from "../src/lib/seed/defaults";
 import { renderScene } from "./seed-data/images";
 import { ADD_ONS, CATEGORIES, FAQS, FAQ_CATEGORIES, IMAGE_SPECS, OPTION_GROUPS, PORTFOLIO, PRODUCTS, PRODUCT_TEXT } from "./seed-data/catalog";
 
@@ -323,6 +330,8 @@ async function main() {
   else log("sample content skipped (catalog not empty or SEED_SAMPLE_CONTENT=false)");
   // After the sample catalog, so the footer menu can list its categories.
   await ensureMenus(prisma, log);
+  await ensureEmailTemplates(prisma, log);
+  await ensureSalesDefaults(prisma, log);
   log("done");
 }
 

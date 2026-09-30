@@ -47,6 +47,15 @@ const selectionSchema = z.object({
   customDetails: z.record(z.string().max(40), z.string().trim().max(500)).default({}),
 });
 
+export const quantitySchema = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v) => (v ? v : "1"))
+  .pipe(z.string().regex(/^\d{1,2}$/, "Enter a quantity from 1 to 20."))
+  .transform(Number)
+  .pipe(z.number().int().min(1, "Enter a quantity from 1 to 20.").max(20, "Enter a quantity from 1 to 20."));
+
 export const configurationQuoteSchema = z.object({
   productId: z.string().min(1).max(40),
   selection: z
@@ -65,6 +74,8 @@ export const configurationQuoteSchema = z.object({
   email: emailSchema,
   phone: phoneSchema,
   zipCode: zipSchema,
+  quantity: quantitySchema,
+  address: optionalText(300),
   timeline: timelineSchema,
   notes: optionalText(4000),
 });
@@ -106,6 +117,21 @@ export const contactSchema = z.object({
   message: trimmed(5000).min(10, "Please include a short message."),
 });
 export type ContactInput = z.infer<typeof contactSchema>;
+
+/** Customer accepts a quote on /quote/[token]. */
+export const acceptQuoteSchema = z.object({
+  revision: z.string().regex(/^\d{1,4}$/, "Invalid quote version.").transform(Number),
+  name: nameSchema,
+  agreeTerms: z.literal("on", { error: "Please confirm this statement." }),
+  agreeDeposit: z.literal("on", { error: "Please confirm this statement." }),
+});
+export type AcceptQuoteInput = z.infer<typeof acceptQuoteSchema>;
+
+/** Customer declines a quote (reason optional). */
+export const declineQuoteSchema = z.object({
+  revision: z.string().regex(/^\d{1,4}$/, "Invalid quote version.").transform(Number),
+  reason: optionalText(1000),
+});
 
 export function fieldErrorsFrom(error: z.ZodError): Record<string, string> {
   const out: Record<string, string> = {};

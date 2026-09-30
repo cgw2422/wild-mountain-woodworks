@@ -1,0 +1,476 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { prisma } from "@/lib/db";
+import { logActivity } from "@/lib/activity";
+import { AdminError, fd, permittedAction } from "@/lib/admin/action";
+import type { ActionResult } from "@/lib/admin/types";
+import { parseDollarsToCents } from "@/lib/money";
+import { siteDateTime, siteDayStart } from "@/lib/site-time";
+import { resendLoggedEmail, type SendResult } from "@/lib/email/send";
+import { EMAIL_TEMPLATE_KEYS } from "@/lib/email/template-definitions";
+import { recordCustomerActivity } from "@/lib/sales/customers";
+import { createCustomInvoice, createInvoiceForOrder, resendInvoice, saveInvoiceDraft, sendInvoice, voidInvoice, type InvoiceLineInput } from "@/lib/sales/invoices";
+import { recordManualPayment, recordRefund, voidManualPayment } from "@/lib/sales/payments";
+import { updateOrder } from "@/lib/sales/orders";
+import {
+  MANUAL_QUOTE_STATUSES,
+  acceptQuoteManually,
+  createManualQuote,
+  createRevision,
+  duplicateQuote,
+  extendQuote,
+  resendQuote,
+  saveRevision,
+  sendQuote,
+  setQuoteArchived,
+  setQuoteStatus,
+} from "@/lib/sales/quotes";
+import { DELIVERY_STATUSES, PRODUCTION_STATUSES } from "@/lib/sales/status";
+import { DEPOSIT_TYPES, LINE_KINDS, MAX_LINES, MAX_LINE_QUANTITY, MAX_UNIT_PRICE_CENTS, parsePercentToBps } from "@/lib/sales/totals";
+import { emailSchema, nameSchema, phoneSchema } from "@/lib/validation/forms";
+
+/*
+ * Admin actions for quotes, orders, invoices, payments and customers.
+ * Permissions (checked on the server for every call):
+ *   "sales"   — quotes workflow, customers, orders/production
+ *   "finance" — quote pricing, invoices, payments, refunds
+ * Editors have neither. All amounts are recomputed by src/lib/sales.
+ */
+
+const PRICING: ["sales", "finance"] = ["sales", "finance"];
+const idSchema = z.string().min(1).max(64);
+
+function refreshSales(...paths: string[]) {
+  for (const p of paths) revalidatePath(p);
+  revalidatePath("/admin", "layout");
+}
+
+function emailOutcome(r: SendResult | null, sent: string): ActionResult {
+  if (!r) return { ok: true, message: sent };
+  if (r.status === "FAILED") return { ok: true, message: `${sent} — but the email failed to send. You can resend it from the email log.` };
+  if (r.status === "SKIPPED") return { ok: true, message: `${sent} (email template is switched off — no email was sent).` };
+  return { ok: true, message: sent };
+}
+
+const optText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max, `Keep this under ${max} characters.`)
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : null));
+
+const moneyCents = (label: string, allowNegative = false) =>
+  z
+    .number({ error: `Enter a price for ${label}.` })
+    .int()
+    .min(allowNegative ? -MAX_UNIT_PRICE_CENTS : 0, "That amount is out of range.")
+    .max(MAX_UNIT_PRICE_CENTS, "That amount is out of range.");
+
+const lineSchema = z.object({
+  sourceId: z.string().max(40).nullable().optional().transform((v) => v ?? null),
+  kind: z.enum(LINE_KINDS),
+  description: z.string().trim().min(1, "Every line needs a description.").max(500),
+  notes: optText(2000),
+  quantity: z.number().int().min(1, "Quantity must be at least 1.").max(MAX_LINE_QUANTITY),
+  unitPriceCents: moneyCents("each line", true),
+  taxable: z.boolean().default(true),
+  productId: z.string().max(40).nullable().optional().transform((v) => v ?? null),
+});
+
+function dayInput(value: string | null | undefined, field: string): Date | null {
+  if (!value) return null;
+  const start = siteDayStart(value, 1);
+  if (!start) throw new AdminError("Enter a valid date.", { [field]: "Enter a valid date." });
+  return start;
+}
+
+/* ================================================================ quotes */
+
+const revisionSchema = z.object({
+  customerName: nameSchema,
+  customerEmail: emailSchema,
+  customerPhone: phoneSchema,
+  customerAddress: optText(300),
+  customerNotes: optText(5000),
+  terms: optText(20000),
+  expiresOn: z.string().trim().max(10).optional().nullable(),
+  leadTime: optText(120),
+  estimatedCompletion: optText(120),
+  deliveryDetails: optText(1000),
+  depositType: z.enum(DEPOSIT_TYPES),
+  depositPercent: z.string().trim().max(10).optional().nullable(),
+  depositAmountCents: z.number().int().min(0).max(MAX_UNIT_PRICE_CENTS * 10).nullable().optional(),
+  taxCents: z.number().int().min(0).max(MAX_UNIT_PRICE_CENTS).default(0),
+  lines: z.array(lineSchema).max(MAX_LINES, `Up to ${MAX_LINES} lines.`),
+});
+
+function parsePayload(data: FormData) {
+  try {
+    return JSON.parse(fd.str(data, "payload")) as unknown;
+  } catch {
+    throw new AdminError("The form data was invalid. Please reload and try again.");
+  }
+}
+
+/** Save the current draft revision (lines, customer, deposit, terms). */
+export const saveQuoteRevisionAction = permittedAction(PRICING, async (admin, quoteIdArg: string, data: FormData) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  const input = revisionSchema.parse(parsePayload(data));
+  let depositPercentBps: number | null = null;
+  if (input.depositType === "PERCENTAGE") {
+    depositPercentBps = parsePercentToBps(input.depositPercent);
+    if (!Number.isFinite(depositPercentBps) || depositPercentBps <= 0 || depositPercentBps > 10000) throw new AdminError("Enter a deposit percentage between 0.01 and 100.", { depositPercent: "Enter 1–100." });
+  }
+  if (input.depositType === "FIXED_AMOUNT" && !input.depositAmountCents) throw new AdminError("Enter the deposit amount.", { depositAmount: "Enter an amount." });
+  const expiresAt = dayInput(input.expiresOn, "expiresOn");
+  const totals = await saveRevision(admin, quoteId, {
+    ...input,
+    expiresAt,
+    depositPercentBps,
+    depositAmountCents: input.depositType === "FIXED_AMOUNT" ? (input.depositAmountCents ?? null) : null,
+  });
+  refreshSales("/admin/quotes", `/admin/quotes/${quoteId}`);
+  return { ok: true, message: `Saved. Total ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(totals.totalCents / 100)}.` };
+});
+
+export const sendQuoteAction = permittedAction(PRICING, async (admin, quoteIdArg: string) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  const r = await sendQuote(admin, quoteId);
+  refreshSales("/admin/quotes", `/admin/quotes/${quoteId}`);
+  return emailOutcome(r, "Quote sent to the customer.");
+});
+
+export const resendQuoteAction = permittedAction("sales", async (admin, quoteIdArg: string) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  const r = await resendQuote(admin, quoteId);
+  refreshSales(`/admin/quotes/${quoteId}`);
+  return emailOutcome(r, "Quote email sent again.");
+});
+
+export const createRevisionAction = permittedAction(PRICING, async (admin, quoteIdArg: string) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  const rev = await createRevision(admin, quoteId);
+  refreshSales(`/admin/quotes/${quoteId}`);
+  return { ok: true, message: `Revision ${rev.number} started. The customer keeps seeing the sent version until you send this one.` };
+});
+
+export const duplicateQuoteAction = permittedAction(PRICING, async (admin, quoteIdArg: string) => {
+  const copy = await duplicateQuote(admin, idSchema.parse(quoteIdArg));
+  refreshSales("/admin/quotes");
+  return { ok: true, id: copy.id, message: `Created ${copy.number}.` };
+});
+
+export const acceptQuoteManuallyAction = permittedAction("sales", async (admin, quoteIdArg: string, data: FormData) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  const note = z.string().trim().min(3, "Say how the customer accepted (e.g. by phone on 10/2).").max(500).parse(fd.str(data, "note"));
+  const order = await acceptQuoteManually(admin, quoteId, note);
+  refreshSales("/admin/quotes", `/admin/quotes/${quoteId}`, "/admin/orders");
+  return { ok: true, id: order.id, message: `Acceptance recorded. Order ${order.number} created.` };
+});
+
+export const extendQuoteAction = permittedAction("sales", async (admin, quoteIdArg: string, data: FormData) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  const expiresAt = dayInput(fd.str(data, "expiresOn"), "expiresOn");
+  if (!expiresAt) throw new AdminError("Choose the new last day.", { expiresOn: "Choose a date." });
+  await extendQuote(admin, quoteId, expiresAt);
+  refreshSales(`/admin/quotes/${quoteId}`);
+  return { ok: true, message: "Expiration extended." };
+});
+
+export const setQuoteStatusAction = permittedAction("sales", async (admin, quoteIdArg: string, data: FormData) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  const status = z.enum(MANUAL_QUOTE_STATUSES as [string, ...string[]], { error: "Choose a valid status." }).parse(fd.str(data, "status"));
+  await setQuoteStatus(admin, quoteId, status as (typeof MANUAL_QUOTE_STATUSES)[number], fd.opt(data, "note"));
+  refreshSales("/admin/quotes", `/admin/quotes/${quoteId}`);
+  return { ok: true, message: "Status updated." };
+});
+
+export const archiveQuoteAction = permittedAction("sales", async (admin, quoteIdArg: string, archived: boolean) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  await setQuoteArchived(admin, quoteId, Boolean(archived));
+  refreshSales("/admin/quotes", `/admin/quotes/${quoteId}`);
+  return { ok: true, message: archived ? "Quote archived." : "Quote restored." };
+});
+
+const manualQuoteSchema = z.object({
+  name: nameSchema,
+  email: emailSchema,
+  phone: phoneSchema,
+  zipCode: z.string().trim().max(10).default(""),
+  address: optText(300),
+  notes: optText(4000),
+});
+
+export const createManualQuoteAction = permittedAction(PRICING, async (admin, data: FormData) => {
+  const input = manualQuoteSchema.parse({
+    name: fd.str(data, "name"),
+    email: fd.str(data, "email"),
+    phone: fd.str(data, "phone"),
+    zipCode: fd.str(data, "zipCode"),
+    address: fd.str(data, "address"),
+    notes: fd.str(data, "notes"),
+  });
+  const productId = fd.opt(data, "productId");
+  const product = productId ? await prisma.product.findUnique({ where: { id: productId }, select: { id: true, name: true, basePriceCents: true } }) : null;
+  const quote = await createManualQuote(admin, {
+    ...input,
+    productId: product?.id ?? null,
+    productName: product?.name ?? null,
+    lines: product
+      ? [{ kind: "PRODUCT", description: product.name, notes: null, quantity: 1, unitPriceCents: product.basePriceCents ?? 0, taxable: true, productId: product.id, configuration: null }]
+      : undefined,
+  });
+  refreshSales("/admin/quotes");
+  return { ok: true, id: quote.id, message: `Quote ${quote.number} created.` };
+});
+
+/* ================================================================ attachments */
+
+export const addSalesAttachmentAction = permittedAction("sales", async (admin, target: "quote" | "order", idArg: string, data: FormData) => {
+  const id = idSchema.parse(idArg);
+  if (target !== "quote" && target !== "order") throw new AdminError("Unknown record type.");
+  const mediaId = idSchema.parse(fd.str(data, "mediaId"));
+  const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { id: true } });
+  if (!media) throw new AdminError("Choose a file from the media library.", { mediaId: "Choose a file." });
+  const exists = target === "quote" ? await prisma.quoteRequest.count({ where: { id } }) : await prisma.order.count({ where: { id } });
+  if (!exists) throw new AdminError("That record no longer exists.");
+  await prisma.salesAttachment.create({
+    data: { mediaId, label: fd.opt(data, "label")?.slice(0, 120) ?? null, customerVisible: fd.bool(data, "customerVisible"), createdById: admin.id, ...(target === "quote" ? { quoteId: id } : { orderId: id }) },
+  });
+  refreshSales(`/admin/${target === "quote" ? "quotes" : "orders"}/${id}`);
+  return { ok: true, message: "File attached." };
+});
+
+export const setSalesAttachmentVisibilityAction = permittedAction("sales", async (_admin, attachmentId: string, visible: boolean) => {
+  const a = await prisma.salesAttachment.update({ where: { id: idSchema.parse(attachmentId) }, data: { customerVisible: Boolean(visible) } });
+  refreshSales(a.quoteId ? `/admin/quotes/${a.quoteId}` : `/admin/orders/${a.orderId}`);
+  return { ok: true, message: visible ? "Now visible to the customer." : "Now internal only." };
+});
+
+export const removeSalesAttachmentAction = permittedAction("sales", async (_admin, attachmentId: string) => {
+  // Removes only the link; the media file stays in the library.
+  const a = await prisma.salesAttachment.delete({ where: { id: idSchema.parse(attachmentId) } });
+  refreshSales(a.quoteId ? `/admin/quotes/${a.quoteId}` : `/admin/orders/${a.orderId}`);
+  return { ok: true, message: "File removed from this record." };
+});
+
+/* ================================================================ orders */
+
+const orderSchema = z.object({
+  productionStatus: z.enum(PRODUCTION_STATUSES),
+  deliveryStatus: z.enum(DELIVERY_STATUSES),
+  deliveryDate: z.string().trim().max(20).optional(),
+  deliveryAddress: optText(300),
+  deliveryNotes: optText(1000),
+  estimatedCompletion: optText(120),
+  productionNotes: optText(5000),
+  customerNotes: optText(5000),
+});
+
+export const updateOrderAction = permittedAction("sales", async (admin, orderIdArg: string, data: FormData) => {
+  const orderId = idSchema.parse(orderIdArg);
+  const input = orderSchema.parse({
+    productionStatus: fd.str(data, "productionStatus"),
+    deliveryStatus: fd.str(data, "deliveryStatus"),
+    deliveryDate: fd.str(data, "deliveryDate"),
+    deliveryAddress: fd.str(data, "deliveryAddress"),
+    deliveryNotes: fd.str(data, "deliveryNotes"),
+    estimatedCompletion: fd.str(data, "estimatedCompletion"),
+    productionNotes: fd.str(data, "productionNotes"),
+    customerNotes: fd.str(data, "customerNotes"),
+  });
+  let deliveryDate: Date | null = null;
+  if (input.deliveryDate) {
+    deliveryDate = siteDateTime(input.deliveryDate.length === 10 ? `${input.deliveryDate}T09:00` : input.deliveryDate);
+    if (!deliveryDate) throw new AdminError("Enter a valid delivery date.", { deliveryDate: "Enter a valid date." });
+  }
+  await updateOrder(admin, orderId, { ...input, deliveryDate, notifyCustomer: fd.bool(data, "notifyCustomer") });
+  refreshSales("/admin/orders", `/admin/orders/${orderId}`);
+  return { ok: true, message: fd.bool(data, "notifyCustomer") ? "Order updated and the customer was emailed." : "Order updated." };
+});
+
+export const createOrderInvoiceAction = permittedAction("finance", async (admin, orderIdArg: string, kind: "DEPOSIT" | "BALANCE" | "FULL") => {
+  const orderId = idSchema.parse(orderIdArg);
+  if (!["DEPOSIT", "BALANCE", "FULL"].includes(kind)) throw new AdminError("Unknown invoice type.");
+  const invoice = await prisma.$transaction((tx) => createInvoiceForOrder(tx, orderId, kind, admin.id));
+  await logActivity("invoice.created", `${admin.name} created ${kind.toLowerCase()} invoice ${invoice.number}`, { actorId: admin.id, entityType: "invoice", entityId: invoice.id });
+  refreshSales(`/admin/orders/${orderId}`, "/admin/invoices");
+  return { ok: true, id: invoice.id, message: `Draft invoice ${invoice.number} created.` };
+});
+
+/* ================================================================ invoices */
+
+const invoiceSchema = z.object({
+  customerName: nameSchema,
+  customerEmail: emailSchema,
+  dueOn: z.string().trim().max(10).optional().nullable(),
+  customerNotes: optText(5000),
+  lines: z.array(lineSchema.omit({ sourceId: true, productId: true })).min(1, "Add at least one line.").max(MAX_LINES),
+});
+
+export const saveInvoiceDraftAction = permittedAction("finance", async (admin, invoiceIdArg: string, data: FormData) => {
+  const invoiceId = idSchema.parse(invoiceIdArg);
+  const input = invoiceSchema.parse(parsePayload(data));
+  await saveInvoiceDraft(admin, invoiceId, { ...input, lines: input.lines as InvoiceLineInput[], dueDate: dayInput(input.dueOn, "dueOn") });
+  refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`);
+  return { ok: true, message: "Draft invoice saved." };
+});
+
+export const createCustomInvoiceAction = permittedAction("finance", async (admin, data: FormData) => {
+  const payload = parsePayload(data) as Record<string, unknown>;
+  const customerId = idSchema.parse(payload.customerId);
+  const orderId = payload.orderId ? idSchema.parse(payload.orderId) : null;
+  const input = invoiceSchema.omit({ customerName: true, customerEmail: true }).parse(payload);
+  const invoice = await createCustomInvoice(admin, { customerId, orderId, lines: input.lines as InvoiceLineInput[], dueDate: dayInput(input.dueOn, "dueOn"), customerNotes: input.customerNotes });
+  refreshSales("/admin/invoices");
+  return { ok: true, id: invoice.id, message: `Draft invoice ${invoice.number} created.` };
+});
+
+export const sendInvoiceAction = permittedAction("finance", async (admin, invoiceIdArg: string) => {
+  const invoiceId = idSchema.parse(invoiceIdArg);
+  const r = await sendInvoice(admin, invoiceId);
+  refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`);
+  return emailOutcome(r.email, r.via === "stripe" ? "Invoice created in Stripe and emailed by Stripe." : "Invoice sent.");
+});
+
+export const resendInvoiceAction = permittedAction("finance", async (admin, invoiceIdArg: string, reminder: boolean) => {
+  const invoiceId = idSchema.parse(invoiceIdArg);
+  const r = await resendInvoice(admin, invoiceId, Boolean(reminder));
+  refreshSales(`/admin/invoices/${invoiceId}`);
+  return emailOutcome(r, reminder ? "Reminder sent." : "Invoice sent again.");
+});
+
+export const voidInvoiceAction = permittedAction("finance", async (admin, invoiceIdArg: string, data: FormData) => {
+  const invoiceId = idSchema.parse(invoiceIdArg);
+  const reason = z.string().trim().min(3, "Give a short reason.").max(300).parse(fd.str(data, "reason"));
+  await voidInvoice(admin, invoiceId, reason);
+  refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`);
+  return { ok: true, message: "Invoice voided." };
+});
+
+/* ================================================================ payments */
+
+export const recordPaymentAction = permittedAction("finance", async (admin, invoiceIdArg: string, data: FormData) => {
+  const invoiceId = idSchema.parse(invoiceIdArg);
+  const amountCents = parseDollarsToCents(fd.str(data, "amount"));
+  if (amountCents == null || Number.isNaN(amountCents)) throw new AdminError("Enter the amount received.", { amount: "Enter an amount." });
+  const receivedAt = siteDateTime(`${fd.str(data, "receivedOn")}T12:00`);
+  if (!receivedAt) throw new AdminError("Enter the date received.", { receivedOn: "Enter a date." });
+  await recordManualPayment(admin, {
+    invoiceId,
+    amountCents,
+    method: fd.str(data, "method"),
+    receivedAt,
+    reference: fd.opt(data, "reference")?.slice(0, 120) ?? null,
+    notes: fd.opt(data, "notes")?.slice(0, 1000) ?? null,
+    sendReceipt: fd.bool(data, "sendReceipt"),
+  });
+  refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`, "/admin/payments", "/admin/orders");
+  return { ok: true, message: "Payment recorded." };
+});
+
+export const voidPaymentAction = permittedAction("finance", async (admin, paymentIdArg: string, data: FormData) => {
+  const reason = z.string().trim().min(3, "Give a short reason.").max(300).parse(fd.str(data, "reason"));
+  await voidManualPayment(admin, idSchema.parse(paymentIdArg), reason);
+  refreshSales("/admin/invoices", "/admin/payments", "/admin/orders");
+  return { ok: true, message: "Payment voided (kept in the history)." };
+});
+
+export const recordRefundAction = permittedAction("finance", async (admin, paymentIdArg: string, data: FormData) => {
+  const amountCents = parseDollarsToCents(fd.str(data, "amount"));
+  if (amountCents == null || Number.isNaN(amountCents)) throw new AdminError("Enter the refund amount.", { amount: "Enter an amount." });
+  const reason = z.string().trim().min(3, "Give a short reason.").max(300).parse(fd.str(data, "reason"));
+  await recordRefund(admin, idSchema.parse(paymentIdArg), amountCents, reason);
+  refreshSales("/admin/invoices", "/admin/payments", "/admin/orders");
+  return { ok: true, message: "Refund recorded." };
+});
+
+/* ================================================================ customers */
+
+const customerSchema = z.object({
+  name: nameSchema,
+  email: emailSchema,
+  phone: phoneSchema,
+  zipCode: optText(10),
+  billingAddress: optText(300),
+  deliveryAddress: optText(300),
+});
+
+export const updateCustomerAction = permittedAction("sales", async (admin, customerIdArg: string, data: FormData) => {
+  const customerId = idSchema.parse(customerIdArg);
+  const input = customerSchema.parse({
+    name: fd.str(data, "name"),
+    email: fd.str(data, "email"),
+    phone: fd.str(data, "phone"),
+    zipCode: fd.str(data, "zipCode"),
+    billingAddress: fd.str(data, "billingAddress"),
+    deliveryAddress: fd.str(data, "deliveryAddress"),
+  });
+  await prisma.customer.update({ where: { id: customerId }, data: input });
+  await logActivity("customer.updated", `${admin.name} updated customer ${input.name}`, { actorId: admin.id, entityType: "customer", entityId: customerId });
+  refreshSales("/admin/customers", `/admin/customers/${customerId}`);
+  return { ok: true, message: "Customer saved." };
+});
+
+const COMMUNICATION_TYPES = ["communication.call", "communication.email", "communication.meeting", "communication.note"] as const;
+
+/** Log a phone call, email, visit or note on the customer timeline. */
+export const logCommunicationAction = permittedAction("sales", async (admin, customerIdArg: string, data: FormData) => {
+  const customerId = idSchema.parse(customerIdArg);
+  const type = z.enum(COMMUNICATION_TYPES, { error: "Choose a type." }).parse(fd.str(data, "type"));
+  const message = z.string().trim().min(2, "Write a short summary.").max(1000).parse(fd.str(data, "message"));
+  const customer = await prisma.customer.findUnique({ where: { id: customerId }, select: { id: true, name: true } });
+  if (!customer) throw new AdminError("That customer no longer exists.");
+  const quoteId = fd.opt(data, "quoteId");
+  const orderId = fd.opt(data, "orderId");
+  await recordCustomerActivity(prisma, {
+    customerId,
+    type,
+    message,
+    actorId: admin.id,
+    quoteId: quoteId && (await prisma.quoteRequest.count({ where: { id: quoteId, customerId } })) ? quoteId : null,
+    orderId: orderId && (await prisma.order.count({ where: { id: orderId, customerId } })) ? orderId : null,
+  });
+  await logActivity("customer.communication", `${admin.name} logged ${type.split(".")[1]} with ${customer.name}`, { actorId: admin.id, entityType: "customer", entityId: customerId });
+  refreshSales(`/admin/customers/${customerId}`);
+  return { ok: true, message: "Added to the timeline." };
+});
+
+/* ================================================================ email */
+
+export const resendEmailAction = permittedAction("sales", async (admin, logIdArg: string) => {
+  const logId = idSchema.parse(logIdArg);
+  const r = await resendLoggedEmail(logId);
+  await logActivity("email.resent", `${admin.name} resent an email (${r.status.toLowerCase()})`, { actorId: admin.id, entityType: "email", entityId: logId });
+  refreshSales("/admin/quotes", "/admin/invoices", "/admin/orders");
+  return r.status === "SENT" ? { ok: true, message: "Email sent." } : { ok: false, message: `The email failed again: ${r.error ?? "unknown error"}` };
+});
+
+const templateSchema = z.object({
+  subject: z.string().trim().min(3).max(200),
+  heading: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(1).max(10000),
+  buttonLabel: optText(60),
+  enabled: z.boolean(),
+});
+
+export const saveEmailTemplateAction = permittedAction("settings", async (admin, keyArg: string, data: FormData) => {
+  if (!EMAIL_TEMPLATE_KEYS.includes(keyArg)) throw new AdminError("Unknown email template.");
+  const input = templateSchema.parse({
+    subject: fd.str(data, "subject"),
+    heading: fd.str(data, "heading"),
+    body: fd.str(data, "body"),
+    buttonLabel: fd.str(data, "buttonLabel"),
+    enabled: fd.bool(data, "enabled"),
+  });
+  const existing = await prisma.emailTemplate.findUnique({ where: { key: keyArg } });
+  if (!existing) throw new AdminError("That template hasn't been created yet — redeploy to add it.");
+  await prisma.emailTemplate.update({ where: { key: keyArg }, data: { ...input, updatedById: admin.id } });
+  await logActivity("email_template.updated", `${admin.name} edited the "${existing.name}" email`, { actorId: admin.id, entityType: "email_template", entityId: keyArg });
+  revalidatePath("/admin/settings/emails");
+  return { ok: true, message: "Email template saved." };
+});

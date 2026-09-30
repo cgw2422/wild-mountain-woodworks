@@ -12,13 +12,15 @@ import { generateReference } from "@/lib/references";
 import { getSettings } from "@/lib/settings";
 import { getStorage } from "@/lib/storage";
 import {
+  describeSnapshot,
   notifyContactMessage,
   notifyCustomRequest,
-  notifyNewQuote,
   sendContactConfirmation,
   sendCustomRequestConfirmation,
-  sendQuoteConfirmation,
 } from "@/lib/email/notifications";
+import { adminRecipient, sendTemplateEmail } from "@/lib/email/send";
+import { adminLinks } from "@/lib/sales/links";
+import { createQuoteRecord } from "@/lib/sales/quotes";
 import type {
   ConfigurationQuoteInput,
   ContactInput,
@@ -82,11 +84,31 @@ export async function withUniqueReference<T>(prefix: "Q" | "C", create: (referen
   throw new Error("Could not generate a unique reference");
 }
 
+/** Emails for a new quote request: confirmation to the customer, notification to Wild Mountain. */
+async function notifyQuoteRequested(quote: { id: string; number: string | null; customerId: string | null; name: string; email: string; phone: string | null; zipCode: string; notes: string | null }, summary: string) {
+  const settings = await getSettings();
+  const vars = {
+    customerName: quote.name,
+    quoteNumber: quote.number,
+    summary,
+    confirmationText: settings.quoteConfirmationText || "Thank you for your request. We review every request personally and will be in touch soon.",
+    customerEmail: quote.email,
+    customerPhone: quote.phone,
+    zipCode: quote.zipCode,
+    notes: quote.notes ? `Notes: ${quote.notes}` : null,
+  };
+  const links = { customerId: quote.customerId, quoteId: quote.id };
+  await sendTemplateEmail({ template: "quote_request_received", to: quote.email, vars, links });
+  await sendTemplateEmail({ template: "admin_new_quote_request", to: await adminRecipient(), vars, actionUrl: adminLinks.quote(quote.id), links, replyTo: quote.email });
+}
+
 /**
- * "Request this configuration": re-price the selection from the database
- * (never trusting the browser), snapshot it, and store the quote request.
+ * "Request a quote" for a configuration: re-price the selection from the
+ * database (never trusting the browser), snapshot it (including any sale
+ * active right now), and store it as a quote with a first draft revision.
  */
-export async function createConfigurationQuote(input: ConfigurationQuoteInput, files: File[] = []) {
+export async function createConfigurationQuote(input: Omit<ConfigurationQuoteInput, "quantity" | "address"> & { quantity?: number; address?: string | null }, files: File[] = []) {
+  const quantity = input.quantity ?? 1;
   const settings = await getSettings();
   if (!settings.quotesEnabled) throw new SubmissionError("Quote requests are temporarily unavailable. Please contact us directly.");
 
@@ -104,30 +126,32 @@ export async function createConfigurationQuote(input: ConfigurationQuoteInput, f
   const customDims = snapshot.options.find((o) => o.isCustom && o.customDetails)?.customDetails ?? null;
   const attachments = await storeAttachments(files);
   try {
-    const quote = await withUniqueReference("Q", (reference) =>
-      prisma.quoteRequest.create({
-        data: {
-          reference,
-          source: "CONFIGURATOR",
-          name: input.name,
-          email: input.email,
-          phone: input.phone,
-          zipCode: input.zipCode,
-          productId: product.id,
-          productName: product.name,
-          configuration: snapshot as unknown as Prisma.InputJsonValue,
-          estimatedTotalCents: pricing.totalCents,
-          requestedDimensions: customDims,
-          notes: input.notes,
-          timeline: input.timeline,
-          attachments: { create: attachments },
-          statusEvents: { create: { toStatus: "NEW" } },
-        },
+    const quote = await prisma.$transaction((tx) =>
+      createQuoteRecord(tx, {
+        source: "CONFIGURATOR",
+        name: input.name,
+        email: input.email,
+        phone: input.phone,
+        zipCode: input.zipCode,
+        address: input.address ?? null,
+        quantity,
+        productId: product.id,
+        productName: product.name,
+        configuration: snapshot,
+        estimatedTotalCents: pricing.totalCents == null ? null : pricing.totalCents * quantity,
+        requestedDimensions: customDims,
+        notes: input.notes,
+        timeline: input.timeline,
+        attachments,
       }),
     );
-    await logActivity("quote.received", `Quote ${quote.reference} from ${quote.name} — ${product.name}`, { entityType: "quote", entityId: quote.id });
-    void notifyNewQuote({ ...quote, snapshot }).catch((error) => logger.error("notifyNewQuote failed", { error }));
-    void sendQuoteConfirmation({ ...quote, snapshot }).catch((error) => logger.error("sendQuoteConfirmation failed", { error }));
+    await logActivity("quote.received", `Quote ${quote.number} from ${quote.name} — ${product.name}${quantity > 1 ? ` × ${quantity}` : ""}`, { entityType: "quote", entityId: quote.id });
+    const summary = [
+      ...describeSnapshot(snapshot, priceShown),
+      ...(quantity > 1 ? [`Quantity: ${quantity}`] : []),
+    ].join("\n");
+    // Awaited so the emails are logged before we reply (sending never throws).
+    await notifyQuoteRequested(quote, summary).catch((error) => logger.error("Quote request emails failed", { error }));
     return quote;
   } catch (err) {
     await cleanupAttachments(attachments);
@@ -141,27 +165,24 @@ export async function createGeneralQuote(input: GeneralQuoteInput, files: File[]
   if (!settings.quotesEnabled) throw new SubmissionError("Quote requests are temporarily unavailable. Please contact us directly.");
   const attachments = await storeAttachments(files);
   try {
-    const quote = await withUniqueReference("Q", (reference) =>
-      prisma.quoteRequest.create({
-        data: {
-          reference,
-          source: "GENERAL",
-          name: input.name,
-          email: input.email,
-          phone: input.phone,
-          zipCode: input.zipCode,
-          productName: input.interest,
-          requestedDimensions: input.requestedDimensions,
-          notes: input.notes,
-          timeline: input.timeline,
-          attachments: { create: attachments },
-          statusEvents: { create: { toStatus: "NEW" } },
-        },
+    const quote = await prisma.$transaction((tx) =>
+      createQuoteRecord(tx, {
+        source: "GENERAL",
+        name: input.name,
+        email: input.email,
+        phone: input.phone,
+        zipCode: input.zipCode,
+        productName: input.interest,
+        requestedDimensions: input.requestedDimensions,
+        notes: input.notes,
+        timeline: input.timeline,
+        attachments,
       }),
     );
-    await logActivity("quote.received", `Quote ${quote.reference} from ${quote.name} — ${input.interest}`, { entityType: "quote", entityId: quote.id });
-    void notifyNewQuote({ ...quote, snapshot: null }).catch((error) => logger.error("notifyNewQuote failed", { error }));
-    void sendQuoteConfirmation({ ...quote, snapshot: null }).catch((error) => logger.error("sendQuoteConfirmation failed", { error }));
+    await logActivity("quote.received", `Quote ${quote.number} from ${quote.name} — ${input.interest}`, { entityType: "quote", entityId: quote.id });
+    const summary = [`Interested in: ${input.interest}`, ...(input.requestedDimensions ? [`Dimensions: ${input.requestedDimensions}`] : [])].join("\n");
+    // Awaited so the emails are logged before we reply (sending never throws).
+    await notifyQuoteRequested(quote, summary).catch((error) => logger.error("Quote request emails failed", { error }));
     return quote;
   } catch (err) {
     await cleanupAttachments(attachments);

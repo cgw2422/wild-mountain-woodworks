@@ -186,6 +186,7 @@ model Media {
   pagesOg          Page[]           @relation("PageOgImage")
   settingsOg       SiteSetting[]    @relation("SettingsOgImage")
   videoPosters     ProductVideo[]   @relation("VideoPoster")
+  salesAttachments SalesAttachment[]
 
   @@index([createdAt])
   @@index([filename])
@@ -290,6 +291,7 @@ model Product {
   orderItems   OrderItem[]
   estimates    PriceEstimate[]
   menuItems    MenuItem[]
+  quoteLines   QuoteLineItem[]
 
   @@index([status, displayOrder])
   @@index([categoryId])
@@ -533,24 +535,81 @@ model PortfolioImage {
 // Inquiries: quotes, custom requests, contact messages
 // ---------------------------------------------------------------------------
 
+/// Overall quote workflow. Admins may move between states when they need
+/// to intervene; customer-facing transitions are enforced in src/lib/sales.
 enum QuoteStatus {
   NEW
-  CONTACTED
-  QUOTED
+  REVIEWING
+  DRAFT
+  SENT
+  VIEWED
   ACCEPTED
   DECLINED
+  EXPIRED
+  CONVERTED_TO_INVOICE
+  CANCELED
   COMPLETED
+}
+
+/// Status of one revision of a quote. Only the current revision can be
+/// accepted, and only while SENT (and not expired).
+enum RevisionStatus {
+  DRAFT
+  SENT
+  SUPERSEDED
+  ACCEPTED
+  DECLINED
+}
+
+enum DepositType {
+  NONE
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+/// Quote/invoice line kinds. Discounts are negative amounts; delivery,
+/// installation and fees are totalled separately from merchandise.
+enum LineItemKind {
+  PRODUCT
+  ADDON
+  CUSTOM
+  DISCOUNT
+  DELIVERY
+  INSTALLATION
+  FEE
 }
 
 enum QuoteSource {
   CONFIGURATOR
   GENERAL
+  /// Created by an admin (phone, email, in person).
+  MANUAL
+  /// Created from a pricing-calculator estimate.
+  ESTIMATE
 }
 
+/// A customer's quote: the original request (snapshot of what they
+/// configured) plus Wild Mountain's priced revisions. Also used for general
+/// and manually created quotes.
 model QuoteRequest {
   id                  String      @id @default(cuid())
+  /// Legacy random reference (WM-Q-…); kept for old links and emails.
   reference           String      @unique
+  /// Customer-facing number, e.g. WMQ-1001.
+  number              String?     @unique
   status              QuoteStatus @default(NEW)
+  customerId          String?
+  customer            Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  /// Unguessable token for /quote/[token] (never a database id).
+  customerToken       String?     @unique
+  currentRevisionId   String?     @unique
+  currentRevision     QuoteRevision? @relation("QuoteCurrentRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  acceptedRevisionId  String?     @unique
+  acceptedRevision    QuoteRevision? @relation("QuoteAcceptedRevision", fields: [acceptedRevisionId], references: [id], onDelete: SetNull)
+  quantity            Int         @default(1)
+  address             String?
+  archivedAt          DateTime?
+  createdById         String?
   source              QuoteSource @default(CONFIGURATOR)
   name                String
   email               String
@@ -574,10 +633,97 @@ model QuoteRequest {
   internalNotes  InternalNote[]
   statusEvents   StatusEvent[]
   priceEstimates PriceEstimate[]
+  revisions      QuoteRevision[] @relation("QuoteRevisions")
+  invoices       Invoice[]
+  orders         Order[]
+  activities     CustomerActivity[]
+  emails         EmailLog[]
+  files          SalesAttachment[]
 
   @@index([status, createdAt])
   @@index([createdAt])
   @@index([email])
+  @@index([customerId])
+}
+
+/// One priced version of a quote. Sent revisions are never edited: changes
+/// create a new revision (Revision 2, 3 …) and the previous one becomes
+/// SUPERSEDED when the new one is sent. Everything the customer sees is
+/// stored here — never read from live product data.
+model QuoteRevision {
+  id                  String         @id @default(cuid())
+  quoteId             String
+  quote               QuoteRequest   @relation("QuoteRevisions", fields: [quoteId], references: [id], onDelete: Cascade)
+  number              Int
+  status              RevisionStatus @default(DRAFT)
+  customerName        String
+  customerEmail       String
+  customerPhone       String?
+  customerAddress     String?
+  /// Customer-facing notes (internal notes live in InternalNote).
+  customerNotes       String?
+  /// Terms (Markdown) as shown on this revision.
+  terms               String?
+  expiresAt           DateTime?
+  leadTime            String?
+  estimatedCompletion String?
+  deliveryDetails     String?
+  depositType         DepositType    @default(NONE)
+  depositPercentBps   Int?
+  depositAmountCents  Int?
+  taxCents            Int            @default(0)
+  // Totals, recomputed from the lines on every save (integer cents).
+  subtotalCents       Int            @default(0)
+  discountCents       Int            @default(0)
+  deliveryCents       Int            @default(0)
+  otherChargesCents   Int            @default(0)
+  totalCents          Int            @default(0)
+  depositCents        Int            @default(0)
+  balanceCents        Int            @default(0)
+  sentAt              DateTime?
+  viewedAt            DateTime?
+  acceptedAt          DateTime?
+  acceptedName        String?
+  acceptedIp          String?
+  acceptedUserAgent   String?
+  /// Exact lines, totals, deposit and terms at acceptance (frozen).
+  acceptedSnapshot    Json?
+  acceptedManuallyById String?
+  declinedAt          DateTime?
+  declineReason       String?
+  createdById         String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  lineItems        QuoteLineItem[]
+  currentOf        QuoteRequest?  @relation("QuoteCurrentRevision")
+  acceptedOf       QuoteRequest?  @relation("QuoteAcceptedRevision")
+  invoices         Invoice[]
+  orders           Order[]
+
+  @@unique([quoteId, number])
+}
+
+model QuoteLineItem {
+  id             String        @id @default(cuid())
+  revisionId     String
+  revision       QuoteRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  position       Int
+  kind           LineItemKind  @default(CUSTOM)
+  description    String
+  notes          String?
+  quantity       Int           @default(1)
+  /// Negative for discounts.
+  unitPriceCents Int
+  lineTotalCents Int
+  /// Prepared for future tax rules; tax is off until configured.
+  taxable        Boolean       @default(true)
+  productId      String?
+  product        Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  /// ConfigurationSnapshot of the configured piece (optional).
+  configuration  Json?
+
+  @@index([revisionId, position])
 }
 
 enum CustomRequestStatus {
@@ -682,12 +828,18 @@ model InternalNote {
   contactMessage   ContactMessage? @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
   orderId          String?
   order            Order?          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerId       String?
+  customer         Customer?       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  invoiceId        String?
+  invoice          Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   createdAt        DateTime        @default(now())
 
   @@index([quoteRequestId])
   @@index([customRequestId])
   @@index([contactMessageId])
   @@index([orderId])
+  @@index([customerId])
+  @@index([invoiceId])
 }
 
 // Status history for quotes, custom requests, messages and (future) orders.
@@ -705,12 +857,15 @@ model StatusEvent {
   contactMessage   ContactMessage? @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
   orderId          String?
   order            Order?          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  invoiceId        String?
+  invoice          Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   createdAt        DateTime        @default(now())
 
   @@index([quoteRequestId])
   @@index([customRequestId])
   @@index([contactMessageId])
   @@index([orderId])
+  @@index([invoiceId])
 }
 
 // ---------------------------------------------------------------------------
@@ -858,7 +1013,26 @@ model SiteSetting {
   showPrices                   Boolean  @default(true)
   quotesEnabled                Boolean  @default(true)
   customOrdersEnabled          Boolean  @default(true)
-  ecommerceEnabled             Boolean  @default(false)
+  /// Stripe invoicing (hosted invoice pages, payment links, webhooks).
+  /// Also needs STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET. Formerly
+  /// "ecommerceEnabled" (cart/checkout, never launched).
+  stripeInvoicingEnabled       Boolean  @default(false)
+  /// Taxes stay off until the business configures them.
+  taxEnabled                   Boolean  @default(false)
+  /// WILD_MOUNTAIN: branded email with the payment link; STRIPE: Stripe emails the invoice.
+  invoiceEmailMode             String   @default("WILD_MOUNTAIN")
+  quoteValidDays               Int      @default(30)
+  invoiceDueDays               Int      @default(14)
+  defaultDepositType           DepositType @default(PERCENTAGE)
+  defaultDepositPercentBps     Int      @default(5000)
+  defaultDepositAmountCents    Int?
+  /// Default customer-facing terms (Markdown) copied onto new quote revisions.
+  defaultQuoteTerms            String?
+  /// How to pay offline (check payable to…, bank transfer details). Shown on
+  /// invoices and invoice emails when Stripe invoicing is off.
+  paymentInstructions          String?
+  /// Dashboard alert: NEW quotes older than this many days.
+  quoteAlertDays               Int      @default(3)
   // Internal pricing calculator defaults (never shown publicly)
   pricingLaborRateCents        Int      @default(4500)
   pricingLumberWastePct        Float    @default(15)
@@ -882,62 +1056,101 @@ model SiteSetting {
 // only Stripe object IDs.
 // ---------------------------------------------------------------------------
 
-enum OrderStatus {
-  PENDING_PAYMENT
-  PAID
-  CANCELLED
-  REFUNDED
-  COMPLETED
-}
-
-enum PaymentStatus {
-  UNPAID
-  PAID
-  PARTIALLY_REFUNDED
-  REFUNDED
-  FAILED
-}
-
+/// Shop progress, separate from payment and delivery.
 enum ProductionStatus {
-  ORDER_RECEIVED
+  QUOTE_ACCEPTED
+  AWAITING_DEPOSIT
+  DEPOSIT_PAID
   DESIGN_CONFIRMATION
-  MATERIALS_PREPARED
+  MATERIALS_ORDERED
+  MATERIALS_READY
   IN_PRODUCTION
+  SANDING
   FINISHING
+  CURING
   READY_FOR_DELIVERY
+  DELIVERY_SCHEDULED
   COMPLETED
+  CANCELED
 }
 
+/// Money state of an order, derived from its invoices and payments.
+enum OrderPaymentStatus {
+  UNPAID
+  DEPOSIT_DUE
+  PARTIALLY_PAID
+  PAID
+  REFUNDED
+  CANCELED
+}
+
+enum DeliveryStatus {
+  NOT_SCHEDULED
+  SCHEDULED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  PICKUP_READY
+  PICKED_UP
+}
+
+/// A piece (or set) being built, created from an accepted quote.
 model Order {
-  id                      String           @id @default(cuid())
-  number                  String           @unique
-  status                  OrderStatus      @default(PENDING_PAYMENT)
-  paymentStatus           PaymentStatus    @default(UNPAID)
-  productionStatus        ProductionStatus @default(ORDER_RECEIVED)
+  id                      String             @id @default(cuid())
+  /// Customer-facing number, e.g. WMO-1001.
+  number                  String             @unique
+  productionStatus        ProductionStatus   @default(QUOTE_ACCEPTED)
+  paymentStatus           OrderPaymentStatus @default(UNPAID)
+  deliveryStatus          DeliveryStatus     @default(NOT_SCHEDULED)
+  customerId              String?
+  customer                Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  quoteId                 String?
+  quote                   QuoteRequest?      @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  acceptedRevisionId      String?
+  acceptedRevision        QuoteRevision?     @relation(fields: [acceptedRevisionId], references: [id], onDelete: SetNull)
+  /// Unguessable token for /order/[token].
+  customerToken           String?            @unique
   customerName            String
   customerEmail           String
   customerPhone           String?
   shippingAddress         Json?
+  deliveryAddress         String?
+  deliveryDate            DateTime?
+  deliveryNotes           String?
+  estimatedCompletion     String?
   subtotalCents           Int
-  discountCents           Int              @default(0)
-  shippingCents           Int              @default(0)
-  taxCents                Int              @default(0)
+  discountCents           Int                @default(0)
+  shippingCents           Int                @default(0)
+  taxCents                Int                @default(0)
   totalCents              Int
-  currency                String           @default("usd")
+  depositCents            Int                @default(0)
+  currency                String             @default("usd")
   promoCode               String?
-  stripeCheckoutSessionId String?          @unique
-  stripePaymentIntentId   String?          @unique
+  /// Legacy (pre quote → invoice design); unused.
+  stripeCheckoutSessionId String?            @unique
+  stripePaymentIntentId   String?            @unique
+  /// Customer-facing notes (internal notes live in InternalNote).
   customerNotes           String?
+  /// Shop notes printed on the work order.
+  productionNotes         String?
   paidAt                  DateTime?
-  createdAt               DateTime         @default(now())
-  updatedAt               DateTime         @updatedAt
+  completedAt             DateTime?
+  canceledAt              DateTime?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
 
   items         OrderItem[]
   internalNotes InternalNote[]
   statusEvents  StatusEvent[]
+  invoices      Invoice[]
+  payments      Payment[]
+  activities    CustomerActivity[]
+  emails        EmailLog[]
+  files         SalesAttachment[]
 
-  @@index([status, createdAt])
+  @@index([productionStatus, createdAt])
+  @@index([paymentStatus])
   @@index([customerEmail])
+  @@index([customerId])
 }
 
 model OrderItem {
@@ -948,8 +1161,12 @@ model OrderItem {
   product        Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
   productName    String
   sku            String?
-  // Immutable ConfigurationSnapshot, priced server-side at order creation.
+  // Snapshot of the accepted quote line (ConfigurationSnapshot for configured pieces).
   configuration  Json
+  description    String?
+  notes          String?
+  kind           LineItemKind @default(PRODUCT)
+  position       Int          @default(0)
   unitPriceCents Int
   quantity       Int      @default(1)
   lineTotalCents Int
@@ -1109,4 +1326,283 @@ model MenuItem {
   updatedAt    DateTime     @updatedAt
 
   @@index([menuId, parentId, displayOrder])
+}
+
+/* ------------------------------------------------------------ sales */
+
+/// Sequential customer-facing numbers (WMQ-1001, WMI-1001, WMO-1001).
+model Counter {
+  key   String @id
+  value Int
+}
+
+/// Internal customer record (customers never need an online account).
+/// Linked by exact email match only; admins decide anything fuzzier.
+model Customer {
+  id               String    @id @default(cuid())
+  name             String
+  email            String
+  phone            String?
+  zipCode          String?
+  billingAddress   String?
+  deliveryAddress  String?
+  stripeCustomerId String?   @unique
+  lastActivityAt   DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  quotes     QuoteRequest[]
+  invoices   Invoice[]
+  payments   Payment[]
+  orders     Order[]
+  activities CustomerActivity[]
+  notes      InternalNote[]
+  emails     EmailLog[]
+
+  @@index([email])
+  @@index([name])
+  @@index([lastActivityAt])
+}
+
+/// Customer timeline: quote requested/sent/viewed/accepted, invoices,
+/// payments, production milestones, logged phone calls.
+model CustomerActivity {
+  id         String        @id @default(cuid())
+  customerId String
+  customer   Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type       String
+  message    String
+  quoteId    String?
+  quote      QuoteRequest? @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  invoiceId  String?
+  invoice    Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  orderId    String?
+  order      Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  actorId    String?
+  createdAt  DateTime      @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  OPEN
+  PARTIALLY_PAID
+  PAID
+  PAST_DUE
+  VOID
+  CANCELED
+}
+
+enum InvoiceKind {
+  DEPOSIT
+  BALANCE
+  FULL
+  CUSTOM
+}
+
+/// Wild Mountain invoice. Works entirely offline (manual payments); when
+/// Stripe invoicing is enabled it is mirrored to a Stripe Invoice for
+/// hosted payment, and Stripe webhooks update it.
+model Invoice {
+  id                     String         @id @default(cuid())
+  /// Customer-facing number, e.g. WMI-1001.
+  number                 String         @unique
+  kind                   InvoiceKind    @default(FULL)
+  status                 InvoiceStatus  @default(DRAFT)
+  customerId             String?
+  customer               Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  quoteId                String?
+  quote                  QuoteRequest?  @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  revisionId             String?
+  revision               QuoteRevision? @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+  orderId                String?
+  order                  Order?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  customerName           String
+  customerEmail          String
+  subtotalCents          Int            @default(0)
+  discountCents          Int            @default(0)
+  deliveryCents          Int            @default(0)
+  otherChargesCents      Int            @default(0)
+  taxCents               Int            @default(0)
+  totalCents             Int            @default(0)
+  /// Sum of successful payments minus refunds (recomputed, never typed in).
+  amountPaidCents        Int            @default(0)
+  dueDate                DateTime?
+  customerNotes          String?
+  /// Unguessable token for /invoice/[token] (offline invoices, print view).
+  publicToken            String?        @unique
+  stripeInvoiceId        String?        @unique
+  stripeHostedInvoiceUrl String?
+  stripeInvoicePdfUrl    String?
+  stripeStatus           String?
+  sentAt                 DateTime?
+  paidAt                 DateTime?
+  voidedAt               DateTime?
+  voidReason             String?
+  createdById            String?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  lineItems     InvoiceLineItem[]
+  payments      Payment[]
+  internalNotes InternalNote[]
+  statusEvents  StatusEvent[]
+  activities    CustomerActivity[]
+  emails        EmailLog[]
+
+  @@index([status, dueDate])
+  @@index([customerId])
+  @@index([quoteId])
+  @@index([orderId])
+}
+
+model InvoiceLineItem {
+  id             String       @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  position       Int
+  kind           LineItemKind @default(CUSTOM)
+  description    String
+  notes          String?
+  quantity       Int          @default(1)
+  unitPriceCents Int
+  lineTotalCents Int
+  taxable        Boolean      @default(true)
+
+  @@index([invoiceId, position])
+}
+
+enum PaymentMethod {
+  STRIPE
+  CASH
+  CHECK
+  BANK_TRANSFER
+  OTHER
+}
+
+enum PaymentSource {
+  STRIPE
+  MANUAL
+}
+
+enum PaymentRecordStatus {
+  SUCCEEDED
+  PENDING
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  VOIDED
+}
+
+/// Money received. Stripe payments come only from verified webhooks; manual
+/// (cash/check/bank) payments are recorded by an admin. Payments are never
+/// deleted — a mistaken manual entry is VOIDED with a reason. No card data
+/// is ever stored.
+model Payment {
+  id                    String              @id @default(cuid())
+  invoiceId             String?
+  invoice               Invoice?            @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  orderId               String?
+  order                 Order?              @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  customerId            String?
+  customer              Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  amountCents           Int
+  refundedCents         Int                 @default(0)
+  method                PaymentMethod
+  source                PaymentSource
+  status                PaymentRecordStatus @default(SUCCEEDED)
+  stripePaymentIntentId String?             @unique
+  stripeChargeId        String?
+  stripeInvoiceId       String?
+  reference             String?
+  notes                 String?
+  receivedAt            DateTime
+  recordedById          String?
+  voidedAt              DateTime?
+  voidedById            String?
+  voidReason            String?
+  createdAt             DateTime            @default(now())
+
+  @@index([invoiceId])
+  @@index([orderId])
+  @@index([customerId])
+  @@index([receivedAt])
+}
+
+/// Stripe webhook events already processed (idempotency).
+model StripeEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now())
+}
+
+/// Editable email content (Admin → Settings → Email templates). Body is
+/// Markdown with {{placeholders}}; the branded layout is added when sent.
+model EmailTemplate {
+  key         String   @id
+  name        String
+  subject     String
+  heading     String
+  body        String
+  buttonLabel String?
+  enabled     Boolean  @default(true)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Every transactional email: what was sent to whom, and whether it
+/// failed (so it can be retried). Records are saved before sending, so a
+/// provider outage never loses the quote/invoice it relates to.
+model EmailLog {
+  id          String        @id @default(cuid())
+  template    String
+  to          String
+  subject     String
+  html        String
+  text        String
+  status      EmailStatus   @default(PENDING)
+  error       String?
+  attempts    Int           @default(0)
+  customerId  String?
+  customer    Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  quoteId     String?
+  quote       QuoteRequest? @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  invoiceId   String?
+  invoice     Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  orderId     String?
+  order       Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  sentAt      DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@index([status, createdAt])
+  @@index([quoteId])
+  @@index([invoiceId])
+  @@index([orderId])
+}
+
+/// Drawings, photos and documents attached to a quote or order from the
+/// media library. Internal unless customerVisible is set.
+model SalesAttachment {
+  id              String        @id @default(cuid())
+  mediaId         String
+  media           Media         @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  quoteId         String?
+  quote           QuoteRequest? @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  orderId         String?
+  order           Order?        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  label           String?
+  customerVisible Boolean       @default(false)
+  createdById     String?
+  createdAt       DateTime      @default(now())
+
+  @@index([quoteId])
+  @@index([orderId])
 }

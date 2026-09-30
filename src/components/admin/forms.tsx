@@ -27,6 +27,7 @@ export function ActionForm({
   successMessage = "Saved.",
   onSuccess,
   redirectTo,
+  redirectToId,
   resetOnSuccess,
   id,
 }: {
@@ -36,6 +37,8 @@ export function ActionForm({
   successMessage?: string | null;
   onSuccess?: (result: ActionResult) => void;
   redirectTo?: string | ((result: ActionResult) => string);
+  /** Server-component friendly: navigate to `${redirectToId}${result.id}`. */
+  redirectToId?: string;
   resetOnSuccess?: boolean;
   id?: string;
 }) {
@@ -55,7 +58,8 @@ export function ActionForm({
         if (res.ok) {
           if (resetOnSuccess) formRef.current?.reset();
           onSuccess?.(res);
-          if (redirectTo) router.push(typeof redirectTo === "function" ? redirectTo(res) : redirectTo);
+          if (redirectToId && res.id) router.push(`${redirectToId}${res.id}`);
+          else if (redirectTo) router.push(typeof redirectTo === "function" ? redirectTo(res) : redirectTo);
           else router.refresh();
         } else {
           // Move focus to the first invalid field for keyboard/screen-reader users.
@@ -401,6 +405,7 @@ export function ConfirmAction({
   className,
   onDone,
   redirectTo,
+  redirectToId,
   successMessage,
 }: {
   action: () => Promise<ActionResult>;
@@ -413,6 +418,8 @@ export function ConfirmAction({
   className?: string;
   onDone?: (r: ActionResult) => void;
   redirectTo?: string;
+  /** Navigate to `${redirectToId}${result.id}` when the action returns an id. */
+  redirectToId?: string;
   successMessage?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -436,7 +443,8 @@ export function ConfirmAction({
           setDone(successMessage);
           setTimeout(() => setDone(null), 3000);
         }
-        if (redirectTo) router.push(redirectTo);
+        if (redirectToId && res.id) router.push(`${redirectToId}${res.id}`);
+        else if (redirectTo) router.push(redirectTo);
         else router.refresh();
       } catch {
         setError("Network error. Please try again.");

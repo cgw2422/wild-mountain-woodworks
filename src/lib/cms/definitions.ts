@@ -357,7 +357,7 @@ export function customPageDefinition(page: { slug: string; title: string }): Pag
 export const RESERVED_PAGE_SLUGS = new Set([
   ...PAGE_DEFINITIONS.map((p) => p.slug),
   ...PAGE_DEFINITIONS.map((p) => p.path.split("/")[1]).filter(Boolean),
-  "admin", "api", "media-files", "cart", "checkout", "order", "orders", "account", "login", "logout",
+  "admin", "api", "media-files", "cart", "checkout", "order", "orders", "quote", "quotes", "invoice", "invoices", "account", "login", "logout",
   "search", "preview", "sitemap.xml", "robots.txt", "manifest.webmanifest", "icon.svg", "apple-icon.png",
   "favicon.ico", "brand", "_next", "static", "new",
 ]);
