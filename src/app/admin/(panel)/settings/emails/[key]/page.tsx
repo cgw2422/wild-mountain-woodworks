@@ -58,7 +58,7 @@ export default async function EditEmailTemplatePage({ params }: Props) {
     buttonLabel: t.buttonLabel,
     actionUrl: siteUrl("/quote/example"),
     vars: { ...SAMPLE, businessName: settings.businessName },
-    brand: { businessName: settings.businessName, logoUrl: siteUrl("/brand/wild-mountain-horizontal-dark.png"), siteUrl: siteUrl("/"), footer: settings.businessName },
+    brand: { businessName: settings.businessName, logoUrl: "/brand/wild-mountain-horizontal-dark.png", siteUrl: siteUrl("/"), footer: settings.businessName },
   });
   return (
     <>
@@ -81,7 +81,7 @@ export default async function EditEmailTemplatePage({ params }: Props) {
           </ActionForm>
         </Card>
         <Card title="Preview" description={`With sample details. Subject: ${preview.subject}`} bodyClassName="p-0">
-          <iframe title="Email preview" srcDoc={preview.html} sandbox="" className="h-[40rem] w-full rounded-b-md bg-white" />
+          <iframe title="Email preview" srcDoc={preview.html} sandbox="allow-same-origin" className="h-[40rem] w-full rounded-b-md bg-white" />
         </Card>
       </div>
     </>

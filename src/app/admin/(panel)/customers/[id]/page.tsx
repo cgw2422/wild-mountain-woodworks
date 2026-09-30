@@ -67,7 +67,7 @@ export default async function CustomerDetailPage({ params }: Props) {
                 {c.quotes.map((q) => (
                   <li key={q.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-sm">
                     <span>
-                      <Link href={`/admin/quotes/${q.id}`} className="font-mono underline underline-offset-2">
+                      <Link href={`/admin/quotes/${q.id}`} className="inline-block py-1.5 font-mono underline underline-offset-2">
                         {q.number ?? q.reference}
                       </Link>{" "}
                       <span className="text-neutral-600">
@@ -91,7 +91,7 @@ export default async function CustomerDetailPage({ params }: Props) {
                 {c.orders.map((o) => (
                   <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-sm">
                     <span>
-                      <Link href={`/admin/orders/${o.id}`} className="font-mono underline underline-offset-2">
+                      <Link href={`/admin/orders/${o.id}`} className="inline-block py-1.5 font-mono underline underline-offset-2">
                         {o.number}
                       </Link>{" "}
                       <span className="text-neutral-600">{formatDate(o.createdAt)}</span>
@@ -114,7 +114,7 @@ export default async function CustomerDetailPage({ params }: Props) {
                 <ul className="divide-y divide-neutral-100">
                   {c.invoices.map((i) => (
                     <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-sm">
-                      <Link href={`/admin/invoices/${i.id}`} className="font-mono underline underline-offset-2">
+                      <Link href={`/admin/invoices/${i.id}`} className="inline-block py-1.5 font-mono underline underline-offset-2">
                         {i.number}
                       </Link>
                       <span className="flex items-center gap-2">

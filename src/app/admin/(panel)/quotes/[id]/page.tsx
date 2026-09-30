@@ -282,7 +282,7 @@ export default async function QuoteDetailPage({ params }: Props) {
           </Card>
 
           <Card title="Revisions" bodyClassName="p-0">
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className={table.table}>
                 <thead className={table.thead}>
                   <tr>
@@ -382,7 +382,7 @@ export default async function QuoteDetailPage({ params }: Props) {
               <ul className="space-y-2 text-sm">
                 {order ? (
                   <li className="flex flex-wrap items-center justify-between gap-2">
-                    <Link href={`/admin/orders/${order.id}`} className="font-mono underline underline-offset-2">
+                    <Link href={`/admin/orders/${order.id}`} className="inline-block py-1.5 font-mono underline underline-offset-2">
                       {order.number}
                     </Link>
                     <span className="flex gap-1">
@@ -393,7 +393,7 @@ export default async function QuoteDetailPage({ params }: Props) {
                 ) : null}
                 {quote.invoices.map((i) => (
                   <li key={i.id} className="flex flex-wrap items-center justify-between gap-2">
-                    <Link href={`/admin/invoices/${i.id}`} className="font-mono underline underline-offset-2">
+                    <Link href={`/admin/invoices/${i.id}`} className="inline-block py-1.5 font-mono underline underline-offset-2">
                       {i.number}
                     </Link>
                     <span className="flex items-center gap-2">

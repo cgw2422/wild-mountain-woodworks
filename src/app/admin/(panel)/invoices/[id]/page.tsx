@@ -161,7 +161,7 @@ export default async function InvoiceDetailPage({ params }: Props) {
             bodyClassName="p-0"
           >
             {invoice.payments.length ? (
-              <div className="overflow-x-auto">
+              <div className="relative overflow-x-auto">
                 <table className={table.table}>
                   <thead className={table.thead}>
                     <tr>

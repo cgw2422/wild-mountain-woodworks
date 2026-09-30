@@ -147,7 +147,7 @@ export default async function OrderDetailPage({ params }: Props) {
             bodyClassName="p-0"
           >
             {order.invoices.length ? (
-              <div className="overflow-x-auto">
+              <div className="relative overflow-x-auto">
                 <table className={table.table}>
                   <thead className={table.thead}>
                     <tr>

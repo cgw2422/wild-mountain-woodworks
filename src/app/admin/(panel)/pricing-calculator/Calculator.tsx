@@ -297,7 +297,7 @@ export function Calculator({
               bodyClassName="p-0"
             >
               {ui.lumber.length ? (
-                <div className="overflow-x-auto">
+                <div className="relative overflow-x-auto">
                   <table className="w-full min-w-[40rem] text-sm">
                     <thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
                       <tr>
@@ -394,7 +394,7 @@ export function Calculator({
               bodyClassName="p-0"
             >
               {ui.materials.length ? (
-                <div className="overflow-x-auto">
+                <div className="relative overflow-x-auto">
                   <table className="w-full min-w-[40rem] text-sm">
                     <thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
                       <tr>
@@ -477,7 +477,7 @@ export function Calculator({
             {/* Other direct costs */}
             <Card title="Other direct costs" description="Delivery, installation, outsourced work and any other expense specific to this project." bodyClassName="p-0">
               {ui.otherCosts.length ? (
-                <div className="overflow-x-auto">
+                <div className="relative overflow-x-auto">
                   <table className="w-full min-w-[34rem] text-sm">
                     <thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
                       <tr>
@@ -560,7 +560,7 @@ export function Calculator({
                   </div>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div className="relative overflow-x-auto">
                   <table className="w-full min-w-[30rem] text-sm">
                     <thead className="text-xs uppercase tracking-wide text-neutral-500">
                       <tr>
