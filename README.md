@@ -368,7 +368,7 @@ Secrets are only read on the server. Only variables prefixed `NEXT_PUBLIC_` are 
 | --- | --- | --- |
 | Build | `npm run build` | `prisma generate` + `next build`. No database access needed. |
 | Pre-deploy | `npm run deploy:prepare` | `scripts/predeploy.sh`: `prisma migrate deploy`, then the **production-safe seed** (`npm run db:seed:production`). Runs once per deploy, before the new version takes traffic. Any failure stops the deploy and the previous version keeps serving. |
-| Start | `npm run start:production` | Starts Next.js only. Restarts never touch the schema or content. |
+| Start | `npm run start:production` | Safety net: repeats `prisma migrate deploy` and the production-safe seed (both no-ops when pre-deploy ran), then starts Next.js. If either fails, Next.js never starts, the health check never passes and Railway keeps the previous deploy. |
 
 **Production-safe seed** (`scripts/seed-production.ts`, logic in `src/lib/seed/defaults.ts`). It is insert-only and idempotent:
 - creates the settings row, and every CMS page/section defined in code, only when missing — so when a feature adds a page (like the Sale collection) its default copy appears on the next deploy, with nothing to run by hand;
@@ -379,7 +379,7 @@ Secrets are only read on the server. Only variables prefixed `NEXT_PUBLIC_` are 
 
 The **development seed** (`npm run db:seed`) adds sample products and imagery to an empty catalog. It's for local machines and demos, and is not run on deploy.
 
-The health check at `/api/health` reports `not_configured`, `unreachable` or `migrations_pending` if the database isn't ready.
+The health check at `/api/health` returns 503 with `not_configured`, `unreachable` or `migrations_pending` (listing each migration this build ships that the database hasn't applied) if the database isn't ready, so Railway never switches traffic to a deploy running against an out-of-date schema.
 
 1. **Create a project** in Railway, **add PostgreSQL**, then **Deploy from GitHub** with this repository.
 2. **Set service variables** on the web service:

@@ -8,6 +8,20 @@
 
 This note records exactly what the current deployment does, what any replacement must keep, and how to migrate safely. It doesn't give the Infrastructure as Code syntax: take that from Railway's current documentation when you do the migration.
 
+## Incident, September 30, 2026: pre-deploy didn't run
+
+**What happened:**
+- Deploy `1a8f24d` moved migrations from the start script to the pre-deploy step.
+- On Railway the pre-deploy step didn't run, so the three migrations that followed were never applied.
+- Pages that read the new product columns returned errors (home, `/furniture`, `/furniture/sale`, product pages). Pages without products (About, FAQ, Contact) kept working.
+- The health check only verified that the core tables existed, so Railway marked the deploys healthy.
+
+**What changed:**
+- **Health check:** it now fails (503 `migrations_pending`) whenever any shipped migration is missing.
+- **Start script:** it repeats migrations and the production-safe seed as a safety net before starting.
+
+**Still to confirm in the Railway dashboard:** why the pre-deploy command didn't run (see step 1 of the checklist, and section 4). With the safety net, the site stays correct either way.
+
 ---
 
 ## 1. Current setup: `railway.json`
@@ -36,8 +50,8 @@ Every row must have an equivalent after the migration. `tests/unit/deploy-config
 | Builder | Railpack | Detects Node and installs dependencies, including `tsx` and the `prisma` CLI, which pre-deploy needs | The build may use a different toolchain or fail |
 | Build command | `npm run build` | `prisma generate` + `next build`. Needs no database access | No Prisma client, so the build fails |
 | **Pre-deploy command** | **`npm run deploy:prepare`** | Runs `scripts/predeploy.sh`: `prisma migrate deploy`, then the production-safe seed (`scripts/seed-production.ts`). Once per deploy, before traffic switches; any failure stops the deploy | **Most dangerous loss.** The new code starts against an **unmigrated database**, and required pages/settings for new features are never created. There's no loud failure: pages that use new columns start erroring |
-| Start command | `npm run start:production` | Starts Next.js on `$PORT` only; never touches the schema or content | The default start may skip the `DATABASE_URL` check |
-| Health check path | `/api/health` | Returns 200 only when the database is configured, reachable and migrated (`migrations_pending` otherwise) | Railway can switch traffic to a broken deploy |
+| Start command | `npm run start:production` | Safety net: repeats `prisma migrate deploy` and the production-safe seed (no-ops when pre-deploy ran), then starts Next.js on `$PORT`. A failure exits before Next.js starts | Without pre-deploy, nothing applies migrations |
+| Health check path | `/api/health` | Returns 200 only when the database is configured, reachable and has **every migration this build ships** (503 `migrations_pending` with the list otherwise) | Railway can switch traffic to a deploy whose pages fail |
 | Health check timeout | 300 s | Gives the first request time to boot | Slow boots are marked failed |
 | Restart policy | `ON_FAILURE`, max 5 retries | Recovers from crashes without restart loops | Crashed instances stay down, or loop forever |
 
@@ -97,6 +111,10 @@ In the **deploy logs**, in this order:
 [predeploy] inserting missing required content (production-safe, insert-only)…
 [seed:production] done — …
 [predeploy] done.
+[start] ensuring database migrations are applied (normally already done by pre-deploy)…
+… No pending migrations to apply.
+[start] ensuring required content exists (production-safe, insert-only)…
+[seed:production] done — everything required already exists; nothing changed.
 [start] starting Next.js on port …
 ```
 
@@ -106,4 +124,4 @@ Then:
 - The home page, `/furniture`, `/furniture/sale` and a product page load.
 - Admin sign-in with two-factor works, and Admin → Promotions and Pages → Sale collection open.
 
-If the `[predeploy]` lines are **missing**, the pre-deploy command isn't configured. Treat the deploy as broken even if the site loads.
+If the `[predeploy]` lines are **missing**, the pre-deploy command isn't running. The start script's safety net keeps the site working, but fix the configuration: in Railway → the web service → **Settings → Deploy → Pre-deploy Command**, it should read `npm run deploy:prepare`. When pre-deploy runs, the `[start]` step reports "No pending migrations" and "nothing changed".

@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { pendingMigrations } from "@/lib/migrations-status";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Railway health check. Verifies the database is configured, reachable and
- * migrated, and reports which step is failing (never any secret values).
+ * has every migration this build ships, and reports which step is failing
+ * (never any secret values).
  */
 export async function GET() {
   const started = Date.now();
@@ -21,6 +23,22 @@ export async function GET() {
     if (!rows[0]?.ok) {
       return Response.json(
         { status: "error", database: "migrations_pending", hint: "Run `npx prisma migrate deploy` against this database." },
+        { status: 503, headers },
+      );
+    }
+    // Every migration shipped with this build must be applied. Otherwise pages
+    // that read newer columns fail while simpler ones work, so report 503 and
+    // Railway won't switch traffic to this deploy.
+    const pending = await pendingMigrations();
+    if (pending.length) {
+      logger.error("Database migrations pending", { pending });
+      return Response.json(
+        {
+          status: "error",
+          database: "migrations_pending",
+          pending,
+          hint: "The pre-deploy step (npm run deploy:prepare) or the start script should apply these. Check the deploy logs for [predeploy] / [start] lines.",
+        },
         { status: 503, headers },
       );
     }

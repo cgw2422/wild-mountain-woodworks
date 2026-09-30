@@ -86,3 +86,18 @@ describe.skipIf(!hasTestDb)("production seed (pre-deploy)", () => {
     expect(await prisma.adminUser.count()).toBe(0);
   }, 120_000);
 });
+
+describe.skipIf(!hasTestDb)("pending migration detection (health check)", () => {
+  it("reports nothing pending on a fully migrated database, and names a missing one", async () => {
+    const { pendingMigrations } = await import("@/lib/migrations-status");
+    expect(await pendingMigrations()).toEqual([]);
+    const [last] = await prisma.$queryRaw<Array<{ migration_name: string }>>`
+      SELECT migration_name FROM "_prisma_migrations" ORDER BY migration_name DESC LIMIT 1`;
+    await prisma.$executeRaw`UPDATE "_prisma_migrations" SET rolled_back_at = now() WHERE migration_name = ${last!.migration_name}`;
+    try {
+      expect(await pendingMigrations()).toEqual([last!.migration_name]);
+    } finally {
+      await prisma.$executeRaw`UPDATE "_prisma_migrations" SET rolled_back_at = NULL WHERE migration_name = ${last!.migration_name}`;
+    }
+  });
+});

@@ -38,7 +38,19 @@ describe("Railway deployment contract", () => {
       restartPolicyType: "ON_FAILURE",
       restartPolicyMaxRetries: 5,
     });
-    // Starting never migrates or seeds; that's the pre-deploy step's job.
-    expect(read("scripts/start-production.sh")).not.toMatch(/migrate|seed/);
+  });
+
+  it("start repeats migrations + the production-safe seed as a safety net, before Next.js", () => {
+    // If Railway skips pre-deploy, the site must still never run against an
+    // unmigrated database (pages reading new columns would 500).
+    const start = read("scripts/start-production.sh");
+    expect(start).toMatch(/set -eu/);
+    const migrate = start.indexOf("npx prisma migrate deploy");
+    const seed = start.indexOf("npx tsx scripts/seed-production.ts");
+    const next = start.indexOf("exec npx next start");
+    expect(migrate).toBeGreaterThan(-1);
+    expect(seed).toBeGreaterThan(migrate);
+    expect(next).toBeGreaterThan(seed);
+    expect(start).not.toMatch(/db:seed(?!:production)|prisma db seed|prisma\/seed\.ts/);
   });
 });
