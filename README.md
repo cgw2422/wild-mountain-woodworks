@@ -119,7 +119,9 @@ Useful scripts:
 | `npm run lint`, `npm run typecheck`, `npm test` | Individually |
 | `npm run db:migrate` | Apply migrations (production) |
 | `npm run db:migrate:dev` | Create and apply a migration (development) |
-| `npm run db:seed` | Seed (idempotent) |
+| `npm run db:seed` | Development seed: required content plus sample catalog in an empty database |
+| `npm run db:seed:production` | Production-safe, insert-only seed of required content (runs in Railway pre-deploy) |
+| `npm run deploy:prepare` | Railway pre-deploy: migrations, then the production-safe seed |
 | `npm run admin:create -- --email … --name "…"` | Create an admin, or reset a password with `--reset` |
 | `npm run qa` | Crawl the running site for errors, overflow, broken images and links |
 | `npm run brand` | Regenerate the logo files from the brand fonts and the supplied horizontal artwork |
@@ -358,7 +360,24 @@ Secrets are only read on the server. Only variables prefixed `NEXT_PUBLIC_` are 
 
 ## Deploying to Railway
 
-`railway.json` builds with `npm run build` and starts with `npm run start:production` (`scripts/start-production.sh`), which applies migrations, runs the idempotent seed (settings, pages, first admin from `ADMIN_EMAIL`/`ADMIN_PASSWORD`, sample content into an empty catalog) and then starts the server. The health check at `/api/health` reports `not_configured`, `unreachable` or `migrations_pending` if the database isn't ready.
+`railway.json` configures three steps:
+
+| Step | Command | What it does |
+| --- | --- | --- |
+| Build | `npm run build` | `prisma generate` + `next build`. No database access needed. |
+| Pre-deploy | `npm run deploy:prepare` | `scripts/predeploy.sh`: `prisma migrate deploy`, then the **production-safe seed** (`npm run db:seed:production`). Runs once per deploy, before the new version takes traffic. Any failure stops the deploy and the previous version keeps serving. |
+| Start | `npm run start:production` | Starts Next.js only. Restarts never touch the schema or content. |
+
+**Production-safe seed** (`scripts/seed-production.ts`, logic in `src/lib/seed/defaults.ts`). It is insert-only and idempotent:
+- creates the settings row, and every CMS page/section defined in code, only when missing — so when a feature adds a page (like the Sale collection) its default copy appears on the next deploy, with nothing to run by hand;
+- adds one-time starter content (e.g. the switched-off starter announcement) once, recorded in `SeedMarker`, so it is never re-created after you delete it;
+- creates the first owner from `ADMIN_EMAIL`/`ADMIN_PASSWORD` only while **no** admin exists; existing admins are never created, changed, reset or re-activated (remove those variables after the first sign-in);
+- never updates or deletes anything, and never touches products, media, storage or sample content;
+- runs in a single transaction under an advisory lock: on any error nothing is saved and the command exits non-zero.
+
+The **development seed** (`npm run db:seed`) adds sample products and imagery to an empty catalog. It's for local machines and demos, and is not run on deploy.
+
+The health check at `/api/health` reports `not_configured`, `unreachable` or `migrations_pending` if the database isn't ready.
 
 1. **Create a project** in Railway, **add PostgreSQL**, then **Deploy from GitHub** with this repository.
 2. **Set service variables** on the web service:
@@ -367,8 +386,9 @@ Secrets are only read on the server. Only variables prefixed `NEXT_PUBLIC_` are 
    - `NEXT_PUBLIC_SITE_URL = https://your-domain` (or your Railway domain at first)
    - `STORAGE_DRIVER = r2` plus the `R2_*` variables ([see below](#cloudflare-r2-setup))
    - Optionally the email variables.
-3. **Deploy.** Migrations run automatically in the pre-deploy step, and builds don't need database access.
-4. **Seed once** to create pages, settings, sample content and your admin, from your computer using the database's *public* URL (Railway → Postgres → Connect):
+   - For the very first deploy, also `ADMIN_EMAIL` and `ADMIN_PASSWORD` (a long passphrase) to create the first owner. Delete them once you've signed in.
+3. **Deploy.** The pre-deploy step applies migrations and inserts the required settings, pages and first owner. The site starts with an empty catalog.
+4. **Optional — sample catalog for a demo.** To fill an empty catalog with sample products and imagery, run the development seed once from your computer using the database's *public* URL (Railway → Postgres → Connect):
    ```bash
    DATABASE_URL="<public postgres url>" STORAGE_DRIVER=r2 R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… \
    R2_SECRET_ACCESS_KEY=… R2_BUCKET=… R2_PUBLIC_URL=… \

@@ -5,6 +5,9 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
+    "preDeployCommand": [
+      "npm run deploy:prepare"
+    ],
     "startCommand": "npm run start:production",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 300,

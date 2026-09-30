@@ -1,5 +1,6 @@
 /**
- * Database seed.
+ * DEVELOPMENT seed (local machines, demos). Production deploys use the
+ * insert-only `npm run db:seed:production` instead (scripts/seed-production.ts).
  *
  *   npx prisma db seed            (also runs automatically after `prisma migrate reset`)
  *
@@ -22,9 +23,8 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { createStorageFromEnv } from "../src/lib/storage/factory";
 import { validatePasswordStrength } from "../src/lib/auth/password";
 import { createPasswordAdmin } from "../src/lib/auth/accounts";
-import { PAGE_DEFINITIONS } from "../src/lib/cms/definitions";
+import { ensurePages as ensureRequiredPages, ensureSettings as ensureRequiredSettings, ensureStarterAnnouncement } from "../src/lib/seed/defaults";
 import { renderScene } from "./seed-data/images";
-import { SEED_PAGES } from "./seed-data/pages";
 import { ADD_ONS, CATEGORIES, FAQS, FAQ_CATEGORIES, IMAGE_SPECS, OPTION_GROUPS, PORTFOLIO, PRODUCTS, PRODUCT_TEXT } from "./seed-data/catalog";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
@@ -88,89 +88,14 @@ async function prerenderImages(keys: string[]) {
 /* ------------------------------------------------------------ settings */
 
 async function ensureSettings() {
-  await prisma.siteSetting.upsert({
-    where: { id: "default" },
-    update: {},
-    create: {
-      id: "default",
-      businessName: "Wild Mountain Woodworks",
-      tagline: "Built by hand. Made to belong.",
-      brandStatement: "Handcrafted furniture built one piece at a time in Ohio.",
-      locationText: "Ohio",
-      serviceAreaText: "Handcrafted in Ohio.",
-      addressRegion: "OH",
-      defaultSeoTitle: "Wild Mountain Woodworks — Handcrafted Furniture Built in Ohio",
-      defaultSeoDescription:
-        "Handcrafted dining tables, benches, consoles and custom furniture, built one piece at a time in Ohio.",
-      defaultLeadTime: "Lead time confirmed with your quote",
-      priceDisclaimer: "Estimated price. Your final price is confirmed in your quote.",
-      quoteConfirmationText:
-        "Thank you for your request. We review every request personally and will follow up with a confirmed quote, lead time and delivery details.",
-      showPrices: true,
-      quotesEnabled: true,
-      customOrdersEnabled: true,
-      ecommerceEnabled: false,
-    },
-  });
+  await ensureRequiredSettings(prisma, log);
   log("settings ok");
 }
 
 /* ------------------------------------------------------------ pages */
 
 async function ensurePages(withImages: boolean) {
-  for (const def of PAGE_DEFINITIONS) {
-    const seed = SEED_PAGES.find((p) => p.slug === def.slug);
-    let page = await prisma.page.findUnique({ where: { slug: def.slug }, include: { sections: true } });
-    if (!page) {
-      page = await prisma.page.create({
-        data: {
-          slug: def.slug,
-          title: seed?.title ?? def.title,
-          body: seed?.body ?? null,
-          seoTitle: seed?.seoTitle ?? null,
-          seoDescription: seed?.seoDescription ?? null,
-          reviewRequired: seed?.reviewRequired ?? false,
-          reviewNotes: seed?.reviewNotes ?? null,
-          status: "PUBLISHED",
-        },
-        include: { sections: true },
-      });
-    }
-    for (const [index, sdef] of def.sections.entries()) {
-      if (page.sections.some((s) => s.key === sdef.key)) continue;
-      const s = seed?.sections.find((x) => x.key === sdef.key);
-      await prisma.pageSection.create({
-        data: {
-          pageId: page.id,
-          key: sdef.key,
-          displayOrder: index,
-          visible: s?.visible ?? true,
-          eyebrow: s?.eyebrow ?? null,
-          heading: s?.heading ?? null,
-          subheading: s?.subheading ?? null,
-          body: s?.body ?? null,
-          imageId: withImages && s?.image ? await sampleMedia(s.image) : null,
-          primaryCtaLabel: s?.primaryCta?.[0] ?? null,
-          primaryCtaHref: s?.primaryCta?.[1] ?? null,
-          secondaryCtaLabel: s?.secondaryCta?.[0] ?? null,
-          secondaryCtaHref: s?.secondaryCta?.[1] ?? null,
-          items: s?.items
-            ? {
-                create: await Promise.all(
-                  s.items.map(async (it, i) => ({
-                    eyebrow: it.eyebrow ?? null,
-                    title: it.title ?? null,
-                    body: it.body ?? null,
-                    imageId: withImages && it.image ? await sampleMedia(it.image) : null,
-                    displayOrder: i,
-                  })),
-                ),
-              }
-            : undefined,
-        },
-      });
-    }
-  }
+  await ensureRequiredPages(prisma, log, withImages ? sampleMedia : undefined);
   log("pages ok");
 }
 
@@ -382,21 +307,6 @@ async function restoreMissingSampleFiles() {
 
 /* ------------------------------------------------------------ main */
 
-/** A switched-off starter announcement to edit in Admin → Promotions (only when there are none). */
-async function ensureStarterAnnouncement() {
-  if ((await prisma.announcement.count()) > 0) return;
-  await prisma.announcement.create({
-    data: {
-      name: "Fall Sale",
-      enabled: false,
-      message: "Fall Sale — Up to 30% Off Select Furniture",
-      linkText: "Shop the sale",
-      linkUrl: "/furniture/sale",
-    },
-  });
-  log("starter announcement ok (off)");
-}
-
 async function main() {
   await ensureSettings();
   await restoreMissingSampleFiles();
@@ -407,7 +317,7 @@ async function main() {
     await prerenderImages(Object.keys(IMAGE_SPECS));
   }
   await ensurePages(withSample);
-  await ensureStarterAnnouncement();
+  await ensureStarterAnnouncement(prisma, log);
   await ensureAdmin();
   if (withSample) await seedSampleCatalog();
   else log("sample content skipped (catalog not empty or SEED_SAMPLE_CONTENT=false)");

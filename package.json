@@ -15,6 +15,8 @@
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "prisma db seed",
+    "db:seed:production": "tsx scripts/seed-production.ts",
+    "deploy:prepare": "sh scripts/predeploy.sh",
     "db:reset": "prisma migrate reset",
     "admin:create": "tsx scripts/create-admin.ts",
     "brand": "tsx scripts/generate-brand.ts",
