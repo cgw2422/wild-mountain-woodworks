@@ -7,7 +7,7 @@ import { CmsImage } from "@/components/media/CmsImage";
 import { Container } from "@/components/ui/Container";
 import { ButtonLink } from "@/components/ui/Button";
 import { Eyebrow } from "@/components/ui/Eyebrow";
-import { Paragraphs } from "@/components/ui/Markdown";
+import { Paragraphs, RichText } from "@/components/ui/Markdown";
 import { Reveal } from "@/components/ui/Reveal";
 import { Breadcrumbs } from "@/components/site/Breadcrumbs";
 import { SectionHeading } from "@/components/site/SectionHeading";
@@ -41,7 +41,7 @@ export default async function CustomFurniturePage() {
               </h1>
             </div>
             <div className="lg:col-span-4 lg:pb-3">
-              {hero.body ? <p className="lede text-muted">{hero.body}</p> : null}
+              <RichText text={hero.body} className="lede text-muted" />
               {hero.primaryCta && settings.customOrdersEnabled ? (
                 <ButtonLink href={hero.primaryCta.href} className="mt-7" arrow>
                   {hero.primaryCta.label}
@@ -93,7 +93,7 @@ export default async function CustomFurniturePage() {
                       {String(i + 1).padStart(2, "0")}
                     </span>
                     <h3 className="mt-5 font-display text-[1.7rem] leading-tight text-ivory">{step.title}</h3>
-                    {step.body ? <p className="mt-3 leading-relaxed text-ivory/70">{step.body}</p> : null}
+                    <RichText text={step.body} className="mt-3 leading-relaxed text-ivory/70" />
                   </Reveal>
                 </li>
               ))}
@@ -118,7 +118,7 @@ export default async function CustomFurniturePage() {
                 {possibilities.items.map((item) => (
                   <div key={item.id} className="grid gap-2 border-t border-stone py-7 sm:grid-cols-[12rem_1fr] sm:gap-8">
                     <dt className="font-display text-2xl leading-tight">{item.title}</dt>
-                    <dd className="leading-relaxed text-muted">{item.body}</dd>
+                    <RichText as="dd" text={item.body} className="leading-relaxed text-muted" />
                   </div>
                 ))}
               </dl>
@@ -158,7 +158,7 @@ export default async function CustomFurniturePage() {
                 <h2 id="form-heading" className="display-lg">
                   {form.heading || "Tell us about your piece."}
                 </h2>
-                {form.body ? <p className="lede mt-6 text-muted">{form.body}</p> : null}
+                <RichText text={form.body} className="lede mt-6 text-muted" />
               </div>
             </div>
             <div className="lg:col-span-7 lg:col-start-6">

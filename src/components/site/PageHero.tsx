@@ -1,4 +1,5 @@
 import { CmsImage } from "@/components/media/CmsImage";
+import { RichText } from "@/components/ui/Markdown";
 import { Container } from "@/components/ui/Container";
 import { Eyebrow } from "@/components/ui/Eyebrow";
 import { ButtonLink } from "@/components/ui/Button";
@@ -35,7 +36,7 @@ export function PageHero({
           </div>
           {section.body || section.primaryCta ? (
             <div className="lg:col-span-4 lg:pb-3">
-              {section.body ? <p className="lede text-muted">{section.body}</p> : null}
+              <RichText text={section.body} className="lede text-muted" />
               {section.primaryCta ? (
                 <ButtonLink href={section.primaryCta.href} className="mt-7" arrow>
                   {section.primaryCta.label}

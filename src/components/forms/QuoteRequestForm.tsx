@@ -15,7 +15,7 @@ export function QuoteRequestForm({
 }: {
   defaultInterest?: string;
   suggestions: string[];
-  confirmation: { heading: string | null; body: string | null };
+  confirmation: { heading: string | null; body: React.ReactNode };
 }) {
   const [files, setFiles] = useState<File[]>([]);
   const opts = useMemo(
@@ -39,7 +39,7 @@ export function QuoteRequestForm({
       <div ref={successRef} tabIndex={-1} role="status" className="border border-charcoal bg-paper p-8 focus:outline-none md:p-10">
         <p className="eyebrow text-bronze-text">Request received</p>
         <h2 className="display-md mt-4">{confirmation.heading || "Thank you — your request is in."}</h2>
-        <p className="lede mt-4 text-muted">{confirmation.body || "We've received your request and will be in touch soon."}</p>
+        {confirmation.body || <p className="lede mt-4 text-muted">We&apos;ve received your request and will be in touch soon.</p>}
         {state.reference ? (
           <p className="mt-6 text-sm">
             Your reference number: <strong className="font-semibold tracking-wide">{state.reference}</strong>

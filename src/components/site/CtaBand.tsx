@@ -1,4 +1,5 @@
 import { CmsImage } from "@/components/media/CmsImage";
+import { RichText } from "@/components/ui/Markdown";
 import { ButtonLink } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 import { Eyebrow } from "@/components/ui/Eyebrow";
@@ -19,7 +20,7 @@ export function CtaBand({ section, headingLevel = "h2" }: { section: SectionCont
       <Container className="flex flex-col items-center py-24 text-center md:py-32 lg:py-40">
         {section.eyebrow ? <Eyebrow light className="mb-6">{section.eyebrow}</Eyebrow> : null}
         {section.heading ? <H className="display-lg max-w-3xl text-ivory">{section.heading}</H> : null}
-        {section.body ? <p className="lede mt-6 max-w-xl text-ivory/80">{section.body}</p> : null}
+        <RichText text={section.body} className="lede mt-6 max-w-xl text-ivory/80" />
         {section.primaryCta || section.secondaryCta ? (
           <div className="mt-10 flex flex-col gap-4 sm:flex-row">
             {section.primaryCta ? (

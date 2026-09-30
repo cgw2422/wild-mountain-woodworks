@@ -9,7 +9,7 @@ import { CmsImage } from "@/components/media/CmsImage";
 import { ButtonLink, Arrow } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 import { Eyebrow } from "@/components/ui/Eyebrow";
-import { Paragraphs } from "@/components/ui/Markdown";
+import { Paragraphs, RichText } from "@/components/ui/Markdown";
 import { Reveal } from "@/components/ui/Reveal";
 import { SectionHeading } from "@/components/site/SectionHeading";
 import { ProductCard } from "@/components/site/ProductCard";
@@ -228,7 +228,7 @@ export default async function HomePage() {
                         {String(i + 1).padStart(2, "0")}
                       </span>
                       <h3 className="mt-3 font-display text-[1.8rem] leading-tight">{item.title}</h3>
-                      {item.body ? <p className="mt-3 leading-relaxed text-muted">{item.body}</p> : null}
+                      <RichText text={item.body} className="mt-3 leading-relaxed text-muted" />
                     </Reveal>
                   </li>
                 ))}
@@ -320,7 +320,7 @@ function HeroText({ hero, light }: { hero: ReturnType<Awaited<ReturnType<typeof 
       <h1 id="hero-heading" className={light ? "display-xl text-ivory" : "display-xl"}>
         {hero.heading || "Wild Mountain Woodworks"}
       </h1>
-      {hero.body ? <p className={`lede mt-6 max-w-xl ${light ? "text-ivory/85" : "text-muted"}`}>{hero.body}</p> : null}
+      <RichText text={hero.body} className={`lede mt-6 max-w-xl ${light ? "text-ivory/85" : "text-muted"}`} />
       {hero.primaryCta || hero.secondaryCta ? (
         <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:gap-4">
           {hero.primaryCta ? (

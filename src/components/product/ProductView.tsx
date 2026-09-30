@@ -5,7 +5,7 @@ import { formatCents } from "@/lib/money";
 import { siteUrl } from "@/lib/site-url";
 import { Container } from "@/components/ui/Container";
 import { ButtonLink } from "@/components/ui/Button";
-import { Markdown } from "@/components/ui/Markdown";
+import { Markdown, RichText } from "@/components/ui/Markdown";
 import { Breadcrumbs } from "@/components/site/Breadcrumbs";
 import { Accordion } from "@/components/site/Accordion";
 import { ProductCard } from "@/components/site/ProductCard";
@@ -100,7 +100,7 @@ export async function ProductView({ data }: { data: Data }) {
                 <RidgeLine className="mt-1.5 h-2.5 w-7 shrink-0 text-bronze" />
                 <div>
                   <p className="font-semibold">{madeToOrder.heading || "Handcrafted to order"}</p>
-                  {madeToOrder.body ? <p className="mt-0.5 text-muted">{madeToOrder.body}</p> : null}
+                  <RichText text={madeToOrder.body} className="mt-0.5 text-muted" />
                 </div>
               </div>
               {leadTime ? (
@@ -117,8 +117,8 @@ export async function ProductView({ data }: { data: Data }) {
                 pricesVisible={pricesVisible}
                 priceDisclaimer={settings.priceDisclaimer}
                 mode={mode}
-                requestCopy={{ heading: request.heading, body: request.body }}
-                confirmationCopy={{ heading: confirmation.heading, body: confirmation.body }}
+                requestCopy={{ heading: request.heading, body: request.body ? <RichText text={request.body} className="mt-3 leading-relaxed text-muted" /> : null }}
+                confirmationCopy={{ heading: confirmation.heading, body: confirmation.body ? <RichText text={confirmation.body} className="mt-3 leading-relaxed text-muted" /> : null }}
               />
             </div>
           </div>
@@ -145,7 +145,7 @@ export async function ProductView({ data }: { data: Data }) {
               {woodNote.visible && woodNote.heading ? (
                 <div className="mt-10 bg-stone-light p-7">
                   <h3 className="font-display text-2xl">{woodNote.heading}</h3>
-                  {woodNote.body ? <p className="mt-3 leading-relaxed text-muted">{woodNote.body}</p> : null}
+                  <RichText text={woodNote.body} className="mt-3 leading-relaxed text-muted" />
                   {woodNote.primaryCta ? (
                     <ButtonLink href={woodNote.primaryCta.href} variant="text" className="mt-4" arrow>
                       {woodNote.primaryCta.label}

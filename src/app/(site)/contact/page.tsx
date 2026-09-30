@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { RichText } from "@/components/ui/Markdown";
 import { getPageContent } from "@/lib/cms/queries";
 import { buildMetadata } from "@/lib/seo";
 import { getSettings } from "@/lib/settings";
@@ -33,11 +34,11 @@ export default async function ContactPage({ searchParams }: { searchParams: Prom
         <div className="lg:col-span-5">
           {hero.eyebrow ? <Eyebrow className="mb-6">{hero.eyebrow}</Eyebrow> : null}
           <h1 className="display-xl animate-reveal">{hero.heading || "Contact"}</h1>
-          {hero.body ? <p className="lede mt-6 text-muted">{hero.body}</p> : null}
+          <RichText text={hero.body} className="lede mt-6 text-muted" />
 
           <div className="mt-12 border-t border-stone pt-8">
             {details.heading ? <h2 className="font-display text-2xl">{details.heading}</h2> : null}
-            {details.body ? <p className="mt-2 text-muted">{details.body}</p> : null}
+            <RichText text={details.body} className="mt-2 text-muted" />
             <dl className="mt-6 space-y-4 text-[0.97rem]">
               {settings.email ? (
                 <div>

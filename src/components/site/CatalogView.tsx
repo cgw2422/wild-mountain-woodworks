@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { RichText } from "@/components/ui/Markdown";
 import { cn } from "@/lib/cn";
 import type { ProductCardData } from "@/lib/catalog/queries";
 import { Container } from "@/components/ui/Container";
@@ -71,7 +72,7 @@ export function CatalogView({
           <Container size="wide" className="flex flex-col gap-8 py-16 md:flex-row md:items-center md:justify-between md:py-20">
             <div className="max-w-2xl">
               <h2 className="display-md">{customCta.heading}</h2>
-              {customCta.body ? <p className="lede mt-4 text-muted">{customCta.body}</p> : null}
+              <RichText text={customCta.body} className="lede mt-4 text-muted" />
             </div>
             {customCta.primaryCta ? (
               <ButtonLink href={customCta.primaryCta.href} size="lg" arrow className="shrink-0">

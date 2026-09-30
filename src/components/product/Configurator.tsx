@@ -34,8 +34,8 @@ export interface ConfiguratorProps {
    * contact → quotes disabled; send customers to the contact page
    */
   mode: PurchaseMode;
-  requestCopy: { heading: string | null; body: string | null };
-  confirmationCopy: { heading: string | null; body: string | null };
+  requestCopy: { heading: string | null; body: React.ReactNode };
+  confirmationCopy: { heading: string | null; body: React.ReactNode };
 }
 
 export function Configurator({ product, pricesVisible, priceDisclaimer, mode, requestCopy, confirmationCopy }: ConfiguratorProps) {
@@ -569,8 +569,8 @@ function RequestPanel({
   selection: ConfigurationSelection;
   pricing: ReturnType<typeof priceConfiguration>;
   showTotal: boolean;
-  copy: { heading: string | null; body: string | null };
-  confirmation: { heading: string | null; body: string | null };
+  copy: { heading: string | null; body: React.ReactNode };
+  confirmation: { heading: string | null; body: React.ReactNode };
   onServerErrors: (e: Record<string, string>) => void;
 }) {
   const [files, setFiles] = useState<File[]>([]);
@@ -642,9 +642,7 @@ function RequestPanel({
       <div ref={successRef} tabIndex={-1} role="status" className="border border-charcoal bg-paper p-6 focus:outline-none sm:p-8">
         <p className="eyebrow text-bronze-text">Request received</p>
         <h3 className="display-sm mt-3">{confirmation.heading || "Thank you — your request is in."}</h3>
-        <p className="mt-3 leading-relaxed text-muted">
-          {confirmation.body || "We've received your request and will be in touch soon."}
-        </p>
+        {confirmation.body || <p className="mt-3 leading-relaxed text-muted">We&apos;ve received your request and will be in touch soon.</p>}
         {state.reference ? (
           <p className="mt-5 text-sm">
             Your reference number: <strong className="font-semibold tracking-wide">{state.reference}</strong>
@@ -663,7 +661,7 @@ function RequestPanel({
       <h3 id="request-heading" className="display-sm">
         {copy.heading || "Request this configuration"}
       </h3>
-      {copy.body ? <p className="mt-3 leading-relaxed text-muted">{copy.body}</p> : null}
+      {copy.body}
 
       <div className="mt-6 bg-ivory p-5">
         <p className="mb-3 text-[0.72rem] font-semibold uppercase tracking-[0.14em]">Your configuration · {product.name}</p>

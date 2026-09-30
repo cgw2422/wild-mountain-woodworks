@@ -4,7 +4,7 @@ import { buildMetadata } from "@/lib/seo";
 import { CmsImage } from "@/components/media/CmsImage";
 import { Container } from "@/components/ui/Container";
 import { Eyebrow } from "@/components/ui/Eyebrow";
-import { Paragraphs } from "@/components/ui/Markdown";
+import { Paragraphs, RichText } from "@/components/ui/Markdown";
 import { Reveal } from "@/components/ui/Reveal";
 import { PageHero } from "@/components/site/PageHero";
 import { SectionHeading } from "@/components/site/SectionHeading";
@@ -54,14 +54,14 @@ export default async function AboutPage() {
               <div className="lg:col-span-5">
                 {why.eyebrow ? <Eyebrow className="mb-6">{why.eyebrow}</Eyebrow> : null}
                 <h2 className="display-lg">{why.heading}</h2>
-                {why.body ? <p className="lede mt-6 text-muted">{why.body}</p> : null}
+                <RichText text={why.body} className="lede mt-6 text-muted" />
               </div>
               {why.items.length ? (
                 <ul className="grid gap-10 sm:grid-cols-2 lg:col-span-6 lg:col-start-7 lg:grid-cols-1">
                   {why.items.map((item) => (
                     <li key={item.id} className="border-t border-stone-dark/40 pt-6">
                       <h3 className="font-display text-[1.75rem] leading-tight">{item.title}</h3>
-                      {item.body ? <p className="mt-2 leading-relaxed text-muted">{item.body}</p> : null}
+                      <RichText text={item.body} className="mt-2 leading-relaxed text-muted" />
                     </li>
                   ))}
                 </ul>

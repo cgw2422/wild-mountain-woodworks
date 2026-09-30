@@ -4,7 +4,7 @@ import { buildMetadata, plainText } from "@/lib/seo";
 import { getFaqGroups } from "@/lib/catalog/queries";
 import { Container } from "@/components/ui/Container";
 import { ButtonLink } from "@/components/ui/Button";
-import { Markdown } from "@/components/ui/Markdown";
+import { Markdown, RichText } from "@/components/ui/Markdown";
 import { PageHero } from "@/components/site/PageHero";
 import { Accordion } from "@/components/site/Accordion";
 import { JsonLd } from "@/components/site/JsonLd";
@@ -67,7 +67,7 @@ export default async function FaqPage() {
           <Container size="wide" className="flex flex-col gap-8 py-16 md:flex-row md:items-center md:justify-between md:py-20">
             <div>
               <h2 className="display-md">{cta.heading}</h2>
-              {cta.body ? <p className="lede mt-3 text-muted">{cta.body}</p> : null}
+              <RichText text={cta.body} className="lede mt-3 text-muted" />
             </div>
             {cta.primaryCta ? (
               <ButtonLink href={cta.primaryCta.href} size="lg" arrow>

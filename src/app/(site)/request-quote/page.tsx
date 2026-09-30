@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { RichText } from "@/components/ui/Markdown";
 import { getPageContent } from "@/lib/cms/queries";
 import { buildMetadata } from "@/lib/seo";
 import { getSettings } from "@/lib/settings";
@@ -34,7 +35,7 @@ export default async function RequestQuotePage({ searchParams }: { searchParams:
         <div className="lg:col-span-5">
           {hero.eyebrow ? <Eyebrow className="mb-6">{hero.eyebrow}</Eyebrow> : null}
           <h1 className="display-xl animate-reveal">{hero.heading || "Request a Quote"}</h1>
-          {hero.body ? <p className="lede mt-6 text-muted">{hero.body}</p> : null}
+          <RichText text={hero.body} className="lede mt-6 text-muted" />
           <div className="mt-8 flex flex-wrap gap-x-8 gap-y-3">
             <ButtonLink href="/furniture" variant="text" arrow>
               Browse & configure
@@ -50,7 +51,7 @@ export default async function RequestQuotePage({ searchParams }: { searchParams:
             <QuoteRequestForm
               defaultInterest={preset}
               suggestions={products.map((p) => p.name)}
-              confirmation={{ heading: confirmation.heading, body: confirmation.body }}
+              confirmation={{ heading: confirmation.heading, body: confirmation.body ? <RichText text={confirmation.body} className="lede mt-4 text-muted" /> : null }}
             />
           ) : (
             <div className="border border-stone bg-paper p-8">
