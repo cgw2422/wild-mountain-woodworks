@@ -19,6 +19,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - **Public forms** validate with lightweight client rules (`src/lib/validation/shared.ts`) and authoritative Zod schemas on the server (`src/lib/validation/forms.ts`); `tests/unit/client-validation.test.ts` keeps them in sync. Keep Zod out of client bundles.
 - **Sales** are resolved server-side at request time (`activeSale` in `src/lib/pricing/sale.ts`, applied in `resolveConfigurableProduct`). Never store a discount % or trust a browser price; list sale products with `activeSaleWhere()`, not hardcoded IDs.
 - **Required default content** (new CMS pages/sections, settings, one-time starter records) goes in `src/lib/seed/defaults.ts`, which must stay insert-only and idempotent: it runs on every Railway deploy (`npm run deploy:prepare`). Sample/demo content belongs only in `prisma/seed.ts`.
+- **Railway config:** `railway.json` (deprecated Config as Code; must move to Infrastructure as Code before Dec 1, 2026 — see `docs/railway-deployment.md`). Its pre-deploy command must stay `npm run deploy:prepare`; `tests/unit/deploy-config.test.ts` guards the contract.
 - **Commerce** stays dormant until `CHECKOUT_UI_READY`, the Settings flag and Stripe keys are all set (`commerceState()` in `src/lib/settings.ts`).
 - Class names go through `cn()` (tailwind-merge), so caller classes override component defaults.
 - Before finishing work: `npm run check`, `npm run build`, and `npm run qa` against a running server.

@@ -360,6 +360,8 @@ Secrets are only read on the server. Only variables prefixed `NEXT_PUBLIC_` are 
 
 ## Deploying to Railway
 
+> **Action needed before December 1, 2026:** this service uses `railway.json` (Railway *Config as Code*), which Railway has deprecated in favour of *Infrastructure as Code*, with a hard cutoff for existing services on December 1, 2026. It still works today and hasn't been migrated yet. See **[docs/railway-deployment.md](docs/railway-deployment.md)** for the exact settings any replacement must keep (above all the pre-deploy command `npm run deploy:prepare`), the migration checklist and how to verify a deploy.
+
 `railway.json` configures three steps:
 
 | Step | Command | What it does |
@@ -639,4 +641,5 @@ The admin **Dashboard → Launch checklist** tracks most of these.
 - [ ] **Products:** replace the sample descriptions and construction notes with your real methods, then confirm prices, option modifiers and lead times.
 - [ ] **Sample content:** remove it from the Dashboard when you're ready.
 - [ ] **Email:** configure a provider and send yourself a test quote.
+- [ ] **Railway configuration:** migrate from `railway.json` to Railway Infrastructure as Code by November 15, 2026 ([docs/railway-deployment.md](docs/railway-deployment.md)). The pre-deploy command must remain `npm run deploy:prepare`.
 - [ ] **Launch settings:** set `NEXT_PUBLIC_SITE_URL` to the final domain and test a database backup restore.
