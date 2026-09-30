@@ -68,7 +68,7 @@ export interface MediaUsage {
 
 /** Every place a Media item is referenced (all references are foreign keys). */
 export async function getMediaUsage(mediaId: string): Promise<MediaUsage[]> {
-  const [products, portfolio, categories, optionValues, addOns, sections, items, pagesOg, settings] = await Promise.all([
+  const [products, portfolio, categories, optionValues, addOns, sections, items, pagesOg, settings, videos] = await Promise.all([
     prisma.productImage.findMany({ where: { mediaId }, select: { product: { select: { id: true, name: true } } } }),
     prisma.portfolioImage.findMany({ where: { mediaId }, select: { project: { select: { id: true, name: true } } } }),
     prisma.category.findMany({ where: { imageId: mediaId }, select: { id: true, name: true } }),
@@ -78,6 +78,7 @@ export async function getMediaUsage(mediaId: string): Promise<MediaUsage[]> {
     prisma.sectionItem.findMany({ where: { imageId: mediaId }, select: { section: { select: { key: true, page: { select: { slug: true, title: true } } } } } }),
     prisma.page.findMany({ where: { ogImageId: mediaId }, select: { slug: true, title: true } }),
     prisma.siteSetting.count({ where: { defaultOgImageId: mediaId } }),
+    prisma.productVideo.findMany({ where: { posterId: mediaId }, select: { product: { select: { id: true, name: true } } } }),
   ]);
   const pageHref = (slug: string) => (slug === "home" ? "/admin/homepage" : `/admin/pages/${slug}`);
   return [
@@ -90,6 +91,7 @@ export async function getMediaUsage(mediaId: string): Promise<MediaUsage[]> {
     ...items.map((i) => ({ label: `${i.section.page.title} → ${i.section.key} item`, href: pageHref(i.section.page.slug) })),
     ...pagesOg.map((p) => ({ label: `${p.title} → social image`, href: pageHref(p.slug) })),
     ...(settings ? [{ label: "Settings → default social image", href: "/admin/settings" }] : []),
+    ...videos.map((v) => ({ label: `Product video poster: ${v.product.name}`, href: `/admin/products/${v.product.id}#videos` })),
   ];
 }
 
@@ -100,7 +102,7 @@ export async function getMediaUsageCounts(mediaIds: string[]): Promise<Record<st
     for (const r of rows) if (r.id && r.id in counts) counts[r.id] += r.n;
   };
   const inIds = { in: mediaIds };
-  const [a, b, c, d, e, f, g, h, i] = await Promise.all([
+  const [a, b, c, d, e, f, g, h, i, j] = await Promise.all([
     prisma.productImage.groupBy({ by: ["mediaId"], where: { mediaId: inIds }, _count: true }),
     prisma.portfolioImage.groupBy({ by: ["mediaId"], where: { mediaId: inIds }, _count: true }),
     prisma.category.groupBy({ by: ["imageId"], where: { imageId: inIds }, _count: true }),
@@ -110,6 +112,7 @@ export async function getMediaUsageCounts(mediaIds: string[]): Promise<Record<st
     prisma.sectionItem.groupBy({ by: ["imageId"], where: { imageId: inIds }, _count: true }),
     prisma.page.groupBy({ by: ["ogImageId"], where: { ogImageId: inIds }, _count: true }),
     prisma.siteSetting.groupBy({ by: ["defaultOgImageId"], where: { defaultOgImageId: inIds }, _count: true }),
+    prisma.productVideo.groupBy({ by: ["posterId"], where: { posterId: inIds }, _count: true }),
   ]);
   add(a.map((r) => ({ id: r.mediaId, n: r._count })));
   add(b.map((r) => ({ id: r.mediaId, n: r._count })));
@@ -120,6 +123,7 @@ export async function getMediaUsageCounts(mediaIds: string[]): Promise<Record<st
   add(g.map((r) => ({ id: r.imageId, n: r._count })));
   add(h.map((r) => ({ id: r.ogImageId, n: r._count })));
   add(i.map((r) => ({ id: r.defaultOgImageId, n: r._count })));
+  add(j.map((r) => ({ id: r.posterId, n: r._count })));
   return counts;
 }
 

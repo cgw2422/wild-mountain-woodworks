@@ -215,6 +215,17 @@ If a section is added to the code later, the site still renders it with empty va
 - **Estimates** can be saved, duplicated, archived, started from a product (loading its internal material-cost and labor-hour estimates) or from a quote, and converted into a quote. **Update product pricing** is a deliberate action that pushes only the values you tick to the product.
 - **Defaults** (shop labor rate, waste %, overhead, target margin, warning thresholds, rounding, deposit %) live in **Settings → Pricing calculator defaults** (`/admin/settings/pricing`).
 
+## Product videos
+
+**Admin → Products → (product) → Videos** uploads videos into the product gallery. They show after the photos, marked with a ▶ badge, play inline with native controls, and are never autoplayed on the page.
+
+- **Formats:** MP4 (H.264) plays in every browser; WebM and MOV are also accepted. Maximum 200 MB. Short 1080p clips work best. There's no server-side video processing, so files are stored exactly as uploaded.
+- **Checks:** extension, declared type and the file's container bytes must agree. MOV and MP4 share a container and are both served as `video/mp4`, which lets Chrome and Firefox play H.264 iPhone clips.
+- **Thumbnail and playback check:** the admin's browser loads the video, reads its size and length, and captures a frame as the poster image before uploading. A file the browser can't decode (for example HEVC in Chrome) is rejected with instructions to export as MP4 (H.264).
+- **Storage:** files live in object storage under `media/`, next to images. R2 serves ranged requests itself; the local `/media-files` route supports `Range` for seeking. The CSP allows `media-src 'self' blob: https:`.
+- **Duplicating and deleting:** a duplicated product shares its source's video files, and a file is deleted only when the last product using it removes it.
+- **SEO:** each video is added to the product's structured data as a `VideoObject`.
+
 ## Quotes and historical snapshots
 
 When a customer sends a configuration request, the server:

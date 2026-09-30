@@ -45,6 +45,7 @@ model AdminUser {
   notes        InternalNote[]
   statusEvents StatusEvent[]
   mediaUploads Media[]
+  videoUploads ProductVideo[]
   estimates    PriceEstimate[]
 }
 
@@ -116,6 +117,7 @@ model Media {
   pageSectionItems SectionItem[]
   pagesOg          Page[]           @relation("PageOgImage")
   settingsOg       SiteSetting[]    @relation("SettingsOgImage")
+  videoPosters     ProductVideo[]   @relation("VideoPoster")
 
   @@index([createdAt])
   @@index([filename])
@@ -192,6 +194,7 @@ model Product {
   updatedAt            DateTime      @updatedAt
 
   images       ProductImage[]
+  videos       ProductVideo[]
   optionGroups ProductOptionGroup[]
   addOns       ProductAddOn[]
   quotes       QuoteRequest[]
@@ -201,6 +204,35 @@ model Product {
   @@index([status, displayOrder])
   @@index([categoryId])
   @@index([featured])
+}
+
+/// A product video. The file lives in object storage under media/ (public);
+/// the poster frame is an ordinary Media image captured in the admin's
+/// browser at upload time (there is no server-side video processing).
+/// Duplicated products share the same file, so storage is only deleted when
+/// the last row using a key is removed.
+model ProductVideo {
+  id           String     @id @default(cuid())
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  storageKey   String
+  url          String
+  originalName String
+  mimeType     String
+  size         Int // bytes
+  width        Int
+  height       Int
+  durationSec  Float
+  title        String     @default("") // accessible name / caption
+  posterId     String?
+  poster       Media?     @relation("VideoPoster", fields: [posterId], references: [id], onDelete: SetNull)
+  sortOrder    Int        @default(0)
+  uploadedById String?
+  uploadedBy   AdminUser? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+
+  @@index([productId, sortOrder])
+  @@index([storageKey])
 }
 
 model ProductImage {

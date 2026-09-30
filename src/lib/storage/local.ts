@@ -8,7 +8,16 @@ const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".webp": "image/webp",
   ".avif": "image/avif",
+  // Videos: ISO-BMFF (.mov included) is served as MP4 — see media/video.ts.
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".mov": "video/mp4",
+  ".webm": "video/webm",
 };
+
+export function contentTypeFor(filePath: string) {
+  return CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
+}
 
 /**
  * Stores files on local disk (default ./storage). Suitable for development.
@@ -21,6 +30,11 @@ export class LocalStorageDriver implements StorageDriver {
 
   constructor(root = process.env.LOCAL_STORAGE_DIR || path.join(process.cwd(), "storage")) {
     this.root = path.resolve(root);
+  }
+
+  /** Absolute path of a stored object (for streaming ranged responses). */
+  pathFor(key: string) {
+    return this.resolve(key);
   }
 
   private resolve(key: string) {
@@ -39,7 +53,7 @@ export class LocalStorageDriver implements StorageDriver {
     try {
       const full = this.resolve(key);
       const body = await fs.readFile(full);
-      return { body, contentType: CONTENT_TYPES[path.extname(full).toLowerCase()] ?? "application/octet-stream" };
+      return { body, contentType: contentTypeFor(full) };
     } catch {
       return null;
     }

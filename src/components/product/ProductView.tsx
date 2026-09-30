@@ -13,6 +13,7 @@ import { CtaBand } from "@/components/site/CtaBand";
 import { JsonLd } from "@/components/site/JsonLd";
 import { SectionHeading } from "@/components/site/SectionHeading";
 import { RidgeLine } from "@/components/brand/Logo";
+import { isoDuration } from "@/lib/media/video";
 import { ProductGallery } from "./ProductGallery";
 import { Configurator, type PurchaseMode } from "./Configurator";
 
@@ -20,7 +21,7 @@ type Data = NonNullable<Awaited<ReturnType<typeof getProductPage>>>;
 
 export async function ProductView({ data }: { data: Data }) {
   const [settings, shared, quotePage] = await Promise.all([getSettings(), getPageContent("product"), getPageContent("request-quote")]);
-  const { product, images, configurable, pricesVisible, startingPriceCents, related, faqs } = data;
+  const { product, images, videos, configurable, pricesVisible, startingPriceCents, related, faqs } = data;
   const flags = commerceState(settings);
   const mode: PurchaseMode = flags.ecommerce && product.purchasable ? "cart" : flags.quotes ? "quote" : "contact";
 
@@ -45,7 +46,21 @@ export async function ProductView({ data }: { data: Data }) {
     { label: product.name },
   ];
 
-  const absoluteImages = images.map((i) => (i.url.startsWith("http") ? i.url : siteUrl(i.url)));
+  const absolute = (url: string) => (url.startsWith("http") ? url : siteUrl(url));
+  const absoluteImages = images.map((i) => absolute(i.url));
+  // Google needs a thumbnail for every VideoObject; fall back to the first photo.
+  const videoObjects = videos
+    .map((v) => ({ v, thumb: v.poster?.url ?? images[0]?.url }))
+    .filter((x): x is { v: (typeof videos)[number]; thumb: string } => Boolean(x.thumb))
+    .map(({ v, thumb }) => ({
+      "@type": "VideoObject",
+      name: v.title || `${product.name} video`,
+      description: v.title || product.shortDescription || product.name,
+      thumbnailUrl: absolute(thumb),
+      uploadDate: v.createdAt.toISOString(),
+      contentUrl: absolute(v.url),
+      duration: isoDuration(v.durationSec),
+    }));
 
   return (
     <>
@@ -60,6 +75,7 @@ export async function ProductView({ data }: { data: Data }) {
           brand: { "@type": "Brand", name: settings.businessName },
           category: product.category?.name,
           url: siteUrl(`/furniture/${product.slug}`),
+          ...(videoObjects.length ? { subjectOf: videoObjects } : {}),
           ...(startingPriceCents != null
             ? {
                 offers: {
@@ -80,7 +96,19 @@ export async function ProductView({ data }: { data: Data }) {
         <div className="grid gap-10 lg:grid-cols-12 lg:gap-14 xl:gap-20">
           <div className="lg:col-span-7">
             <div className="lg:sticky lg:top-28">
-              <ProductGallery images={images.map((img, i) => ({ ...img, id: `${img.id}-${i}` }))} productName={product.name} />
+              <ProductGallery
+                images={images.map((img, i) => ({ ...img, id: `${img.id}-${i}` }))}
+                videos={videos.map((v) => ({
+                  id: v.id,
+                  url: v.url,
+                  mimeType: v.mimeType,
+                  width: v.width,
+                  height: v.height,
+                  title: v.title,
+                  posterUrl: v.poster?.url ?? null,
+                }))}
+                productName={product.name}
+              />
             </div>
           </div>
 

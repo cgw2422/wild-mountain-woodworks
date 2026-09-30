@@ -26,6 +26,9 @@ const csp = [
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://js.stripe.com`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
+  // Product videos: R2 public URL (https) or local /media-files; blob: for
+  // the admin's in-browser poster capture.
+  "media-src 'self' blob: https:",
   "font-src 'self' data:",
   "connect-src 'self'" + (isDev ? " ws: wss:" : ""),
   "frame-src 'self' https://checkout.stripe.com https://js.stripe.com",

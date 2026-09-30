@@ -17,14 +17,18 @@ import {
   archiveProduct,
   deleteProduct,
   duplicateProduct,
+  removeProductVideo,
+  reorderProductVideos,
   restoreProduct,
   saveProduct,
   saveProductImages,
   unpublishProduct,
+  updateProductVideoTitle,
 } from "../actions";
 import { AddOnsManager } from "./AddOnsManager";
 import { ImagesManager } from "./ImagesManager";
 import { OptionsManager } from "./OptionsManager";
+import { VideosManager } from "./VideosManager";
 
 export const metadata: Metadata = { title: "Edit product" };
 export const dynamic = "force-dynamic";
@@ -33,6 +37,7 @@ const SECTIONS = [
   { id: "basic", label: "Basic information" },
   { id: "pricing", label: "Pricing" },
   { id: "images", label: "Images" },
+  { id: "videos", label: "Videos" },
   { id: "options", label: "Options" },
   { id: "add-ons", label: "Add-ons" },
   { id: "specifications", label: "Specifications" },
@@ -51,6 +56,7 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
     include: {
       category: { select: { id: true, name: true, archivedAt: true } },
       images: { orderBy: [{ sortOrder: "asc" }], include: { media: true } },
+      videos: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], include: { poster: { select: { url: true } } } },
       optionGroups: { orderBy: { displayOrder: "asc" }, include: { valueOverrides: true } },
       addOns: { orderBy: { displayOrder: "asc" } },
       _count: { select: { quotes: true, orderItems: true } },
@@ -200,6 +206,26 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
                     focalY: img.media.focalY,
                     originalName: img.media.originalName,
                   },
+                }))}
+              />
+            </Card>
+
+            <Card id="videos" title={`Videos (${product.videos.length})`} description="Saved automatically. Videos appear in the product gallery after the photos." className="scroll-mt-6">
+              <VideosManager
+                productId={product.id}
+                saveTitle={updateProductVideoTitle.bind(null, product.id)}
+                reorder={reorderProductVideos.bind(null, product.id)}
+                remove={removeProductVideo.bind(null, product.id)}
+                initial={product.videos.map((v) => ({
+                  id: v.id,
+                  url: v.url,
+                  title: v.title,
+                  originalName: v.originalName,
+                  size: v.size,
+                  width: v.width,
+                  height: v.height,
+                  durationSec: v.durationSec,
+                  posterUrl: v.poster?.url ?? null,
                 }))}
               />
             </Card>

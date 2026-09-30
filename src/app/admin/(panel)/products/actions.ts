@@ -9,6 +9,7 @@ import { AdminError, adminAction, fd } from "@/lib/admin/action";
 import { isFurnitureSlugTaken, uniqueFurnitureSlug } from "@/lib/catalog/slugs";
 import { parseDollarsToCents } from "@/lib/money";
 import { isValidSlug } from "@/lib/slug";
+import { cleanupVideoFiles, deleteProductVideo } from "@/lib/media/video";
 import { intText, moneyText, optionalText, requiredText } from "./_lib/schemas";
 import {
   addOnsPayloadSchema,
@@ -374,7 +375,10 @@ export const deleteProduct = adminAction(async (admin, productId: string) => {
     throw new AdminError(`“${p.name}” is referenced by ${parts.join(" and ")}, so it can't be deleted. Archive it instead to hide it from the site.`);
   }
   // Product images/options/add-on attachments cascade; Media files are kept in the library.
+  // Video rows cascade too; their files are removed unless a duplicate still uses them.
+  const videos = await prisma.productVideo.findMany({ where: { productId }, select: { storageKey: true, posterId: true } });
   await prisma.product.delete({ where: { id: productId } });
+  await cleanupVideoFiles(videos);
   await logActivity("product.deleted", `${admin.name} deleted "${p.name}"`, { actorId: admin.id, entityType: "product", entityId: productId });
   revalidateSite();
   return { ok: true, message: "Product deleted." };
@@ -389,6 +393,7 @@ export const duplicateProduct = adminAction(async (admin, productId: string) => 
     where: { id: productId },
     include: {
       images: { orderBy: { sortOrder: "asc" } },
+      videos: { orderBy: { sortOrder: "asc" } },
       optionGroups: { orderBy: { displayOrder: "asc" }, include: { valueOverrides: true } },
       addOns: { orderBy: { displayOrder: "asc" } },
     },
@@ -426,6 +431,23 @@ export const duplicateProduct = adminAction(async (admin, productId: string) => 
         isSample: false,
         images: {
           create: src.images.map((img) => ({ mediaId: img.mediaId, alt: img.alt, sortOrder: img.sortOrder, isPrimary: img.isPrimary })),
+        },
+        // The copy shares the same stored files; they're only deleted once no product uses them.
+        videos: {
+          create: src.videos.map((v) => ({
+            storageKey: v.storageKey,
+            url: v.url,
+            originalName: v.originalName,
+            mimeType: v.mimeType,
+            size: v.size,
+            width: v.width,
+            height: v.height,
+            durationSec: v.durationSec,
+            title: v.title,
+            posterId: v.posterId,
+            sortOrder: v.sortOrder,
+            uploadedById: v.uploadedById,
+          })),
         },
         addOns: {
           create: src.addOns.map((a) => ({
@@ -466,4 +488,31 @@ export const duplicateProduct = adminAction(async (admin, productId: string) => 
   await logActivity("product.duplicated", `${admin.name} duplicated "${src.name}" as "${copy.name}"`, { actorId: admin.id, entityType: "product", entityId: copy.id });
   revalidateSite();
   return { ok: true, id: copy.id, message: "Duplicated." };
+});
+
+/* ------------------------------------------------------------------------ */
+/* Videos (uploads go through /api/admin/products/[id]/videos)               */
+/* ------------------------------------------------------------------------ */
+
+export const updateProductVideoTitle = adminAction(async (admin, productId: string, videoId: string, title: string) => {
+  const clean = z.string().trim().max(200, "Keep the title under 200 characters.").parse(title);
+  const res = await prisma.productVideo.updateMany({ where: { id: videoId, productId }, data: { title: clean } });
+  if (!res.count) throw new AdminError("That video no longer exists.");
+  revalidateSite();
+  return { ok: true, message: "Video title saved." };
+});
+
+export const reorderProductVideos = adminAction(async (admin, productId: string, ids: string[]) => {
+  const list = z.array(z.string().max(40)).max(50).parse(ids);
+  await prisma.$transaction(list.map((id, i) => prisma.productVideo.updateMany({ where: { id, productId }, data: { sortOrder: i } })));
+  revalidateSite();
+  return { ok: true, message: "Video order saved." };
+});
+
+export const removeProductVideo = adminAction(async (admin, productId: string, videoId: string) => {
+  const row = await deleteProductVideo(videoId, productId);
+  if (!row) throw new AdminError("That video no longer exists.");
+  await logActivity("product.updated", `${admin.name} removed a video from a product`, { actorId: admin.id, entityType: "product", entityId: productId });
+  revalidateSite();
+  return { ok: true, message: "Video removed." };
 });

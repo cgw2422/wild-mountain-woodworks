@@ -118,7 +118,7 @@ export const getProductPage = cache(async (where: { slug: string } | { id: strin
   const configurable = resolveConfigurableProduct(product);
   const pricesVisible = settings.showPrices && product.showPrice && product.basePriceCents != null;
 
-  const [related, faqs] = await Promise.all([
+  const [related, faqs, videos] = await Promise.all([
     prisma.product.findMany({
       where: { ...publicProductWhere, id: { not: product.id }, ...(product.categoryId ? { categoryId: product.categoryId } : {}) },
       orderBy: [{ featured: "desc" }, { displayOrder: "asc" }],
@@ -129,6 +129,11 @@ export const getProductPage = cache(async (where: { slug: string } | { id: strin
       where: { visible: true, archivedAt: null, showOnProductPages: true },
       orderBy: [{ category: { displayOrder: "asc" } }, { displayOrder: "asc" }],
       take: 6,
+    }),
+    prisma.productVideo.findMany({
+      where: { productId: product.id },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      include: { poster: { select: mediaFields } },
     }),
   ]);
 
@@ -147,6 +152,17 @@ export const getProductPage = cache(async (where: { slug: string } | { id: strin
   return {
     product,
     images: product.images.map((i) => withAlt(i)!).filter(Boolean),
+    videos: videos.map((v) => ({
+      id: v.id,
+      url: v.url,
+      mimeType: v.mimeType,
+      width: v.width,
+      height: v.height,
+      durationSec: v.durationSec,
+      title: v.title,
+      createdAt: v.createdAt,
+      poster: v.poster,
+    })),
     configurable,
     pricesVisible,
     startingPriceCents: pricesVisible ? startingPrice(configurable) : null,
