@@ -99,7 +99,7 @@ export async function ProductView({ data }: { data: Data }) {
         <div className="grid gap-10 lg:grid-cols-12 lg:gap-14 xl:gap-20">
           <div className="lg:col-span-7">
             <div className="relative lg:sticky lg:top-28">
-              {sale ? <SaleBadge label={sale.label} percentOff={sale.percentOff} className="-left-2 sm:-left-4 lg:left-4" /> : null}
+              {sale ? <SaleBadge label={sale.label} percentOff={sale.percentOff} size="hero" className="-left-2 sm:-left-4 lg:left-5" /> : null}
               <ProductGallery
                 images={images.map((img, i) => ({ ...img, id: `${img.id}-${i}` }))}
                 videos={videos.map((v) => ({
