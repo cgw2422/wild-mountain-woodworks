@@ -63,8 +63,8 @@ export interface ConfigurableProduct {
   sku: string | null;
   /** The base price charged now — the sale price while a sale is active. */
   basePriceCents: number | null;
-  /** Set while a sale is active: the regular base price and when the sale ends. */
-  sale: { regularBasePriceCents: number; endsAt: string | null } | null;
+  /** Set while a sale is active: the regular base price, when the sale ends and its label. */
+  sale: { regularBasePriceCents: number; endsAt: string | null; label: string | null } | null;
   optionGroups: ConfigOptionGroup[];
   addOns: ConfigAddOn[];
 }

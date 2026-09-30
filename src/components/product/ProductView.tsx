@@ -16,13 +16,14 @@ import { isoDuration } from "@/lib/media/video";
 import { lastSaleDay, siteDateInput, siteDateLabel } from "@/lib/site-time";
 import { ProductGallery } from "./ProductGallery";
 import { PriceTag } from "./PriceTag";
+import { SaleBadge } from "./SaleBadge";
 import { Configurator, type PurchaseMode } from "./Configurator";
 
 type Data = NonNullable<Awaited<ReturnType<typeof getProductPage>>>;
 
 export async function ProductView({ data }: { data: Data }) {
   const [settings, shared, quotePage] = await Promise.all([getSettings(), getPageContent("product"), getPageContent("request-quote")]);
-  const { product, images, videos, configurable, pricesVisible, startingPriceCents, regularPriceCents, saleEndsAt, related, faqs } = data;
+  const { product, images, videos, configurable, pricesVisible, startingPriceCents, regularPriceCents, sale, saleEndsAt, related, faqs } = data;
   const flags = commerceState(settings);
   const mode: PurchaseMode = flags.ecommerce && product.purchasable ? "cart" : flags.quotes ? "quote" : "contact";
 
@@ -97,7 +98,8 @@ export async function ProductView({ data }: { data: Data }) {
         <Breadcrumbs items={crumbs} className="mb-6 md:mb-10" />
         <div className="grid gap-10 lg:grid-cols-12 lg:gap-14 xl:gap-20">
           <div className="lg:col-span-7">
-            <div className="lg:sticky lg:top-28">
+            <div className="relative lg:sticky lg:top-28">
+              {sale ? <SaleBadge label={sale.label} percentOff={sale.percentOff} className="-left-2 sm:-left-4 lg:left-4" /> : null}
               <ProductGallery
                 images={images.map((img, i) => ({ ...img, id: `${img.id}-${i}` }))}
                 videos={videos.map((v) => ({
@@ -119,7 +121,7 @@ export async function ProductView({ data }: { data: Data }) {
             <h1 className="display-lg mt-4">{product.name}</h1>
             {startingPriceCents != null ? (
               <p className="mt-4 text-lg">
-                <PriceTag cents={startingPriceCents} regularCents={regularPriceCents} showPercent />
+                <PriceTag cents={startingPriceCents} regularCents={regularPriceCents} label={sale?.label} />
                 {regularPriceCents != null && saleEndsAt ? (
                   <span className="block text-sm text-muted">Sale ends {siteDateLabel(lastSaleDay(new Date(saleEndsAt)))}</span>
                 ) : null}

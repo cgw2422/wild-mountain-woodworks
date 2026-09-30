@@ -382,6 +382,21 @@ async function restoreMissingSampleFiles() {
 
 /* ------------------------------------------------------------ main */
 
+/** A switched-off starter announcement to edit in Admin → Promotions (only when there are none). */
+async function ensureStarterAnnouncement() {
+  if ((await prisma.announcement.count()) > 0) return;
+  await prisma.announcement.create({
+    data: {
+      name: "Fall Sale",
+      enabled: false,
+      message: "Fall Sale — Up to 30% Off Select Furniture",
+      linkText: "Shop the sale",
+      linkUrl: "/furniture/sale",
+    },
+  });
+  log("starter announcement ok (off)");
+}
+
 async function main() {
   await ensureSettings();
   await restoreMissingSampleFiles();
@@ -392,6 +407,7 @@ async function main() {
     await prerenderImages(Object.keys(IMAGE_SPECS));
   }
   await ensurePages(withSample);
+  await ensureStarterAnnouncement();
   await ensureAdmin();
   if (withSample) await seedSampleCatalog();
   else log("sample content skipped (catalog not empty or SEED_SAMPLE_CONTENT=false)");

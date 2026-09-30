@@ -205,7 +205,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                             saleStatus(p) === "active" ? (
                               <span title={`Regular ${formatCents(p.basePriceCents)}`}>
                                 <del className="mr-1.5 text-neutral-400">{formatCents(p.basePriceCents)}</del>
-                                <span className="font-medium text-emerald-700">{formatCents(p.salePriceCents!)}</span>
+                                <span className="font-semibold text-bronze-text">{formatCents(p.salePriceCents!)}</span>
                               </span>
                             ) : (
                               formatCents(p.basePriceCents)

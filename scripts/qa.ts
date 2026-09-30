@@ -26,6 +26,7 @@ const WIDTHS = [1440, 1024, 768, 390];
 const SEED_PATHS = [
   "/",
   "/furniture",
+  "/furniture/sale",
   "/our-work",
   "/custom-furniture",
   "/about",
@@ -53,6 +54,7 @@ const ADMIN_PATHS = [
   "/admin/custom-requests",
   "/admin/messages",
   "/admin/faqs",
+  "/admin/promotions",
   "/admin/pages",
   "/admin/homepage",
   "/admin/media",

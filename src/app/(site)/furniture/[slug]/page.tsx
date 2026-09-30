@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getPageContent } from "@/lib/cms/queries";
 import { buildMetadata, plainText } from "@/lib/seo";
-import { getCatalogProducts, getNavCategories, getProductPage, getPublicCategoryBySlug } from "@/lib/catalog/queries";
+import { countSaleProducts, getCatalogProducts, getNavCategories, getProductPage, getPublicCategoryBySlug } from "@/lib/catalog/queries";
 import { CatalogView } from "@/components/site/CatalogView";
 import { PageHero } from "@/components/site/PageHero";
 import { ProductView } from "@/components/product/ProductView";
@@ -41,7 +41,12 @@ export default async function FurnitureSlugPage({ params }: Props) {
 
   const category = await getPublicCategoryBySlug(slug);
   if (category && !category.linkUrl) {
-    const [page, categories, products] = await Promise.all([getPageContent("furniture"), getNavCategories(), getCatalogProducts(category.id)]);
+    const [page, categories, products, saleCount] = await Promise.all([
+      getPageContent("furniture"),
+      getNavCategories(),
+      getCatalogProducts(category.id),
+      countSaleProducts(),
+    ]);
     return (
       <>
         <PageHero
@@ -57,7 +62,7 @@ export default async function FurnitureSlugPage({ params }: Props) {
           breadcrumbs={[{ label: "Furniture", href: "/furniture" }, { label: category.name }]}
         />
         <div className="pt-10">
-          <CatalogView categories={categories} activeSlug={category.slug} products={products} customCta={page.section("custom-cta")} />
+          <CatalogView categories={categories} activeSlug={category.slug} products={products} customCta={page.section("custom-cta")} saleCount={saleCount} />
         </div>
       </>
     );

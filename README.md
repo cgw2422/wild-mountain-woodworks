@@ -229,7 +229,14 @@ If a section is added to the code later, the site still renders it with empty va
   - Values without an override follow the library automatically.
 - **Add-ons** are reusable or product-specific, with required, minimum and maximum quantities. Products can override the price, required flag and quantities.
 - **Pricing engine** (`src/lib/pricing/engine.ts`): base price + option modifiers + add-ons × quantity.
-- **Sale prices** (`src/lib/pricing/sale.ts`): a product's optional sale price (dollars or "20%", optional start/end dates) replaces the base price while it runs; options and add-ons are unchanged. It's applied server-side when the product is loaded, so the storefront, quotes and checkout all charge it, and quote snapshots record the regular price and savings. The site shows the regular price struck through.
+- **Sales** (`src/lib/pricing/sale.ts`, product editor → Pricing): Sale enabled, sale price (dollars or "30%"), optional start/end dates, optional label ("Fall Sale"). While enabled and inside its dates, the sale price replaces the regular (base) price; options and add-ons are unchanged. The discount % is always derived, never stored, and a sale price at or above the regular price is rejected (even while the sale is off). The active price is decided on the server per request (`resolveConfigurableProduct`), so the storefront, structured data, quotes and future checkout all use it, sales start and expire with no redeploy, and quote snapshots record the regular price and savings. On the site: struck-through regular price, bronze sale price, "SALE · 30% OFF" caption and a small image badge — only where prices are shown.
+- **Sale collection** (`/furniture/sale`): every live product whose sale is running right now, queried from the sale fields (`activeSaleWhere`), never a hand-picked list. A "Sale" filter appears in the catalog only while something is on sale; the empty page is `noindex`. Page text: Admin → Pages → Sale collection.
+
+## Promotions and the announcement bar
+
+Admin → Catalog → **Promotions**. Create an announcement, then set its message, secondary text, link, colors (brand presets; contrast is enforced), start/end date-times (site time zone), "show the end date", whether visitors can close it, and desktop/mobile visibility. The enabled announcement inside its dates shows above the main navigation on every public page (the most recently started wins if several overlap) and hides itself when it ends.
+
+Closing it is remembered per promotion in a small cookie (`wm_promo_dismissed`, read by the server so there's no flash). A new announcement — or changing the message, secondary text or link — shows again even to visitors who closed an earlier one. Links may only be site paths or http(s) URLs.
   - The same pure function gives the live estimate in the browser.
   - The server always re-prices from the database before storing anything. **Prices sent by a browser are never trusted** — there isn't even a price field to send.
 - **Showing prices.** Prices appear when Settings → Show prices *and* the product's own Show price setting are both on.

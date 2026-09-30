@@ -114,6 +114,26 @@ export const SEED_PAGES: SeedPage[] = [
     ],
   },
   {
+    slug: "sale",
+    title: "Sale",
+    seoTitle: "Furniture on Sale",
+    seoDescription: "Handcrafted pieces currently offered at a special price — each still built to order in our shop.",
+    sections: [
+      {
+        key: "hero",
+        eyebrow: "Furniture",
+        heading: "Currently on Sale",
+        body: "A select few pieces, offered at a special price for a limited time. Each is still built to order, to the same standard.",
+      },
+      {
+        key: "empty",
+        heading: "No pieces are on sale right now.",
+        body: "Every piece in the collection is built to order — browse the full collection, or tell us what you're looking for.",
+        primaryCta: ["View the Collection", "/furniture"],
+      },
+    ],
+  },
+  {
     slug: "furniture",
     title: "Furniture",
     seoTitle: "Handcrafted Furniture",

@@ -6,7 +6,7 @@ import { uniqueSlug } from "@/lib/slug";
  * Products and categories share the /furniture/[slug] namespace, so a slug
  * must be unique across BOTH tables. Reserved words are blocked too.
  */
-const RESERVED = new Set(["all", "new", "search", "cart", "checkout", "preview"]);
+const RESERVED = new Set(["all", "new", "search", "cart", "checkout", "preview", "sale"]);
 
 export async function isFurnitureSlugTaken(slug: string, exclude?: { productId?: string; categoryId?: string }) {
   if (RESERVED.has(slug)) return true;

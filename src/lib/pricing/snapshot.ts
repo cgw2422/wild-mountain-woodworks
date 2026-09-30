@@ -16,7 +16,7 @@ export interface ConfigurationSnapshot {
   /** The base price charged — the sale price when a sale was active. */
   basePriceCents: number | null;
   /** Present when a sale was active at submission (absent on older snapshots). */
-  sale?: { regularBasePriceCents: number; savingsCents: number } | null;
+  sale?: { regularBasePriceCents: number; savingsCents: number; label?: string | null } | null;
   options: Array<{
     groupId: string;
     groupName: string;
@@ -86,7 +86,7 @@ export function buildConfigurationSnapshot(
     currency: "usd",
     product: { id: product.id, name: product.name, slug: product.slug, sku: product.sku },
     basePriceCents: product.basePriceCents,
-    sale: product.sale ? { regularBasePriceCents: product.sale.regularBasePriceCents, savingsCents: pricing.savingsCents } : null,
+    sale: product.sale ? { regularBasePriceCents: product.sale.regularBasePriceCents, savingsCents: pricing.savingsCents, label: product.sale.label } : null,
     options,
     addOns,
     totalCents: pricing.totalCents,

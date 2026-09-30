@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { prisma } from "@/lib/db";
 import { POLICY_SLUGS } from "@/lib/cms/definitions";
-import { publicCategoryWhere, publicProductWhere } from "@/lib/catalog/queries";
+import { countSaleProducts, publicCategoryWhere, publicProductWhere } from "@/lib/catalog/queries";
 import { siteUrl } from "@/lib/site-url";
 import { logger } from "@/lib/logger";
 
@@ -10,14 +10,17 @@ export const dynamic = "force-dynamic";
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticPaths = ["/", "/furniture", "/our-work", "/custom-furniture", "/about", "/faq", "/contact", "/request-quote"];
   try {
-    const [products, categories, projects, policies] = await Promise.all([
+    const [products, categories, projects, policies, saleCount] = await Promise.all([
       prisma.product.findMany({ where: publicProductWhere, select: { slug: true, updatedAt: true } }),
       prisma.category.findMany({ where: { ...publicCategoryWhere, linkUrl: null }, select: { slug: true, updatedAt: true } }),
       prisma.portfolioProject.findMany({ where: { status: "PUBLISHED" }, select: { slug: true, updatedAt: true } }),
       prisma.page.findMany({ where: { slug: { in: POLICY_SLUGS }, status: "PUBLISHED" }, select: { slug: true, updatedAt: true } }),
+      countSaleProducts(),
     ]);
     return [
       ...staticPaths.map((p) => ({ url: siteUrl(p), changeFrequency: "weekly" as const, priority: p === "/" ? 1 : 0.8 })),
+      // Only while something is on sale.
+      ...(saleCount > 0 ? [{ url: siteUrl("/furniture/sale"), changeFrequency: "daily" as const, priority: 0.7 }] : []),
       ...categories.map((c) => ({ url: siteUrl(`/furniture/${c.slug}`), lastModified: c.updatedAt, priority: 0.8 })),
       ...products.map((p) => ({ url: siteUrl(`/furniture/${p.slug}`), lastModified: p.updatedAt, priority: 0.9 })),
       ...projects.map((p) => ({ url: siteUrl(`/our-work/${p.slug}`), lastModified: p.updatedAt, priority: 0.6 })),

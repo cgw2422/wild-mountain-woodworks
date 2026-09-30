@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { priceConfiguration, startingPrice } from "@/lib/pricing/engine";
 import { resolveConfigurableProduct } from "@/lib/pricing/resolve";
-import { activeSale, percentOff, saleStatus } from "@/lib/pricing/sale";
+import { activeSale, parseSaleAmount, percentOff, saleCaption, saleStatus } from "@/lib/pricing/sale";
 import { buildConfigurationSnapshot } from "@/lib/pricing/snapshot";
 import { lastSaleDay, siteDateInput, siteDayStart } from "@/lib/site-time";
 import { ridgeRecord } from "../support/fixtures";
@@ -27,6 +27,31 @@ describe("sale status", () => {
     expect(activeSale({ basePriceCents: 100000, salePriceCents: 150000 }, NOW)).toBeNull();
   });
 
+  it("is off while the sale is switched off, whatever the dates", () => {
+    expect(saleStatus({ basePriceCents: 120000, salePriceCents: 99500, saleEnabled: false }, NOW)).toBe("off");
+    expect(activeSale({ basePriceCents: 120000, salePriceCents: 99500, saleEnabled: false }, NOW)).toBeNull();
+    expect(activeSale({ basePriceCents: 120000, salePriceCents: 99500, saleEnabled: true, saleLabel: " Fall Sale " }, NOW)?.label).toBe("Fall Sale");
+  });
+
+  it("derives the discount and caption (never stored)", () => {
+    expect(percentOff(139900, 97900)).toBe(30);
+    expect(saleCaption(null, 30)).toBe("Sale · 30% off");
+    expect(saleCaption("Fall Sale", 30)).toBe("Fall Sale · 30% off");
+  });
+
+  it("parses dollars or a percentage, rejecting prices at or above regular", () => {
+    expect(parseSaleAmount("979", 139900)).toEqual({ cents: 97900 });
+    expect(parseSaleAmount("$1,095.50", 139900)).toEqual({ cents: 109550 });
+    expect(parseSaleAmount("30%", 139900)).toEqual({ cents: 97900 });
+    expect(parseSaleAmount("1399", 139900)).toMatchObject({ error: expect.stringMatching(/lower than the regular/) });
+    expect(parseSaleAmount("1500", 139900)).toMatchObject({ error: expect.any(String) });
+    expect(parseSaleAmount("0", 139900)).toMatchObject({ error: expect.any(String) });
+    expect(parseSaleAmount("-5", 139900)).toMatchObject({ error: expect.any(String) });
+    expect(parseSaleAmount("100%", 139900)).toMatchObject({ error: expect.any(String) });
+    expect(parseSaleAmount("979", null)).toMatchObject({ error: expect.stringMatching(/regular price/) });
+    expect(parseSaleAmount("  ", 139900)).toBeNull();
+  });
+
   it("rounds the percent off down", () => {
     expect(percentOff(120000, 99500)).toBe(17);
     expect(percentOff(100000, 80000)).toBe(20);
@@ -37,7 +62,7 @@ describe("pricing with a sale", () => {
   it("replaces only the base price; options and add-ons are unchanged", () => {
     const product = resolveConfigurableProduct(ridgeRecord({ salePriceCents: 99500 }), NOW);
     expect(product.basePriceCents).toBe(99500);
-    expect(product.sale).toEqual({ regularBasePriceCents: 120000, endsAt: null });
+    expect(product.sale).toEqual({ regularBasePriceCents: 120000, endsAt: null, label: null });
     const r = priceConfiguration(product, selection);
     expect(r.totalCents).toBe(99500 + 30000 + 80000 + 35000);
     expect(r.savingsCents).toBe(20500);
@@ -57,7 +82,7 @@ describe("pricing with a sale", () => {
     const product = resolveConfigurableProduct(ridgeRecord({ salePriceCents: 99500 }), NOW);
     const snap = buildConfigurationSnapshot(product, selection, priceConfiguration(product, selection), { priceShownToCustomer: true, now: NOW });
     expect(snap.basePriceCents).toBe(99500);
-    expect(snap.sale).toEqual({ regularBasePriceCents: 120000, savingsCents: 20500 });
+    expect(snap.sale).toEqual({ regularBasePriceCents: 120000, savingsCents: 20500, label: null });
     const regular = resolveConfigurableProduct(ridgeRecord(), NOW);
     expect(buildConfigurationSnapshot(regular, selection, priceConfiguration(regular, selection), { priceShownToCustomer: true }).sale).toBeNull();
   });

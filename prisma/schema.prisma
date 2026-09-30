@@ -231,11 +231,14 @@ model Product {
   description          String        @default("") // Markdown
   basePriceCents       Int?
   showPrice            Boolean       @default(true)
-  // Sale: replaces the base price (options/add-ons unchanged) while
-  // saleStartsAt <= now < saleEndsAt. Either bound may be open.
+  // Sale: while saleEnabled and saleStartsAt <= now < saleEndsAt (either
+  // bound may be open), salePriceCents replaces the base (regular) price;
+  // options and add-ons are unchanged. The discount % is always derived.
+  saleEnabled          Boolean       @default(false)
   salePriceCents       Int?
   saleStartsAt         DateTime?
   saleEndsAt           DateTime?
+  saleLabel            String? // e.g. "Fall Sale" — shown instead of "Sale"
   featured             Boolean       @default(false)
   featuredOrder        Int           @default(0)
   // Future commerce: individual products can be excluded from online
@@ -270,6 +273,7 @@ model Product {
 
   @@index([status, displayOrder])
   @@index([categoryId])
+  @@index([saleEnabled, saleStartsAt, saleEndsAt])
   @@index([featured])
 }
 
@@ -983,4 +987,31 @@ model PriceEstimate {
 
   @@index([archivedAt, updatedAt])
   @@index([productId])
+}
+
+/// Sitewide announcement/promotion bar shown above the main navigation.
+/// The first enabled announcement inside its schedule is shown.
+model Announcement {
+  id              String    @id @default(cuid())
+  name            String // internal name, e.g. "Fall Sale 2026"
+  enabled         Boolean   @default(false)
+  message         String
+  secondaryText   String?
+  linkText        String?
+  linkUrl         String?
+  backgroundColor String    @default("#1f1e1c")
+  textColor       String    @default("#f7f3ec")
+  startsAt        DateTime?
+  endsAt          DateTime?
+  showEndDate     Boolean   @default(true)
+  dismissible     Boolean   @default(true)
+  showOnDesktop   Boolean   @default(true)
+  showOnMobile    Boolean   @default(true)
+  /// Bumped when the visible wording or link changes, so visitors who
+  /// dismissed the previous wording see the new promotion.
+  revision        Int       @default(1)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([enabled, startsAt, endsAt])
 }

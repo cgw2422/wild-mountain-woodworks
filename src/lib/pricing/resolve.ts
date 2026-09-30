@@ -22,9 +22,11 @@ export interface ProductConfigRecord {
   slug: string;
   sku: string | null;
   basePriceCents: number | null;
+  saleEnabled?: boolean;
   salePriceCents?: number | null;
   saleStartsAt?: Date | null;
   saleEndsAt?: Date | null;
+  saleLabel?: string | null;
   optionGroups: Array<{
     displayOrder: number;
     requiredOverride: boolean | null;
@@ -167,7 +169,7 @@ export function resolveConfigurableProduct(record: ProductConfigRecord, now: Dat
     slug: record.slug,
     sku: record.sku,
     basePriceCents: sale ? sale.priceCents : record.basePriceCents,
-    sale: sale ? { regularBasePriceCents: sale.regularPriceCents, endsAt: sale.endsAt } : null,
+    sale: sale ? { regularBasePriceCents: sale.regularPriceCents, endsAt: sale.endsAt, label: sale.label } : null,
     optionGroups,
     addOns,
   };

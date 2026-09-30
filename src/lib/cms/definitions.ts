@@ -154,6 +154,22 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
     }],
   },
   {
+    slug: "sale",
+    title: "Sale collection",
+    path: "/furniture/sale",
+    kind: "system",
+    description: "Header for /furniture/sale, which lists every piece whose sale is running right now (set per product in Products → Pricing).",
+    sections: [
+      hero({ imageHelp: "Optional wide image above the sale collection." }),
+      {
+        key: "empty",
+        label: "When nothing is on sale",
+        help: "Shown when no sale is running. The page is also hidden from search engines then.",
+        fields: ["heading", "body", "primaryCta"],
+      },
+    ],
+  },
+  {
     slug: "custom-furniture",
     title: "Custom Furniture",
     path: "/custom-furniture",

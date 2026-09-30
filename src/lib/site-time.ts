@@ -61,3 +61,39 @@ export function siteDateLabel(at: Date, tz = siteTimeZone(), now = new Date()): 
 export function lastSaleDay(endsAt: Date): Date {
   return new Date(endsAt.getTime() - 1);
 }
+
+const DATETIME_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/;
+
+/** "YYYY-MM-DDTHH:mm" (from <input type="datetime-local">) in the site time zone → UTC instant. */
+export function siteDateTime(value: string, tz = siteTimeZone()): Date | null {
+  const m = DATETIME_RE.exec(value.trim());
+  if (!m) return null;
+  const h = Number(m[2]), min = Number(m[3]);
+  if (h > 23 || min > 59) return null;
+  const day = siteDayStart(m[1]!, 0, tz);
+  if (!day) return null;
+  // Add the wall-clock time, then correct for a DST change during the day.
+  const guess = day.getTime() + (h * 60 + min) * 60_000;
+  const [y, mo, d] = m[1]!.split("-").map(Number);
+  const wall = Date.UTC(y!, mo! - 1, d!, h, min);
+  let t = wall - offsetMs(new Date(guess), tz);
+  t = wall - offsetMs(new Date(t), tz);
+  return new Date(t);
+}
+
+/** Instant → "YYYY-MM-DDTHH:mm" in the site time zone (for <input type="datetime-local">). */
+export function siteDateTimeInput(at: Date | null | undefined, tz = siteTimeZone()): string {
+  if (!at) return "";
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+      .formatToParts(at)
+      .map((p) => [p.type, p.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+/** "October 6" (or "October 6, 2027" outside the current year) in the site time zone. */
+export function siteLongDateLabel(at: Date, tz = siteTimeZone(), now = new Date()): string {
+  const sameYear = siteDateInput(at, tz).slice(0, 4) === siteDateInput(now, tz).slice(0, 4);
+  return new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "long", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) }).format(at);
+}

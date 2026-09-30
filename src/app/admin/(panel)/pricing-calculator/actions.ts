@@ -228,13 +228,19 @@ export const convertEstimateToQuote = adminAction(async (admin, estimateId: stri
  * the product is live and prices are shown.
  */
 export const updateProductPricing = adminAction(async (admin, productId: string, data: FormData) => {
-  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, name: true } });
+  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, name: true, saleEnabled: true, salePriceCents: true } });
   if (!product) throw new AdminError("That product no longer exists.");
   const update: Prisma.ProductUpdateInput = {};
   const changes: string[] = [];
   if (fd.bool(data, "applyBasePrice")) {
     const cents = parseDollarsToCents(fd.str(data, "basePrice"));
     if (cents == null || Number.isNaN(cents) || cents <= 0) throw new AdminError("Enter a valid base price.", { basePrice: "Enter an amount." });
+    if (product.salePriceCents != null && cents <= product.salePriceCents) {
+      throw new AdminError(
+        `“${product.name}” has a sale price of ${formatCents(product.salePriceCents)}. The regular price must be higher — change or remove the sale in the product editor first.`,
+        { basePrice: "Must be higher than the product's sale price." },
+      );
+    }
     update.basePriceCents = cents;
     changes.push(`base price ${formatCents(cents)}`);
   }

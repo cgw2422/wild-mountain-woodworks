@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CmsImage } from "@/components/media/CmsImage";
 import { PriceTag } from "@/components/product/PriceTag";
+import { SaleBadge } from "@/components/product/SaleBadge";
 import type { ProductCardData } from "@/lib/catalog/queries";
 import { cn } from "@/lib/cn";
 
@@ -15,6 +16,7 @@ export function ProductCard({ product, priority, className }: { product: Product
               <CmsImage image={product.secondaryImage} slot="productCard" alt="" className="h-full" />
             </div>
           ) : null}
+          {product.sale ? <SaleBadge label={product.sale.label} percentOff={product.sale.percentOff} /> : null}
         </div>
       </div>
       <div className="mt-5 flex flex-col gap-2">
@@ -30,7 +32,7 @@ export function ProductCard({ product, priority, className }: { product: Product
             <span className="link-underline group-hover:[background-size:100%_1px]">View Piece</span>
           </span>
           {product.startingPriceCents != null ? (
-            <PriceTag cents={product.startingPriceCents} regularCents={product.regularPriceCents} className="justify-end text-right text-[0.9rem] text-charcoal" />
+            <PriceTag cents={product.startingPriceCents} regularCents={product.regularPriceCents} showCaption={false} className="justify-end text-right text-[0.9rem] text-charcoal" />
           ) : null}
         </div>
       </div>

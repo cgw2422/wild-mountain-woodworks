@@ -33,16 +33,23 @@ describe.skipIf(!hasTestDb)("product sale prices", () => {
     await createSignedInAdmin();
     const { product } = await seedRidge();
 
-    const ok = await actions.saveProduct(product.id, form(product, { basePrice: "1295", salePrice: "20%", saleStarts: "2026-10-01", saleEnds: "2026-10-14" }));
+    const ok = await actions.saveProduct(product.id, form(product, { basePrice: "1295", saleEnabled: "on", saleLabel: "Fall Sale", salePrice: "20%", saleStarts: "2026-10-01", saleEnds: "2026-10-14" }));
     expect(ok.ok).toBe(true);
     const saved = await prisma.product.findUniqueOrThrow({ where: { id: product.id } });
-    expect(saved.salePriceCents).toBe(103600);
+    expect(saved).toMatchObject({ saleEnabled: true, saleLabel: "Fall Sale", salePriceCents: 103600 });
     expect(saved.saleStartsAt!.toISOString()).toBe("2026-10-01T04:00:00.000Z");
     expect(saved.saleEndsAt!.toISOString()).toBe("2026-10-15T04:00:00.000Z");
     expect(await prisma.activityLog.count({ where: { type: "product.sale_updated", entityId: product.id } })).toBe(1);
 
-    const notLower = await actions.saveProduct(product.id, form(product, { basePrice: "1200", salePrice: "1500" }));
-    expect(notLower).toMatchObject({ ok: false, fieldErrors: { salePrice: expect.stringMatching(/lower than the base/) } });
+    const notLower = await actions.saveProduct(product.id, form(product, { basePrice: "1200", saleEnabled: "on", salePrice: "1500" }));
+    expect(notLower).toMatchObject({ ok: false, fieldErrors: { salePrice: expect.stringMatching(/lower than the regular/) } });
+    // Rejected even while switched off, so it can't be enabled later.
+    const equalOff = await actions.saveProduct(product.id, form(product, { basePrice: "1200", salePrice: "1200" }));
+    expect(equalOff).toMatchObject({ ok: false, fieldErrors: { salePrice: expect.any(String) } });
+    const enabledBlank = await actions.saveProduct(product.id, form(product, { basePrice: "1200", saleEnabled: "on", salePrice: "" }));
+    expect(enabledBlank).toMatchObject({ ok: false, fieldErrors: { salePrice: expect.any(String) } });
+    const longLabel = await actions.saveProduct(product.id, form(product, { basePrice: "1200", salePrice: "995", saleLabel: "x".repeat(41) }));
+    expect(longLabel).toMatchObject({ ok: false, fieldErrors: { saleLabel: expect.any(String) } });
     const backwards = await actions.saveProduct(product.id, form(product, { basePrice: "1200", salePrice: "995", saleStarts: "2026-10-14", saleEnds: "2026-10-01" }));
     expect(backwards).toMatchObject({ ok: false, fieldErrors: { saleEnds: expect.any(String) } });
     const noBase = await actions.saveProduct(product.id, form(product, { basePrice: "", salePrice: "995" }));
@@ -50,10 +57,22 @@ describe.skipIf(!hasTestDb)("product sale prices", () => {
     // Rejected saves change nothing.
     expect((await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).salePriceCents).toBe(103600);
 
+    const off = await actions.saveProduct(product.id, form(product, { basePrice: "1295", salePrice: "1036" }));
+    expect(off.ok).toBe(true);
+    expect(await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).toMatchObject({ saleEnabled: false, salePriceCents: 103600 });
+
     const cleared = await actions.saveProduct(product.id, form(product, { basePrice: "1200", salePrice: "", saleStarts: "2026-10-01" }));
     expect(cleared.ok).toBe(true);
-    expect(await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).toMatchObject({ salePriceCents: null, saleStartsAt: null, saleEndsAt: null });
-    expect(await prisma.activityLog.count({ where: { type: "product.sale_removed" } })).toBe(1);
+    expect(await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).toMatchObject({ saleEnabled: false, salePriceCents: null, saleStartsAt: null, saleEndsAt: null });
+    expect(await prisma.activityLog.count({ where: { type: "product.sale_removed" } })).toBe(2);
+  });
+
+  it("never publishes with a bad sale price", async () => {
+    await createSignedInAdmin();
+    const { product } = await seedRidge("DRAFT");
+    const res = await actions.saveProduct(product.id, form(product, { intent: "publish", basePrice: "1200", saleEnabled: "on", salePrice: "1300" }));
+    expect(res.ok).toBe(false);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).status).toBe("DRAFT");
   });
 
   it("refuses to change a sale without an admin session", async () => {
@@ -65,11 +84,11 @@ describe.skipIf(!hasTestDb)("product sale prices", () => {
   it("prices quotes at the sale price server-side, only while the sale is running", async () => {
     const { product, ids } = await seedRidge();
     const selection = { options: { [ids.size]: ids.s84, [ids.wood]: ids.walnut }, addOns: {}, customDetails: {} };
-    await prisma.product.update({ where: { id: product.id }, data: { salePriceCents: 99500, saleEndsAt: new Date(Date.now() + 86_400_000) } });
+    await prisma.product.update({ where: { id: product.id }, data: { saleEnabled: true, salePriceCents: 99500, saleEndsAt: new Date(Date.now() + 86_400_000) } });
 
     const onSale = await createConfigurationQuote({ ...customer, productId: product.id, selection });
     expect(onSale.estimatedTotalCents).toBe(99500 + 30000 + 60000);
-    expect(parseSnapshot(onSale.configuration)!.sale).toEqual({ regularBasePriceCents: 120000, savingsCents: 20500 });
+    expect(parseSnapshot(onSale.configuration)!.sale).toEqual({ regularBasePriceCents: 120000, savingsCents: 20500, label: null });
 
     await prisma.product.update({ where: { id: product.id }, data: { saleEndsAt: new Date(Date.now() - 1000) } });
     const after = await createConfigurationQuote({ ...customer, productId: product.id, selection });

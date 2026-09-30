@@ -25,6 +25,7 @@ const GROUPS: Array<{ label: string; items: Array<{ href: string; label: string;
       { href: "/admin/categories", label: "Categories" },
       { href: "/admin/options", label: "Options" },
       { href: "/admin/add-ons", label: "Add-ons" },
+      { href: "/admin/promotions", label: "Promotions" },
     ],
   },
   {

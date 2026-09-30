@@ -6,6 +6,8 @@ import { mediaFields, type MediaRef } from "@/lib/cms/queries";
 import { configurableProductInclude } from "@/lib/pricing/load";
 import { resolveConfigurableProduct } from "@/lib/pricing/resolve";
 import { startingPrice } from "@/lib/pricing/engine";
+import { percentOff } from "@/lib/pricing/sale";
+import type { ConfigurableProduct } from "@/lib/pricing/types";
 import { getSettings } from "@/lib/settings";
 
 /**
@@ -37,6 +39,8 @@ export interface ProductCardData {
   startingPriceCents: number | null;
   /** The regular "from" price while a sale is active (shown struck through), else null. */
   regularPriceCents: number | null;
+  /** Set only while a sale is active AND prices are shown. */
+  sale: { label: string | null; percentOff: number } | null;
 }
 
 const cardInclude = { ...configurableProductInclude, ...imageInclude, category: true } satisfies Prisma.ProductInclude;
@@ -47,8 +51,23 @@ function withAlt(img: { media: MediaRef; alt: string | null } | undefined): Medi
   return { ...img.media, alt: img.alt?.trim() || img.media.alt };
 }
 
-function toCard(p: CardRecord, pricesVisible: boolean): ProductCardData {
-  const configurable = resolveConfigurableProduct(p);
+/**
+ * Display prices, resolved server-side at request time: an expired or
+ * scheduled sale is simply absent, so nothing needs a redeploy. Sales are
+ * only shown where prices are shown.
+ */
+function salePricing(configurable: ConfigurableProduct, visible: boolean) {
+  const start = visible ? startingPrice(configurable) : null;
+  const regular = visible && start != null && configurable.sale ? startingPrice(configurable, { regular: true }) : null;
+  return {
+    startingPriceCents: start,
+    regularPriceCents: regular,
+    sale: start != null && regular != null && regular > start ? { label: configurable.sale!.label, percentOff: percentOff(regular, start) } : null,
+  };
+}
+
+function toCard(p: CardRecord, pricesVisible: boolean, now: Date = new Date()): ProductCardData {
+  const configurable = resolveConfigurableProduct(p, now);
   const visible = pricesVisible && p.showPrice;
   return {
     id: p.id,
@@ -58,8 +77,7 @@ function toCard(p: CardRecord, pricesVisible: boolean): ProductCardData {
     categoryName: p.category?.name ?? null,
     image: withAlt(p.images[0]),
     secondaryImage: withAlt(p.images[1]),
-    startingPriceCents: visible ? startingPrice(configurable) : null,
-    regularPriceCents: visible && configurable.sale ? startingPrice(configurable, { regular: true }) : null,
+    ...salePricing(configurable, visible),
   };
 }
 
@@ -102,6 +120,40 @@ export async function getCatalogProducts(categoryId?: string) {
   });
   return products.map((p) => toCard(p, settings.showPrices));
 }
+
+/**
+ * Products whose sale is running at `now`, decided in the database from the
+ * sale toggle, window and prices — never from a hand-maintained list — and
+ * re-checked by the pricing engine. Scheduled sales appear on their start
+ * date and expired ones drop out automatically.
+ */
+export function activeSaleWhere(now: Date = new Date()) {
+  return {
+    saleEnabled: true,
+    salePriceCents: { not: null, gt: 0, lt: prisma.product.fields.basePriceCents },
+    basePriceCents: { not: null },
+    AND: [{ OR: [{ saleStartsAt: null }, { saleStartsAt: { lte: now } }] }, { OR: [{ saleEndsAt: null }, { saleEndsAt: { gt: now } }] }],
+  } satisfies Prisma.ProductWhereInput;
+}
+
+/** Cards for /furniture/sale: live products with an active, visible sale. */
+export async function getSaleProducts(now: Date = new Date()) {
+  const settings = await getSettings();
+  if (!settings.showPrices) return [];
+  const products = await prisma.product.findMany({
+    where: { ...publicProductWhere, ...activeSaleWhere(now), showPrice: true },
+    orderBy: [{ featured: "desc" }, { displayOrder: "asc" }, { createdAt: "desc" }],
+    include: cardInclude,
+  });
+  return products.map((p) => toCard(p, true, now)).filter((c) => c.sale != null);
+}
+
+/** How many public pieces are on sale right now (for the catalog's "Sale" filter). */
+export const countSaleProducts = cache(async () => {
+  const settings = await getSettings();
+  if (!settings.showPrices) return 0;
+  return prisma.product.count({ where: { ...publicProductWhere, ...activeSaleWhere(), showPrice: true } });
+});
 
 export const getPublicCategoryBySlug = cache(async (slug: string) =>
   prisma.category.findFirst({ where: { slug, ...publicCategoryWhere }, include: { image: { select: mediaFields } } }),
@@ -169,8 +221,7 @@ export const getProductPage = cache(async (where: { slug: string } | { id: strin
     })),
     configurable,
     pricesVisible,
-    startingPriceCents: pricesVisible ? startingPrice(configurable) : null,
-    regularPriceCents: pricesVisible && configurable.sale ? startingPrice(configurable, { regular: true }) : null,
+    ...salePricing(configurable, pricesVisible),
     saleEndsAt: pricesVisible ? (configurable.sale?.endsAt ?? null) : null,
     related: relatedCards,
     faqs,
