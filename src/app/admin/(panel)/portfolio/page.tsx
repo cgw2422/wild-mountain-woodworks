@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import {requirePermission} from "@/lib/auth/session";
 import { AdminLinkButton, EmptyState, PageHeader, formatDate, table } from "@/components/admin/ui";
 import { reorderProjects } from "./actions";
 import { PortfolioList, type ProjectRow } from "./PortfolioList";
@@ -9,7 +9,7 @@ import { PortfolioList, type ProjectRow } from "./PortfolioList";
 export const metadata: Metadata = { title: "Portfolio" };
 
 export default async function PortfolioIndex() {
-  await requireAdmin();
+  await requirePermission("content");
   const projects = await prisma.portfolioProject.findMany({
     orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
     include: {

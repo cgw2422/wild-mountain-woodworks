@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requirePermission } from "@/lib/auth/session";
 import Link from "next/link";
 import type { CustomRequestStatus, QuoteStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -52,7 +53,11 @@ function ChecklistItem({ ok, title, children }: { ok: boolean; title: React.Reac
 
 const linkCls = "font-medium text-neutral-900 underline underline-offset-2 hover:text-neutral-600";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
+  const admin = await requirePermission("dashboard");
+  const denied = (await searchParams).denied === "1";
+  // Editors get a content-only dashboard: no inbox, catalog or security data.
+  if (admin.role === "EDITOR") return <EditorDashboard name={admin.name} denied={denied} />;
   const [
     settings,
     activeProducts,
@@ -104,6 +109,7 @@ export default async function DashboardPage() {
 
   return (
     <>
+      {denied ? <DeniedNotice /> : null}
       <PageHeader
         title="Dashboard"
         description={`Welcome back. Here's what needs attention at ${settings.businessName}.`}
@@ -320,6 +326,97 @@ export default async function DashboardPage() {
             </ul>
           </Card>
         </div>
+      </div>
+    </>
+  );
+}
+
+function DeniedNotice() {
+  return (
+    <p role="alert" className="mb-5 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      Your role doesn&apos;t include that area. Ask an owner if you need access.
+    </p>
+  );
+}
+
+const CONTENT_ACTIVITY = ["page.", "homepage.", "faq.", "portfolio.", "media.", "navigation.", "menu."];
+
+async function EditorDashboard({ name, denied }: { name: string; denied: boolean }) {
+  const [drafts, reviewPages, missingAlt, activity] = await Promise.all([
+    prisma.page.findMany({ where: { status: "DRAFT" }, orderBy: { updatedAt: "desc" }, take: 8, select: { slug: true, title: true, updatedAt: true } }),
+    prisma.page.findMany({ where: { reviewRequired: true }, orderBy: { title: "asc" }, select: { slug: true, title: true } }),
+    prisma.media.count({ where: { alt: "" } }),
+    prisma.activityLog.findMany({
+      where: { OR: CONTENT_ACTIVITY.map((t) => ({ type: { startsWith: t } })) },
+      orderBy: { createdAt: "desc" },
+      take: 12,
+      include: { actor: { select: { name: true } } },
+    }),
+  ]);
+  return (
+    <>
+      {denied ? <DeniedNotice /> : null}
+      <PageHeader
+        title="Dashboard"
+        description={`Welcome back, ${name}. You can edit pages, the homepage, portfolio, FAQs, navigation and media.`}
+        actions={
+          <>
+            <AdminLinkButton href="/admin/pages/new" variant="primary">
+              New page
+            </AdminLinkButton>
+            <AdminLinkButton href="/admin/homepage">Edit homepage</AdminLinkButton>
+            <AdminLinkButton href="/admin/navigation">Navigation</AdminLinkButton>
+            <AdminLinkButton href="/admin/media">Media</AdminLinkButton>
+          </>
+        }
+      />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card title="Draft pages" description="Not visible to visitors until published.">
+          {drafts.length ? (
+            <ul className="divide-y divide-neutral-100 text-sm">
+              {drafts.map((p) => (
+                <li key={p.slug} className="flex justify-between gap-3 py-2">
+                  <Link href={`/admin/pages/${p.slug}`} className={linkCls}>
+                    {p.title}
+                  </Link>
+                  <span className="text-neutral-500">{formatDate(p.updatedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-neutral-600">No draft pages.</p>
+          )}
+        </Card>
+        <Card title="Needs attention">
+          <ul className="space-y-2 text-sm">
+            <li>
+              {reviewPages.length ? `${reviewPages.length} page(s) flagged for owner/legal review.` : "No pages flagged for review."}
+            </li>
+            <li>
+              {missingAlt ? (
+                <Link href="/admin/media?filter=noalt" className={linkCls}>
+                  {missingAlt} image{missingAlt === 1 ? "" : "s"} missing alt text
+                </Link>
+              ) : (
+                "All images have alt text."
+              )}
+            </li>
+          </ul>
+        </Card>
+        <Card title="Recent content changes" className="lg:col-span-2">
+          {activity.length ? (
+            <ul className="divide-y divide-neutral-100 text-sm">
+              {activity.map((a) => (
+                <li key={a.id} className="flex justify-between gap-3 py-2">
+                  <span className="[overflow-wrap:anywhere]">{a.message}</span>
+                  <span className="shrink-0 text-neutral-500">{formatDate(a.createdAt, true)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-neutral-600">Nothing yet.</p>
+          )}
+        </Card>
       </div>
     </>
   );

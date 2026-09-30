@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { centsToDollarInput } from "@/lib/money";
@@ -13,6 +14,7 @@ export const metadata: Metadata = { title: "Edit add-on" };
 export const dynamic = "force-dynamic";
 
 export default async function AddOnPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireAdmin();
   const { id } = await params;
   const addOn = await prisma.addOn.findUnique({
     where: { id },

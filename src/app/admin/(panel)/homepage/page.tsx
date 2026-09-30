@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import {requirePermission} from "@/lib/auth/session";
 import { getPageDefinition } from "@/lib/cms/definitions";
 import { ActionForm, SubmitButton, Toggle } from "@/components/admin/forms";
 import { PageSettingsForm } from "@/components/admin/content/PageSettingsForm";
@@ -25,7 +25,7 @@ const primaryImage = {
 };
 
 export default async function HomepageEditor() {
-  await requireAdmin();
+  await requirePermission("content");
   const def = getPageDefinition("home");
   if (!def) notFound();
 
@@ -62,7 +62,7 @@ export default async function HomepageEditor() {
     image: p.images[0]?.media ?? null,
     href: `/admin/portfolio/${p.id}`,
   }));
-  const links = linkSuggestions();
+  const links = await linkSuggestions();
   const homeCategories = categories.filter((c) => c.showOnHomepage && c.visible);
 
   const panels: Record<string, React.ReactNode> = {
@@ -186,8 +186,8 @@ export default async function HomepageEditor() {
             action={savePageSettings.bind(null, "home")}
             title={page?.title ?? def.title}
             defaultTitle={def.title}
-            status="PUBLISHED"
-            canDraft={false}
+            navLabel={page?.navLabel ?? null}
+            slug={null}
             seoTitle={page?.seoTitle ?? null}
             seoDescription={page?.seoDescription ?? null}
             ogImage={page?.ogImage ?? null}

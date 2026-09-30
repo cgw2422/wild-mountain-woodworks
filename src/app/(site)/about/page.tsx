@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getPageContent } from "@/lib/cms/queries";
+import { NOT_FOUND_METADATA, getVisiblePage, requireVisiblePage, withPreviewRobots } from "@/lib/cms/pages";
 import { buildMetadata } from "@/lib/seo";
 import { CmsImage } from "@/components/media/CmsImage";
 import { Container } from "@/components/ui/Container";
@@ -12,12 +12,14 @@ import { CtaBand } from "@/components/site/CtaBand";
 import { RidgeLine } from "@/components/brand/Logo";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const page = await getPageContent("about");
-  return buildMetadata({ title: page.seoTitle ?? "About", description: page.seoDescription, path: "/about", image: page.ogImage ?? page.section("hero").image });
+  const visible = await getVisiblePage("about");
+  if (!visible) return NOT_FOUND_METADATA;
+  const page = visible.page;
+  return withPreviewRobots(visible, buildMetadata({ title: page.seoTitle ?? "About", description: page.seoDescription, path: "/about", image: page.ogImage ?? page.section("hero").image }));
 }
 
 export default async function AboutPage() {
-  const page = await getPageContent("about");
+  const { page } = await requireVisiblePage("about");
   const intro = page.section("intro");
   const why = page.section("why");
   const craft = page.section("craftsmanship");

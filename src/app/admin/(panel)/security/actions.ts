@@ -7,7 +7,7 @@ import { z } from "zod";
 import { isAPIError } from "better-auth/api";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
-import { AdminError, adminAction, fd, ownerAction } from "@/lib/admin/action";
+import { AdminError, permittedAction, fd, ownerAction } from "@/lib/admin/action";
 import { getAuth } from "@/lib/auth/auth";
 import { requireAdmin } from "@/lib/auth/session";
 import { logger } from "@/lib/logger";
@@ -31,7 +31,7 @@ async function throttle(adminId: string, what: string) {
 
 /* Your account ---------------------------------------------------------------- */
 
-export const changePassword = adminAction(async (admin, data: FormData) => {
+export const changePassword = permittedAction("own_account", async (admin, data: FormData) => {
   await throttle(admin.id, "password");
   const current = str(data, "currentPassword");
   const next = str(data, "newPassword");
@@ -70,7 +70,7 @@ export async function regenerateBackupCodes(password: string): Promise<{ ok: boo
 }
 
 /** Replace the authenticator: turn two-factor off, then enrolment is required again immediately. */
-export const replaceAuthenticator = adminAction(async (admin, data: FormData) => {
+export const replaceAuthenticator = permittedAction("own_account", async (admin, data: FormData) => {
   await throttle(admin.id, "replace-mfa");
   try {
     await getAuth().api.disableTwoFactor({ body: { password: str(data, "password") }, headers: await headers() });
@@ -82,7 +82,7 @@ export const replaceAuthenticator = adminAction(async (admin, data: FormData) =>
   redirect("/admin/setup-mfa");
 });
 
-export const revokeMySession = adminAction(async (admin, sessionId: string) => {
+export const revokeMySession = permittedAction("own_account", async (admin, sessionId: string) => {
   if (sessionId === admin.sessionId) throw new AdminError("Use Sign out to end this session.");
   const res = await prisma.adminSession.deleteMany({ where: { id: sessionId, userId: admin.id } });
   if (!res.count) throw new AdminError("That session has already ended.");
@@ -91,7 +91,7 @@ export const revokeMySession = adminAction(async (admin, sessionId: string) => {
   return { ok: true, message: "Session signed out." };
 });
 
-export const revokeMyOtherSessions = adminAction(async (admin) => {
+export const revokeMyOtherSessions = permittedAction("own_account", async (admin) => {
   const res = await prisma.adminSession.deleteMany({ where: { userId: admin.id, id: { not: admin.sessionId } } });
   await logActivity("admin.sessions_revoked", `${admin.name} signed out their other sessions (${res.count})`, { actorId: admin.id, entityType: "admin", entityId: admin.id });
   refresh();
@@ -100,7 +100,7 @@ export const revokeMyOtherSessions = adminAction(async (admin) => {
 
 /* Admin users (owner only) --------------------------------------------------------- */
 
-const roleSchema = z.enum(["OWNER", "ADMIN"], { message: "Choose a role." });
+const roleSchema = z.enum(["OWNER", "ADMIN", "EDITOR"], { message: "Choose a role." });
 
 async function target(userId: string) {
   const user = await prisma.adminUser.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true, role: true, active: true } });
@@ -147,7 +147,7 @@ export const setAdminRole = ownerAction(async (admin, userId: string, role: stri
     entityId: userId,
   });
   refresh();
-  return { ok: true, message: `${user.name} is now ${next === "OWNER" ? "an owner" : "an admin"}.` };
+  return { ok: true, message: `${user.name} is now ${next === "OWNER" ? "an owner" : next === "ADMIN" ? "an admin" : "an editor"}.` };
 });
 
 export const setAdminActive = ownerAction(async (admin, userId: string, active: boolean) => {

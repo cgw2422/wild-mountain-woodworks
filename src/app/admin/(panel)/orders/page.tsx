@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { cn } from "@/lib/cn";
@@ -35,6 +36,7 @@ function Condition({ ok, label, detail }: { ok: boolean; label: string; detail: 
 }
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  await requireAdmin();
   const sp = await searchParams;
   const page = pageParam(sp);
   const state = commerceState(await getSettings());

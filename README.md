@@ -137,6 +137,14 @@ Authentication uses [Better Auth](https://better-auth.com), a maintained library
 - Enrolment shows a QR code and **10 one-time backup codes, displayed once** (they can be regenerated, which invalidates the old ones).
 - Every sign-in then needs a 6-digit code or a backup code. After 5 wrong codes the account is locked for 15 minutes.
 
+**Roles** (`src/lib/auth/permissions.ts`, enforced server-side on every admin page, action and API route):
+
+| Role | Can |
+| --- | --- |
+| Owner | Everything, including admin users, roles, resets and the audit log |
+| Admin | Products, categories, options, promotions, quotes, requests, messages, content, navigation, media, settings — not admin users or owner security |
+| Editor | Pages, homepage, portfolio, FAQs, navigation and media, plus their own password and two-factor. No catalog, pricing, quotes, settings or security |
+
 **Creating admins (no public sign-up):**
 - **First owner (controlled bootstrap):** set `ADMIN_EMAIL`, `ADMIN_PASSWORD` (and optionally `ADMIN_NAME`) and run `npm run db:seed`, or run `npm run admin:create -- --email owner@example.com --name "Your Name"`, which prompts for a hidden password.
 - **Everyone else:** an owner adds them in **Admin → Security → Admin users**. They set up two-factor at first sign-in.
@@ -197,7 +205,9 @@ src/lib/                domain logic:
   media/                upload validation, processing, usage tracking, image slots
   storage/              object storage abstraction (R2 / local)
   services/             quote, custom request and contact submission services
-  commerce/             cart pricing, checkout, Stripe provider (dormant)
+  commerce/             Stripe provider (dormant; being replaced by quote → invoice sales)
+  navigation/           menu locations and public menu resolver
+  auth/permissions.ts   role → permission matrix
   email/                provider abstraction + notification templates
   auth/                 passwords, sessions, tokens
 ```
@@ -207,6 +217,24 @@ src/lib/                domain logic:
 If a section is added to the code later, the site still renders it with empty values until you fill it in.
 
 **Public pages are rendered on each request.** Admin changes show up immediately, and builds never need the database.
+
+### Pages: create, draft, publish, archive, preview
+
+Admin → Pages lists the site's structured pages, customer care/policy pages and **your pages** (created with **Create page**, public at `/{address}`, using a template with a header, Markdown text, an optional feature block and an optional call-to-action band).
+
+- New pages start as **Draft**. Draft and **Archived** pages return "page not found" to visitors, disappear from every menu and from the sitemap immediately, and keep all their content. Publishing restores them. About, FAQ, Contact, Custom Furniture, policy pages and created pages can change status; the homepage, catalog, sale page and product/project templates are always published.
+- **Preview** uses Next.js Draft Mode (`/api/admin/preview?path=…`). It only switches on after the server checks the staff session and the "content" permission, and every previewed render checks the session again — a copied preview cookie alone shows nothing. Previews are `noindex` and the admin toolbar shows **DRAFT PREVIEW** with Publish, Edit and Exit Preview.
+- Pages record created/published dates and who created and last edited them. Duplicate copies a created or policy page into a new draft.
+
+### Navigation
+
+Admin → Navigation edits the site's menus: **Main navigation** (header, with dropdowns), **Footer navigation**, **Company**, **Customer Care** (also the sidebar on customer care pages) and **Legal links**. Items can link to a page, a product category, a product, a path on this site, an external `https://` URL, or be a non-clickable dropdown heading. Items can be nested (main menu), reordered by drag and drop, disabled, and opened in a new tab.
+
+Menus never show a broken link: an item whose page is a draft/archived, whose category is hidden or whose product isn't live is skipped when the menu renders and returns automatically once its target is live again. Starter menus matching the original header and footer are created once on deploy (`src/lib/seed/defaults.ts`).
+
+### Admin toolbar on the live site
+
+Signed-in staff see a slim dark toolbar above the site: an **Edit** link for whatever is on screen (Edit Homepage / Page / Product / Category / Project / FAQs), **Add New** (only what the role may create), shortcuts, the draft-preview indicator, **View Admin** and **Log Out**. It collapses into a menu on phones. It is rendered only after the server validates the session (visitors' HTML never contains it), and its context comes from `/api/admin/context`, which returns 401 to anyone else. With a separate admin subdomain (`ADMIN_URL`) the admin session cookie belongs to the admin host, so the toolbar and previews only work where the admin and site share a host.
 
 ## Images, media library and cropping
 

@@ -56,6 +56,8 @@ const ADMIN_PATHS = [
   "/admin/faqs",
   "/admin/promotions",
   "/admin/pages",
+  "/admin/pages/new",
+  "/admin/navigation",
   "/admin/homepage",
   "/admin/media",
   "/admin/settings",

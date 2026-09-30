@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { requireAdmin } from "@/lib/auth/session";
+import {requirePermission} from "@/lib/auth/session";
 import { Card, PageHeader } from "@/components/admin/ui";
 import { createProject } from "../actions";
 import { NewProjectForm } from "./NewProjectForm";
@@ -7,7 +7,7 @@ import { NewProjectForm } from "./NewProjectForm";
 export const metadata: Metadata = { title: "New project" };
 
 export default async function NewProject() {
-  await requireAdmin();
+  await requirePermission("content");
   return (
     <>
       <PageHeader breadcrumbs={[{ label: "Portfolio", href: "/admin/portfolio" }, { label: "New project" }]} title="New portfolio project" />

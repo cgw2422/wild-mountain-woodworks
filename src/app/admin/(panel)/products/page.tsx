@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import type { Prisma, ProductStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -34,6 +35,7 @@ function hrefFor(params: Search, patch: Partial<Search>) {
 }
 
 export default async function ProductsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  await requireAdmin();
   const raw = await searchParams;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.trim() || undefined;
   const status = (TABS.some((t) => t.key === one(raw.status)) ? one(raw.status) : "all") as TabKey;

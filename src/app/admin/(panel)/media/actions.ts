@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
-import { AdminError, adminAction, fd } from "@/lib/admin/action";
+import { AdminError, permittedAction, fd } from "@/lib/admin/action";
 import { deleteMedia } from "@/lib/media/service";
 import { revalidateSite } from "@/lib/revalidate";
 
@@ -18,7 +18,7 @@ const detailsSchema = z.object({
   focalY: z.coerce.number().int().min(0, "Use 0–100.").max(100, "Use 0–100."),
 });
 
-export const updateMediaDetails = adminAction(async (admin, id: string, data: FormData) => {
+export const updateMediaDetails = permittedAction("media", async (admin, id: string, data: FormData) => {
   const parsed = detailsSchema.parse({
     alt: fd.str(data, "alt"),
     caption: fd.str(data, "caption"),
@@ -39,7 +39,7 @@ export const updateMediaDetails = adminAction(async (admin, id: string, data: Fo
  * Delete a media item. Without `force`, refuses while the image is in use.
  * With `force`, every reference is detached first (never silently broken).
  */
-export const deleteMediaItem = adminAction(async (admin, id: string, force: boolean) => {
+export const deleteMediaItem = permittedAction("media", async (admin, id: string, force: boolean) => {
   const media = await prisma.media.findUnique({ where: { id }, select: { originalName: true } });
   if (!media) throw new AdminError("This image was already deleted.");
   const result = await deleteMedia(id, { force: Boolean(force) });

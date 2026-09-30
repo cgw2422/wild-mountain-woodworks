@@ -25,7 +25,8 @@ export async function ProductView({ data }: { data: Data }) {
   const [settings, shared, quotePage] = await Promise.all([getSettings(), getPageContent("product"), getPageContent("request-quote")]);
   const { product, images, videos, configurable, pricesVisible, startingPriceCents, regularPriceCents, sale, saleEndsAt, related, faqs } = data;
   const flags = commerceState(settings);
-  const mode: PurchaseMode = flags.ecommerce && product.purchasable ? "cart" : flags.quotes ? "quote" : "contact";
+  // Sales are quote-based: every configuration becomes a quote request (no cart/checkout).
+  const mode: PurchaseMode = flags.quotes ? "quote" : "contact";
 
   const madeToOrder = shared.section("made-to-order");
   const woodNote = shared.section("wood-note");

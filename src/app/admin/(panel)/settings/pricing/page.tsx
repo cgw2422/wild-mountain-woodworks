@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import { getSettings } from "@/lib/settings";
 import { centsToDollarInput } from "@/lib/money";
 import { ROUNDING_OPTIONS } from "@/lib/pricing/estimator";
@@ -10,6 +11,7 @@ export const metadata: Metadata = { title: "Pricing defaults" };
 export const dynamic = "force-dynamic";
 
 export default async function PricingSettingsPage() {
+  await requireAdmin();
   const s = await getSettings();
   return (
     <>

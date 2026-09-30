@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import type { MessageStatus, Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -25,6 +26,7 @@ function preview(text: string, max = 110) {
 }
 
 export default async function MessagesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  await requireAdmin();
   const sp = await searchParams;
   const statusKey = TABS.find((t) => t.key === param(sp, "status").toLowerCase())?.key ?? "";
   const tab = TABS.find((t) => t.key === statusKey)!;

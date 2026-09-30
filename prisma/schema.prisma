@@ -25,9 +25,13 @@ datasource db {
 
 /// OWNER: full control, including admin users, roles and security.
 /// ADMIN: products, quotes, content, media and ordinary site management.
+/// OWNER: everything. ADMIN: ordinary site management (no admin users or
+/// owner security). EDITOR: editorial/CMS work only. The permission matrix is
+/// src/lib/auth/permissions.ts, enforced server-side.
 enum AdminRole {
   OWNER
   ADMIN
+  EDITOR
 }
 
 /// Admin accounts. Authentication (password hashing, sessions, two-factor)
@@ -58,6 +62,8 @@ model AdminUser {
   mediaUploads    Media[]
   videoUploads    ProductVideo[]
   estimates       PriceEstimate[]
+  pagesCreated    Page[]           @relation("PageCreatedBy")
+  pagesEdited     Page[]           @relation("PageUpdatedBy")
 }
 
 /// Server-side admin sessions (Better Auth). The cookie holds the token plus
@@ -191,6 +197,7 @@ model Media {
 
 model Category {
   id             String    @id @default(cuid())
+  menuItems      MenuItem[]
   name           String
   slug           String    @unique
   description    String?
@@ -282,6 +289,7 @@ model Product {
   quotes       QuoteRequest[]
   orderItems   OrderItem[]
   estimates    PriceEstimate[]
+  menuItems    MenuItem[]
 
   @@index([status, displayOrder])
   @@index([categoryId])
@@ -757,10 +765,23 @@ model Page {
   // Flags draft policy language that should receive owner/legal review.
   reviewRequired Boolean       @default(false)
   reviewNotes    String?
+  /// Pages created in Admin → Pages (public at /{slug}, "custom" template).
+  /// Other pages are defined in src/lib/cms/definitions.ts.
+  isCustom       Boolean       @default(false)
+  /// Optional shorter label used when the page is added to a menu.
+  navLabel       String?
+  publishedAt    DateTime?
+  createdById    String?
+  createdBy      AdminUser?    @relation("PageCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById    String?
+  updatedBy      AdminUser?    @relation("PageUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  sections PageSection[]
+  sections  PageSection[]
+  menuItems MenuItem[]
+
+  @@index([status])
 }
 
 model PageSection {
@@ -1034,4 +1055,58 @@ model Announcement {
 model SeedMarker {
   key       String   @id
   appliedAt DateTime @default(now())
+}
+
+/* ------------------------------------------------------------ navigation */
+
+/// A public-site menu. `key` is what the site renders in a given place
+/// (MAIN = header, FOOTER / COMPANY / CUSTOMER_CARE = footer columns,
+/// LEGAL = footer bottom row). Structure and items are edited in
+/// Admin → Navigation; nothing about them is hardcoded.
+model Menu {
+  id        String     @id @default(cuid())
+  key       String     @unique
+  name      String
+  /// Heading shown above the menu where the design has one (footer columns).
+  title     String?
+  updatedAt DateTime   @updatedAt
+  items     MenuItem[]
+}
+
+enum MenuItemType {
+  INTERNAL_PAGE
+  CUSTOM_INTERNAL_LINK
+  EXTERNAL_LINK
+  PRODUCT_CATEGORY
+  PRODUCT
+  LABEL
+}
+
+/// One menu entry. Page/category/product items keep their link even while
+/// the target is unpublished; public rendering simply skips any item whose
+/// target isn't live, and shows it again when it is.
+model MenuItem {
+  id           String       @id @default(cuid())
+  menuId       String
+  menu         Menu         @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  parentId     String?
+  parent       MenuItem?    @relation("MenuItemChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children     MenuItem[]   @relation("MenuItemChildren")
+  type         MenuItemType
+  /// Blank = use the target's name (page nav label/title, category, product).
+  label        String       @default("")
+  url          String?
+  pageId       String?
+  page         Page?        @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  categoryId   String?
+  category     Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  productId    String?
+  product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  enabled      Boolean      @default(true)
+  openInNewTab Boolean      @default(false)
+  displayOrder Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([menuId, parentId, displayOrder])
 }

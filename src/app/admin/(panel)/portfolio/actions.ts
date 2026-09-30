@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
-import { AdminError, adminAction, fd } from "@/lib/admin/action";
+import { AdminError, permittedAction, fd } from "@/lib/admin/action";
 import { isPortfolioSlugTaken, uniquePortfolioSlug } from "@/lib/catalog/slugs";
 import { revalidateSite } from "@/lib/revalidate";
 import { isValidSlug, slugify } from "@/lib/slug";
@@ -20,7 +20,7 @@ async function validateSlug(slug: string, excludeId?: string) {
   }
 }
 
-export const createProject = adminAction(async (admin, data: FormData) => {
+export const createProject = permittedAction("content", async (admin, data: FormData) => {
   const name = reqText(160, "Give the project a name.").parse(fd.str(data, "name"));
   const manual = fd.str(data, "slug").toLowerCase();
   let slug: string;
@@ -60,7 +60,7 @@ const projectSchema = z.object({
   seoDescription: optText(SEO_DESCRIPTION_MAX),
 });
 
-export const updateProject = adminAction(async (admin, id: string, data: FormData) => {
+export const updateProject = permittedAction("content", async (admin, id: string, data: FormData) => {
   const parsed = projectSchema.parse({
     name: fd.str(data, "name"),
     slug: fd.str(data, "slug"),
@@ -102,7 +102,7 @@ const galleryItem = z.object({
   isPrimary: z.boolean(),
 });
 
-export const saveGallery = adminAction(async (admin, id: string, raw: unknown) => {
+export const saveGallery = permittedAction("content", async (admin, id: string, raw: unknown) => {
   const parsed = z.array(galleryItem).max(60, "A project can have at most 60 photos.").parse(raw);
   const seen = new Set<string>();
   const items = parsed.filter((i) => (seen.has(i.mediaId) ? false : (seen.add(i.mediaId), true)));
@@ -136,7 +136,7 @@ export const saveGallery = adminAction(async (admin, id: string, raw: unknown) =
   return { ok: true, message: "Photos saved." };
 });
 
-export const setProjectStatus = adminAction(async (admin, id: string, status: "DRAFT" | "PUBLISHED" | "ARCHIVED") => {
+export const setProjectStatus = permittedAction("content", async (admin, id: string, status: "DRAFT" | "PUBLISHED" | "ARCHIVED") => {
   z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).parse(status);
   const project = await prisma.portfolioProject.findUnique({ where: { id }, include: { _count: { select: { images: true } } } });
   if (!project) throw new AdminError("This project no longer exists.");
@@ -167,7 +167,7 @@ export const setProjectStatus = adminAction(async (admin, id: string, status: "D
   };
 });
 
-export const deleteProject = adminAction(async (admin, id: string) => {
+export const deleteProject = permittedAction("content", async (admin, id: string) => {
   const project = await prisma.portfolioProject.findUnique({ where: { id }, select: { name: true } });
   if (!project) throw new AdminError("This project was already deleted.");
   // PortfolioImage rows cascade; the photos stay in the media library.
@@ -177,7 +177,7 @@ export const deleteProject = adminAction(async (admin, id: string) => {
   return { ok: true, message: "Project deleted." };
 });
 
-export const reorderProjects = adminAction(async (admin, rawIds: string[]) => {
+export const reorderProjects = permittedAction("content", async (admin, rawIds: string[]) => {
   const ids = z.array(z.string().min(1).max(40)).max(1000).parse(rawIds);
   await prisma.$transaction(ids.map((id, i) => prisma.portfolioProject.update({ where: { id }, data: { displayOrder: i } })));
   await logActivity("portfolio.updated", `${admin.name} reordered portfolio projects`, { actorId: admin.id, entityType: "portfolio" });

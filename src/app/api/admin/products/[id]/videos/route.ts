@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  * (seconds) and optional "title".
  */
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }) {
-  const guard = await guardAdminApi(request);
+  const guard = await guardAdminApi(request, "catalog");
   if ("error" in guard) return guard.error;
   const { id } = await ctx.params;
 

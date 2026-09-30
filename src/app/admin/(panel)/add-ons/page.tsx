@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
@@ -12,6 +13,7 @@ export const metadata: Metadata = { title: "Add-ons" };
 export const dynamic = "force-dynamic";
 
 export default async function AddOnsPage() {
+  await requireAdmin();
   const addOns = await prisma.addOn.findMany({
     orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
     include: { image: { select: { url: true, alt: true, focalX: true, focalY: true } }, _count: { select: { products: true } } },

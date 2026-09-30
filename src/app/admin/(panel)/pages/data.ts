@@ -19,6 +19,8 @@ export async function loadPageForEditor(def: PageDefinition) {
   const page = await prisma.page.findUnique({
     where: { slug: def.slug },
     include: {
+      createdBy: { select: { name: true } },
+      updatedBy: { select: { name: true } },
       ogImage: { select: editorMediaSelect },
       sections: {
         include: {
@@ -61,9 +63,11 @@ export async function loadPageForEditor(def: PageDefinition) {
   return { page, sections };
 }
 
-/** Common on-site destinations offered as suggestions in link fields. */
-export function linkSuggestions(): string[] {
-  const paths = new Set<string>(["/", "/furniture", "/custom-furniture", "/our-work", "/about", "/faq", "/contact", "/request-quote"]);
+/** Common on-site destinations offered as suggestions in link fields (including published created pages). */
+export async function linkSuggestions(): Promise<string[]> {
+  const paths = new Set<string>(["/", "/furniture", "/furniture/sale", "/custom-furniture", "/our-work", "/about", "/faq", "/contact", "/request-quote"]);
   for (const d of PAGE_DEFINITIONS) paths.add(d.path);
+  const created = await prisma.page.findMany({ where: { isCustom: true, status: "PUBLISHED" }, select: { slug: true }, orderBy: { slug: "asc" } });
+  for (const p of created) paths.add(`/${p.slug}`);
   return [...paths];
 }

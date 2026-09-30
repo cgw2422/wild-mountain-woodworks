@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import {requirePermission} from "@/lib/auth/session";
 import { getMediaUsage } from "@/lib/media/service";
 import { Badge, Card, DescriptionList, PageHeader, formatBytes, formatDate } from "@/components/admin/ui";
 import { deleteMediaItem, updateMediaDetails } from "../actions";
@@ -19,7 +19,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function MediaDetail({ params }: Props) {
-  await requireAdmin();
+  await requirePermission("media");
   const { id } = await params;
   const media = await prisma.media.findUnique({ where: { id }, include: { uploadedBy: { select: { name: true, email: true } } } });
   if (!media) notFound();

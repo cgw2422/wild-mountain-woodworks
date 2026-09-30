@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { AdminLinkButton, Badge, Card, EmptyState, PageHeader, formatDate } from "@/components/admin/ui";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 const imageSelect = { select: { url: true, alt: true, focalX: true, focalY: true } } as const;
 
 export default async function CategoriesPage() {
+  await requireAdmin();
   const categories = await prisma.category.findMany({
     orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
     include: { image: imageSelect, _count: { select: { products: true } } },

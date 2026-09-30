@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { estimateInputsSchema } from "@/lib/pricing/estimate-schema";
@@ -13,6 +14,7 @@ export const metadata: Metadata = { title: "Price estimate" };
 export const dynamic = "force-dynamic";
 
 export default async function EstimatePage({ params }: { params: Promise<{ id: string }> }) {
+  await requireAdmin();
   const { id } = await params;
   const [estimate, ctx] = await Promise.all([
     prisma.priceEstimate.findUnique({ where: { id }, include: { quoteRequest: { select: { id: true, reference: true } } } }),

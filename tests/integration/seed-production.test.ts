@@ -27,7 +27,8 @@ describe.skipIf(!hasTestDb)("production seed (pre-deploy)", () => {
 
   it("creates only what's missing, and a second run changes nothing", async () => {
     const created = await prisma.$transaction((tx) => applyRequiredDefaults(tx, quiet, { ADMIN_EMAIL: "owner@example.com", ADMIN_PASSWORD: STRONG }));
-    expect(created).toBe(1 + PAGE_DEFINITIONS.length + sectionCount + 1 + 1);
+    // settings + pages + sections + starter announcement + 5 starter menus + first owner
+    expect(created).toBe(1 + PAGE_DEFINITIONS.length + sectionCount + 1 + 5 + 1);
     expect(await prisma.siteSetting.count()).toBe(1);
     expect(await prisma.page.count()).toBe(PAGE_DEFINITIONS.length);
     expect(await prisma.pageSection.count()).toBe(sectionCount);

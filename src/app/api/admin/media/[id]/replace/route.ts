@@ -8,7 +8,7 @@ import { revalidateSite } from "@/lib/revalidate";
 
 /** Replace the file behind a media item everywhere it is used. */
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }) {
-  const guard = await guardAdminApi(request);
+  const guard = await guardAdminApi(request, "media");
   if ("error" in guard) return guard.error;
   const { id } = await ctx.params;
   const form = await request.formData().catch(() => null);

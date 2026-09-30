@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
@@ -53,6 +54,7 @@ const SECTIONS = [
 const MD = "Markdown supported: **bold**, *italic*, lists with “- ”, blank line between paragraphs.";
 
 export default async function ProductEditorPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireAdmin();
   const { id } = await params;
   const product = await prisma.product.findUnique({
     where: { id },

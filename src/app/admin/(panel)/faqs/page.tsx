@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import {requirePermission} from "@/lib/auth/session";
 import { AdminLinkButton, PageHeader } from "@/components/admin/ui";
 import { FaqManager } from "./FaqManager";
 
 export const metadata: Metadata = { title: "FAQs" };
 
 export default async function FaqsPage() {
-  await requireAdmin();
+  await requirePermission("content");
   const [categories, faqs] = await Promise.all([
     prisma.faqCategory.findMany({ orderBy: [{ displayOrder: "asc" }, { name: "asc" }], include: { _count: { select: { faqs: true } } } }),
     prisma.faq.findMany({ orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }] }),

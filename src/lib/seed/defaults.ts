@@ -177,12 +177,103 @@ export async function bootstrapFirstOwner(db: Db, log: Log, env: Record<string, 
   return 1;
 }
 
+type StarterItem = { page?: string; label?: string; url?: string };
+
+/**
+ * Starter menus matching the site's original header and footer. Each menu is
+ * created once (tracked in SeedMarker): if it already exists, or the owner
+ * later empties or edits it, it is never touched again. Items point at pages
+ * by id, so they hide automatically while a page is a draft.
+ */
+const STARTER_MENUS: Array<{ key: string; name: string; title: string | null; items: StarterItem[]; categories?: boolean }> = [
+  {
+    key: "MAIN",
+    name: "Main navigation",
+    title: null,
+    items: [
+      { page: "furniture", label: "Furniture" },
+      { page: "our-work", label: "Our Work" },
+      { page: "custom-furniture", label: "Custom Furniture" },
+      { page: "about", label: "About" },
+      { page: "faq", label: "FAQ" },
+      { page: "contact", label: "Contact" },
+    ],
+  },
+  { key: "FOOTER", name: "Footer navigation", title: "Furniture", items: [{ page: "furniture", label: "All Furniture" }], categories: true },
+  {
+    key: "COMPANY",
+    name: "Company menu",
+    title: "Company",
+    items: [
+      { page: "about", label: "About" },
+      { page: "our-work", label: "Our Work" },
+      { page: "custom-furniture", label: "Custom Furniture" },
+      { page: "contact", label: "Contact" },
+    ],
+  },
+  {
+    key: "CUSTOMER_CARE",
+    name: "Customer Care menu",
+    title: "Customer Care",
+    items: [
+      { page: "faq", label: "FAQ" },
+      { page: "furniture-care", label: "Furniture Care" },
+      { page: "wood-characteristics", label: "Wood Characteristics" },
+      { page: "shipping-delivery", label: "Shipping & Delivery" },
+      { page: "returns-cancellations", label: "Returns & Cancellations" },
+      { page: "warranty", label: "Warranty" },
+    ],
+  },
+  {
+    key: "LEGAL",
+    name: "Legal links",
+    title: null,
+    items: [
+      { page: "privacy", label: "Privacy" },
+      { page: "terms", label: "Terms" },
+    ],
+  },
+];
+
+export async function ensureMenus(db: Db, log: Log): Promise<number> {
+  let created = 0;
+  for (const m of STARTER_MENUS) {
+    await once(db, `menu:${m.key}`, async () => {
+      if (await db.menu.findUnique({ where: { key: m.key } })) return;
+      const menu = await db.menu.create({ data: { key: m.key, name: m.name, title: m.title } });
+      let order = 0;
+      for (const it of m.items) {
+        const page = it.page ? await db.page.findUnique({ where: { slug: it.page }, select: { id: true } }) : null;
+        if (it.page && !page) continue;
+        await db.menuItem.create({
+          data: {
+            menuId: menu.id,
+            type: page ? "INTERNAL_PAGE" : "CUSTOM_INTERNAL_LINK",
+            label: it.label ?? "",
+            url: it.url ?? null,
+            pageId: page?.id ?? null,
+            displayOrder: order++,
+          },
+        });
+      }
+      if (m.categories) {
+        const cats = await db.category.findMany({ where: { archivedAt: null, linkUrl: null }, orderBy: { displayOrder: "asc" }, select: { id: true } });
+        for (const c of cats) await db.menuItem.create({ data: { menuId: menu.id, type: "PRODUCT_CATEGORY", categoryId: c.id, displayOrder: order++ } });
+      }
+      log(`created starter menu "${m.name}"`);
+      created++;
+    });
+  }
+  return created;
+}
+
 /** Everything the application requires, insert-only. Returns how many records were created. */
 export async function applyRequiredDefaults(db: Db, log: Log, env: Record<string, string | undefined> = process.env): Promise<number> {
   return (
     (await ensureSettings(db, log)) +
     (await ensurePages(db, log)) +
     (await ensureStarterAnnouncement(db, log)) +
+    (await ensureMenus(db, log)) +
     (await bootstrapFirstOwner(db, log, env))
   );
 }

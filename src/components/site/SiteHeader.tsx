@@ -1,21 +1,16 @@
 import Link from "next/link";
 import { Logo } from "@/components/brand/Logo";
 import { ButtonLink } from "@/components/ui/Button";
-import { HeaderShell, MobileMenu, NavLink } from "./HeaderClient";
+import type { NavLink as NavLinkData } from "@/lib/navigation/menus";
+import { HeaderShell, MainNav, MobileMenu } from "./HeaderClient";
 
-export const PRIMARY_NAV = [
-  { href: "/furniture", label: "Furniture" },
-  { href: "/our-work", label: "Our Work" },
-  { href: "/custom-furniture", label: "Custom Furniture" },
-  { href: "/about", label: "About" },
-  { href: "/faq", label: "FAQ" },
-  { href: "/contact", label: "Contact" },
-];
-
+/** The header's links come from the MAIN menu (Admin → Navigation). */
 export function SiteHeader({
+  items,
   cta,
   contact,
 }: {
+  items: NavLinkData[];
   cta: { label: string; href: string };
   contact: { email: string | null; phone: string | null };
 }) {
@@ -27,13 +22,7 @@ export function SiteHeader({
           <Logo variant="horizontal" className="hidden h-[1.8rem] w-auto xl:block 2xl:h-[2.1rem]" title="" />
         </Link>
         <nav aria-label="Main" className="hidden lg:block">
-          <ul className="flex items-center gap-7 xl:gap-9">
-            {PRIMARY_NAV.map((item) => (
-              <li key={item.href}>
-                <NavLink href={item.href}>{item.label}</NavLink>
-              </li>
-            ))}
-          </ul>
+          <MainNav items={items} />
         </nav>
         <div className="flex items-center gap-3">
           <span className="hidden sm:block">
@@ -41,7 +30,7 @@ export function SiteHeader({
               {cta.label}
             </ButtonLink>
           </span>
-          <MobileMenu items={PRIMARY_NAV} cta={cta} contact={contact} />
+          <MobileMenu items={items} cta={cta} contact={contact} />
         </div>
       </div>
     </HeaderShell>

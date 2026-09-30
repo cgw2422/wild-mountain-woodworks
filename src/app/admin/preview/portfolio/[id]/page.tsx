@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { requireAdmin } from "@/lib/auth/session";
+import {requirePermission} from "@/lib/auth/session";
 import { getPortfolioProject } from "@/lib/catalog/queries";
 import { SiteChrome } from "@/components/site/SiteChrome";
 import { PreviewBanner } from "@/components/site/PreviewBanner";
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Preview", robots: { index: false, follow: false } };
 
 export default async function PortfolioPreview({ params }: { params: Promise<{ id: string }> }) {
-  await requireAdmin();
+  await requirePermission("content");
   const { id } = await params;
   const data = await getPortfolioProject({ id }, true);
   if (!data) notFound();

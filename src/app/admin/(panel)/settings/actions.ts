@@ -70,12 +70,20 @@ export const saveSettings = adminAction(async (admin, section: SettingsSection, 
     const exists = await prisma.media.findUnique({ where: { id: parsed.defaultOgImageId as string }, select: { id: true } });
     if (!exists) throw new AdminError("The selected image was deleted. Please choose another.");
   }
+  const before = await prisma.siteSetting.findUnique({ where: { id: "default" }, select: { ecommerceEnabled: true } });
   await prisma.siteSetting.upsert({
     where: { id: "default" },
     update: parsed as Prisma.SiteSettingUpdateInput,
     create: { id: "default", ...(parsed as Prisma.SiteSettingUncheckedCreateInput) },
   });
   await logActivity("settings.updated", `${admin.name} updated ${def.label}`, { actorId: admin.id, entityType: "settings" });
+  if ("ecommerceEnabled" in parsed && (before?.ecommerceEnabled ?? false) !== parsed.ecommerceEnabled) {
+    await logActivity(
+      "settings.commerce_changed",
+      `${admin.name} turned the E-commerce Enabled flag ${parsed.ecommerceEnabled ? "ON" : "OFF"} (${before?.ecommerceEnabled ? "on" : "off"} → ${parsed.ecommerceEnabled ? "on" : "off"})`,
+      { actorId: admin.id, entityType: "settings", entityId: "ecommerceEnabled" },
+    );
+  }
   revalidateSite();
   return { ok: true, message: `Saved ${def.label} — live on the site now.` };
 });

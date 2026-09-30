@@ -6,10 +6,11 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { AuthConfigError, SESSION_IDLE_SECONDS, SESSION_MAX_AGE_SECONDS, getAuth } from "./auth";
 import { clientIpFromHeaders } from "./client-ip";
+import { can, type Permission, type Role } from "./permissions";
 
 export { clientIpFromHeaders } from "./client-ip";
 
-export type AdminRole = "OWNER" | "ADMIN";
+export type AdminRole = Role;
 
 export type CurrentAdmin = {
   id: string;
@@ -74,26 +75,48 @@ export const getSessionState = cache(async (): Promise<SessionState | null> => {
 });
 
 /**
- * The fully authenticated admin (signed in AND two-factor enrolled), or null.
- * A session without two-factor enrolment grants nothing but the enrolment page.
+ * The fully authenticated staff user (OWNER, ADMIN or EDITOR; signed in AND
+ * two-factor enrolled), or null. A session without two-factor enrolment
+ * grants nothing but the enrolment page.
  */
 export async function getCurrentAdmin(): Promise<CurrentAdmin | null> {
   const state = await getSessionState();
   return state?.mfaEnrolled ? state.admin : null;
 }
 
-/** Use in every admin page, layout, server action and API route. */
-export async function requireAdmin(): Promise<CurrentAdmin> {
+/** Any signed-in, two-factor-enrolled staff user, including editors (the admin shell, own account). */
+export async function requireStaff(): Promise<CurrentAdmin> {
   const state = await getSessionState();
   if (!state) redirect("/admin/login");
   if (!state.mfaEnrolled) redirect("/admin/setup-mfa");
   return state.admin;
 }
 
-/** Owner-only pages and actions. Non-owners get a 404-style redirect to the dashboard. */
+/**
+ * Staff with a specific permission (src/lib/auth/permissions.ts). Anyone
+ * else is sent back to the dashboard — every admin page calls this (or
+ * requireAdmin/requireOwner), because layouts don't re-run on navigation.
+ */
+export async function requirePermission(permission: Permission): Promise<CurrentAdmin> {
+  const admin = await requireStaff();
+  if (!can(admin.role, permission)) redirect("/admin?denied=1");
+  return admin;
+}
+
+/**
+ * OWNER or ADMIN — ordinary site management. Editors are refused. This is
+ * the default for admin pages that haven't been opened to editors.
+ */
+export async function requireAdmin(): Promise<CurrentAdmin> {
+  const admin = await requireStaff();
+  if (admin.role !== "OWNER" && admin.role !== "ADMIN") redirect("/admin?denied=1");
+  return admin;
+}
+
+/** Owner-only pages and actions. Non-owners get a redirect to the dashboard. */
 export async function requireOwner(): Promise<CurrentAdmin> {
-  const admin = await requireAdmin();
-  if (admin.role !== "OWNER") redirect("/admin");
+  const admin = await requireStaff();
+  if (admin.role !== "OWNER") redirect("/admin?denied=1");
   return admin;
 }
 

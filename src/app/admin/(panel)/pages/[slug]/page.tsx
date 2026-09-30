@@ -1,58 +1,74 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/auth/session";
-import { getPageDefinition } from "@/lib/cms/definitions";
+import {requirePermission} from "@/lib/auth/session";
+import { resolvePageDefinition } from "@/lib/cms/pages";
+import { PageStatusControls } from "@/components/admin/pages/PageStatusControls";
 import { ActionButton, ActionForm, SubmitButton, TextArea } from "@/components/admin/forms";
 import { MarkdownEditor } from "@/components/admin/content/MarkdownEditor";
 import { SectionEditor } from "@/components/admin/content/SectionEditor";
 import { PageSettingsForm } from "@/components/admin/content/PageSettingsForm";
-import { AdminLinkButton, Card, PageHeader, StatusBadge, formatDate } from "@/components/admin/ui";
-import { flagPageForReview, markPageReviewed, savePageBody, savePageSettings, saveSection } from "../actions";
+import { Card, PageHeader, StatusBadge, formatDate } from "@/components/admin/ui";
+import { duplicatePage, flagPageForReview, markPageReviewed, savePageBody, savePageSettings, saveSection, setPageStatus } from "../actions";
 import { linkSuggestions, loadPageForEditor } from "../data";
 
 type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  return { title: getPageDefinition(slug)?.title ?? "Page" };
+  return { title: (await resolvePageDefinition(slug))?.title ?? "Page" };
 }
 
 export default async function EditPage({ params }: Props) {
-  await requireAdmin();
+  await requirePermission("content");
   const { slug } = await params;
   if (slug === "home") redirect("/admin/homepage");
-  const def = getPageDefinition(slug);
+  const def = await resolvePageDefinition(slug);
   if (!def) notFound();
 
   const { page, sections } = await loadPageForEditor(def);
-  const links = linkSuggestions();
-  const isPolicy = def.kind === "policy";
+  const links = await linkSuggestions();
   const sharedTemplate = slug === "product" || slug === "portfolio-project";
   const status = page?.status ?? "PUBLISHED";
+  const title = page?.title ?? def.title;
+  const path = def.kind === "custom" ? `/${slug}` : def.path;
+  const previewHref = sharedTemplate ? null : status === "PUBLISHED" ? path : `/api/admin/preview?path=${encodeURIComponent(path)}`;
 
   return (
     <>
       <PageHeader
-        breadcrumbs={[{ label: "Pages", href: "/admin/pages" }, { label: def.title }]}
+        breadcrumbs={[{ label: "Pages", href: "/admin/pages" }, { label: title }]}
         title={
           <span className="flex flex-wrap items-center gap-2">
-            {def.title} <StatusBadge status={status} />
+            {title} <StatusBadge status={status} />
           </span>
         }
-        description={
-          <>
-            {def.description}
-            {page ? ` Last updated ${formatDate(page.updatedAt, true)}.` : " Not edited yet — defaults are shown on the site until you save."}
-          </>
-        }
+        description={def.kind === "custom" ? <span className="font-mono text-sm">{path}</span> : def.description}
         actions={
-          sharedTemplate ? null : (
-            <AdminLinkButton href={def.path} target="_blank">
-              View page ↗
-            </AdminLinkButton>
-          )
+          <PageStatusControls
+            status={status}
+            canChangeStatus={Boolean(def.statusControl)}
+            previewHref={previewHref}
+            setStatus={def.statusControl ? setPageStatus.bind(null, slug) : null}
+            duplicate={def.kind === "system" ? null : duplicatePage.bind(null, slug)}
+          />
         }
       />
+
+      {status !== "PUBLISHED" ? (
+        <p role="status" className="mb-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {status === "DRAFT" ? "Draft" : "Archived"} — this page isn&apos;t visible to visitors, and it&apos;s left out of menus and the sitemap. Use
+          “Preview draft” to see it on the site; only signed-in staff can.
+        </p>
+      ) : null}
+
+      <Card title="Page details" className="mb-6">
+        <dl className="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <Detail term="Status">{status === "PUBLISHED" ? "Published" : status === "DRAFT" ? "Draft" : "Archived"}{def.statusControl ? "" : " (always)"}</Detail>
+          <Detail term="Published">{page?.publishedAt ? formatDate(page.publishedAt, true) : "Not yet"}</Detail>
+          <Detail term="Created">{page ? `${formatDate(page.createdAt, true)}${page.createdBy ? ` by ${page.createdBy.name}` : ""}` : "—"}</Detail>
+          <Detail term="Last edited">{page ? `${formatDate(page.updatedAt, true)}${page.updatedBy ? ` by ${page.updatedBy.name}` : ""}` : "Not edited yet"}</Detail>
+        </dl>
+      </Card>
 
       <div className="space-y-6">
         {page?.reviewRequired ? (
@@ -98,10 +114,10 @@ export default async function EditPage({ params }: Props) {
         <Card id="page-settings" title="Page settings & SEO" description="How this page appears in search results and when shared on social media.">
           <PageSettingsForm
             action={savePageSettings.bind(null, slug)}
-            title={page?.title ?? def.title}
+            title={title}
             defaultTitle={def.title}
-            status={status}
-            canDraft={isPolicy}
+            navLabel={page?.navLabel ?? null}
+            slug={def.kind === "custom" ? slug : null}
             seoTitle={page?.seoTitle ?? null}
             seoDescription={page?.seoDescription ?? null}
             ogImage={page?.ogImage ?? null}
@@ -142,5 +158,14 @@ export default async function EditPage({ params }: Props) {
         ) : null}
       </div>
     </>
+  );
+}
+
+function Detail({ term, children }: { term: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-xs text-neutral-500">{term}</dt>
+      <dd className="text-neutral-900">{children}</dd>
+    </div>
   );
 }

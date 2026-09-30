@@ -21,7 +21,7 @@ function sanitizeFilename(name: string) {
 
 /** Stream a private customer reference image to a signed-in admin. */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await guardAdminApi(request);
+  const guard = await guardAdminApi(request, "inbox");
   if ("error" in guard) return guard.error;
 
   const { id } = await params;

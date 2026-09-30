@@ -228,7 +228,7 @@ describe.skipIf(!hasTestDb)("roles and admin management", () => {
     expect((await prisma.adminUser.findUniqueOrThrow({ where: { id: admin.id } })).role).toBe("ADMIN");
     expect(await prisma.adminUser.count()).toBe(2);
     // The audit log is owner-only too.
-    await expect(session.requireOwner()).rejects.toThrow(/REDIRECT \/admin$/);
+    await expect(session.requireOwner()).rejects.toThrow(/REDIRECT \/admin\?denied=1$/);
   });
 
   it("lets an owner manage admins, with last-owner and self protections", async () => {

@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 /** List media for the picker/library. ?q=search&page=1&pageSize=40 */
 export async function GET(request: Request) {
-  const guard = await guardAdminApi(request);
+  const guard = await guardAdminApi(request, "media");
   if ("error" in guard) return guard.error;
   const url = new URL(request.url);
   const q = url.searchParams.get("q")?.trim().slice(0, 100) ?? "";
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 
 /** Upload one or more images (multipart field "files"). */
 export async function POST(request: Request) {
-  const guard = await guardAdminApi(request);
+  const guard = await guardAdminApi(request, "media");
   if ("error" in guard) return guard.error;
   let form: FormData;
   try {

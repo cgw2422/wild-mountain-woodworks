@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
@@ -24,6 +25,7 @@ export const metadata: Metadata = { title: "Edit option group" };
 export const dynamic = "force-dynamic";
 
 export default async function OptionGroupPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireAdmin();
   const { id } = await params;
   const group = await prisma.optionGroup.findUnique({
     where: { id },

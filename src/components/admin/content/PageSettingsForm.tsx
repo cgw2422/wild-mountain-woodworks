@@ -1,18 +1,21 @@
 "use client";
 
 import type { ActionResult } from "@/lib/admin/types";
-import { ActionForm, Select, SubmitButton, TextInput } from "@/components/admin/forms";
+import { ActionForm, SubmitButton, TextInput } from "@/components/admin/forms";
 import { ImageField, type ImageValue } from "@/components/admin/media/ImageField";
-import { Badge } from "@/components/admin/ui";
 import { SeoFields } from "./SeoFields";
 
-/** Page title, status (policy pages only), SEO fields and social share image. */
+/**
+ * Page title, menu label, address (pages created in the admin only), SEO
+ * fields and social share image. Status is changed with the page's status
+ * buttons, not here.
+ */
 export function PageSettingsForm({
   action,
   title,
   defaultTitle,
-  status,
-  canDraft,
+  navLabel,
+  slug,
   seoTitle,
   seoDescription,
   ogImage,
@@ -20,35 +23,34 @@ export function PageSettingsForm({
   action: (formData: FormData) => Promise<ActionResult>;
   title: string;
   defaultTitle: string;
-  status: "PUBLISHED" | "DRAFT" | "ARCHIVED";
-  canDraft: boolean;
+  navLabel: string | null;
+  /** Editable address for created pages; null for pages with a fixed route. */
+  slug: string | null;
   seoTitle: string | null;
   seoDescription: string | null;
   ogImage: ImageValue | null;
 }) {
   return (
-    <ActionForm action={action} className="space-y-5">
+    <ActionForm action={action} className="space-y-5" redirectTo={slug ? (r) => (r.id ? `/admin/pages/${r.id}` : `/admin/pages/${slug}`) : undefined}>
       <div className="grid gap-4 md:grid-cols-2">
         <TextInput name="title" label="Page title" required defaultValue={title} maxLength={120} help="Used as the page name and the default browser/search title." />
-        {canDraft ? (
-          <Select
-            name="status"
-            label="Status"
-            defaultValue={status === "DRAFT" ? "DRAFT" : "PUBLISHED"}
-            options={[
-              { value: "PUBLISHED", label: "Published — visible to visitors" },
-              { value: "DRAFT", label: "Draft — hidden from visitors" },
-            ]}
-            help="Draft pages are hidden from the public site."
+        <TextInput
+          name="navLabel"
+          label="Navigation label"
+          defaultValue={navLabel ?? ""}
+          maxLength={40}
+          help="Optional shorter name used when this page is added to a menu. Blank = the page title."
+        />
+        {slug ? (
+          <TextInput
+            name="slug"
+            label="Page address"
+            defaultValue={slug}
+            maxLength={60}
+            className="font-mono"
+            help="The page's URL: /your-address. Lowercase letters, numbers and hyphens. Changing it updates menus automatically, but old links to the page stop working."
           />
-        ) : (
-          <div>
-            <p className="mb-1.5 text-sm font-medium text-neutral-800">Status</p>
-            <p className="flex flex-wrap items-center gap-2 text-sm text-neutral-600">
-              <Badge tone="green">Published</Badge> Core site pages are always published.
-            </p>
-          </div>
-        )}
+        ) : null}
       </div>
       <SeoFields title={seoTitle} description={seoDescription} titlePlaceholder={defaultTitle} />
       <ImageField

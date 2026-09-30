@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
+import type { NavLink as NavLinkData } from "@/lib/navigation/menus";
 import { Logo } from "@/components/brand/Logo";
 
 /** Sticky header that gains a hairline border once the page scrolls. */
@@ -28,17 +29,92 @@ export function HeaderShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+const isActive = (pathname: string, href: string | null) => Boolean(href && !/^https?:/.test(href) && (pathname === href || (href !== "/" && pathname.startsWith(href + "/"))));
+
+/** A menu link: internal via next/link, external as a plain anchor (new tab when set). */
+export function MenuAnchor({ item, className, onClick, children }: { item: NavLinkData; className?: string; onClick?: () => void; children?: React.ReactNode }) {
   const pathname = usePathname();
-  const active = pathname === href || pathname.startsWith(href + "/");
+  const newTab = item.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {};
+  if (item.external) {
+    return (
+      <a href={item.href!} className={className} onClick={onClick} {...newTab}>
+        {children ?? item.label}
+        {item.newTab ? <span className="sr-only"> (opens in a new tab)</span> : null}
+      </a>
+    );
+  }
   return (
-    <Link
-      href={href}
-      aria-current={active ? "page" : undefined}
-      className="link-underline text-[0.8rem] font-medium tracking-[0.04em] text-charcoal"
-    >
-      {children}
+    <Link href={item.href!} className={className} onClick={onClick} aria-current={isActive(pathname, item.href) ? "page" : undefined} {...newTab}>
+      {children ?? item.label}
     </Link>
+  );
+}
+
+const topLinkCls = "link-underline text-[0.8rem] font-medium tracking-[0.04em] text-charcoal";
+
+/** Desktop main navigation: plain links, and dropdowns for items with sub-items. */
+export function MainNav({ items }: { items: NavLinkData[] }) {
+  return (
+    <ul className="flex items-center gap-7 xl:gap-9">
+      {items.map((item) => (
+        <li key={item.id} className="relative">
+          {item.children.length ? <NavDropdown item={item} /> : <MenuAnchor item={item} className={topLinkCls} />}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function NavDropdown({ item }: { item: NavLinkData }) {
+  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const ref = useRef<HTMLDivElement>(null);
+  const [lastPath, setLastPath] = useState(pathname);
+  if (pathname !== lastPath) {
+    setLastPath(pathname);
+    setOpen(false);
+  }
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const menuId = `nav-${item.id}`;
+  return (
+    <div ref={ref} className="flex items-center gap-1" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      {item.href ? <MenuAnchor item={item} className={topLinkCls} /> : <span className="text-[0.8rem] font-medium tracking-[0.04em] text-charcoal">{item.label}</span>}
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={menuId}
+        onClick={() => setOpen((o) => !o)}
+        className="-mr-2 flex h-8 w-6 items-center justify-center text-charcoal"
+      >
+        <span className="sr-only">{item.label} menu</span>
+        <svg viewBox="0 0 12 12" className={cn("h-2.5 w-2.5 transition-transform", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+          <path d="M2.5 4.5 6 8l3.5-3.5" />
+        </svg>
+      </button>
+      <div id={menuId} hidden={!open} className="absolute left-1/2 top-full z-50 -translate-x-1/2 pt-3">
+        <ul className="min-w-56 border border-stone bg-paper py-3 shadow-[0_10px_30px_rgba(31,30,28,0.08)]">
+          {item.children.map((c) => (
+            <li key={c.id}>
+              <MenuAnchor item={c} className="block px-5 py-2 text-[0.88rem] text-charcoal hover:bg-ivory-deep aria-[current=page]:text-bronze-text" onClick={() => setOpen(false)} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 
@@ -48,7 +124,7 @@ export function MobileMenu({
   cta,
   contact,
 }: {
-  items: Array<{ href: string; label: string }>;
+  items: NavLinkData[];
   cta: { label: string; href: string };
   contact: { email: string | null; phone: string | null };
 }) {
@@ -121,15 +197,29 @@ export function MobileMenu({
           <nav aria-label="Mobile" className="mt-8 flex-1 overflow-y-auto">
             <ul className="space-y-1">
               {items.map((item) => (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    onClick={() => setOpen(false)}
-                    aria-current={pathname === item.href || pathname.startsWith(item.href + "/") ? "page" : undefined}
-                    className="block py-2.5 font-display text-[2.1rem] leading-tight text-ivory aria-[current=page]:text-bronze-light"
-                  >
-                    {item.label}
-                  </Link>
+                <li key={item.id}>
+                  {item.href ? (
+                    <MenuAnchor
+                      item={item}
+                      onClick={() => setOpen(false)}
+                      className="block py-2.5 font-display text-[2.1rem] leading-tight text-ivory aria-[current=page]:text-bronze-light"
+                    />
+                  ) : (
+                    <p className="pb-1 pt-4 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-ivory/60">{item.label}</p>
+                  )}
+                  {item.children.length ? (
+                    <ul className="mb-2 ml-1 space-y-0.5 border-l border-white/15 pl-4">
+                      {item.children.map((c) => (
+                        <li key={c.id}>
+                          <MenuAnchor
+                            item={c}
+                            onClick={() => setOpen(false)}
+                            className="block py-1.5 text-[1.05rem] text-ivory/85 aria-[current=page]:text-bronze-light"
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </li>
               ))}
             </ul>

@@ -3,13 +3,13 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
-import { AdminError, adminAction } from "@/lib/admin/action";
+import { AdminError, permittedAction } from "@/lib/admin/action";
 import { revalidateSite } from "@/lib/revalidate";
 
 const idList = z.array(z.string().min(1).max(40)).max(50);
 
 /** Set which ACTIVE products are featured on the homepage, in order. */
-export const saveFeaturedProducts = adminAction(async (admin, rawIds: string[]) => {
+export const saveFeaturedProducts = permittedAction("content", async (admin, rawIds: string[]) => {
   const ids = [...new Set(idList.parse(rawIds))];
   const found = await prisma.product.findMany({ where: { id: { in: ids }, status: "ACTIVE" }, select: { id: true } });
   if (found.length !== ids.length) throw new AdminError("One of the selected products is no longer active. Reload the page and try again.");
@@ -28,7 +28,7 @@ export const saveFeaturedProducts = adminAction(async (admin, rawIds: string[]) 
 });
 
 /** Set which PUBLISHED portfolio projects appear in the Our Work preview. */
-export const saveFeaturedProjects = adminAction(async (admin, rawIds: string[]) => {
+export const saveFeaturedProjects = permittedAction("content", async (admin, rawIds: string[]) => {
   const ids = [...new Set(idList.parse(rawIds))];
   const found = await prisma.portfolioProject.findMany({ where: { id: { in: ids }, status: "PUBLISHED" }, select: { id: true } });
   if (found.length !== ids.length) throw new AdminError("One of the selected projects is no longer published. Reload the page and try again.");
@@ -46,7 +46,7 @@ export const saveFeaturedProjects = adminAction(async (admin, rawIds: string[]) 
 });
 
 /** Toggle Category.showOnHomepage for every (non-archived) category. */
-export const saveHomepageCategories = adminAction(async (admin, data: FormData) => {
+export const saveHomepageCategories = permittedAction("content", async (admin, data: FormData) => {
   const categories = await prisma.category.findMany({ where: { archivedAt: null }, select: { id: true, showOnHomepage: true } });
   const changes = categories
     .map((c) => ({ id: c.id, show: data.get(`show-${c.id}`) === "on" }))

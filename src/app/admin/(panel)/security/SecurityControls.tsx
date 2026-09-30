@@ -130,7 +130,7 @@ export function PasswordActionButton({
 }
 
 /** Change another admin's role, with confirmation. */
-export function RoleSelect({ name, role, change }: { name: string; role: "OWNER" | "ADMIN"; change: (role: string) => Promise<ActionResult> }) {
+export function RoleSelect({ name, role, change }: { name: string; role: "OWNER" | "ADMIN" | "EDITOR"; change: (role: string) => Promise<ActionResult> }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -143,7 +143,12 @@ export function RoleSelect({ name, role, change }: { name: string; role: "OWNER"
         className="h-9 rounded border border-neutral-300 bg-white px-2 text-sm"
         onChange={(e) => {
           const next = e.target.value;
-          const text = next === "OWNER" ? `Make ${name} an owner? Owners can manage admin users and security.` : `Change ${name} to admin? They'll lose access to admin users and security.`;
+          const text =
+            next === "OWNER"
+              ? `Make ${name} an owner? Owners can manage admin users and security.`
+              : next === "ADMIN"
+                ? `Change ${name} to admin? Admins manage products, quotes, content and settings, but not admin users or security.`
+                : `Change ${name} to editor? Editors can only work on pages, homepage, portfolio, FAQs, navigation and media.`;
           if (!window.confirm(text)) return;
           setError(null);
           start(async () => {
@@ -153,6 +158,7 @@ export function RoleSelect({ name, role, change }: { name: string; role: "OWNER"
           });
         }}
       >
+        <option value="EDITOR">Editor</option>
         <option value="ADMIN">Admin</option>
         <option value="OWNER">Owner</option>
       </select>

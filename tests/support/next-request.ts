@@ -9,10 +9,11 @@
  *   vi.mock("next/cache", async () => (await import("../support/next-request")).nextCache);
  */
 export const jar = new Map<string, string>();
-export const request = { ip: "203.0.113.9", userAgent: "vitest", origin: "http://localhost:3000" as string | null };
+export const request = { ip: "203.0.113.9", userAgent: "vitest", origin: "http://localhost:3000" as string | null, draftMode: false };
 
 export function resetRequest() {
   jar.clear();
+  request.draftMode = false;
   request.ip = "203.0.113.9";
   request.userAgent = "vitest";
   request.origin = "http://localhost:3000";
@@ -35,6 +36,14 @@ export const nextHeaders = {
       else jar.set(n, encodeURIComponent(v)); // Next.js URL-encodes cookie values when writing them
     },
     delete: (name: string) => void jar.delete(name),
+  }),
+  // Next.js Draft Mode (the preview cookie). Tests flip it directly.
+  draftMode: async () => ({
+    get isEnabled() {
+      return request.draftMode;
+    },
+    enable: () => void (request.draftMode = true),
+    disable: () => void (request.draftMode = false),
   }),
   headers: async () => {
     const h = new Headers({ "user-agent": request.userAgent, "x-real-ip": request.ip });
@@ -66,7 +75,7 @@ export async function signInAs(userId: string, opts: { ageMs?: number; idleMs?: 
 }
 
 /** A fully enrolled admin (two-factor on) with a credential password, signed in. */
-export async function createSignedInAdmin(opts: { role?: "OWNER" | "ADMIN"; email?: string; password?: string; signIn?: boolean } = {}) {
+export async function createSignedInAdmin(opts: { role?: "OWNER" | "ADMIN" | "EDITOR"; email?: string; password?: string; signIn?: boolean } = {}) {
   const { prisma } = await import("@/lib/db");
   const { createPasswordAdmin } = await import("@/lib/auth/accounts");
   const email = opts.email ?? "owner@example.com";

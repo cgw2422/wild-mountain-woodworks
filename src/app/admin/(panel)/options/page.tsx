@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { AdminLinkButton, Badge, EmptyState, PageHeader } from "@/components/admin/ui";
@@ -11,6 +12,7 @@ export const metadata: Metadata = { title: "Options" };
 export const dynamic = "force-dynamic";
 
 export default async function OptionsPage() {
+  await requireAdmin();
   const groups = await prisma.optionGroup.findMany({
     orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
     include: { _count: { select: { values: true, products: true } } },

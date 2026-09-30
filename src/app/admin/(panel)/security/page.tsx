@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/session";
+import { ROLE_DESCRIPTIONS, ROLE_LABELS } from "@/lib/auth/permissions";
 import { SESSION_IDLE_SECONDS, SESSION_MAX_AGE_SECONDS } from "@/lib/auth/auth";
 import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password-rules";
 import { ActionButton, ActionForm, ConfirmAction, Select, SubmitButton, TextInput } from "@/components/admin/forms";
@@ -34,7 +35,7 @@ function device(ua: string | null) {
 const hoursLabel = (s: number) => (s % 86400 === 0 ? `${s / 86400} day${s === 86400 ? "" : "s"}` : `${Math.round(s / 3600)} hour${s === 3600 ? "" : "s"}`);
 
 export default async function SecurityPage() {
-  const admin = await requireAdmin();
+  const admin = await requirePermission("own_account");
   const isOwner = admin.role === "OWNER";
   const [me, sessions, admins] = await Promise.all([
     prisma.adminUser.findUniqueOrThrow({ where: { id: admin.id }, select: { twoFactorEnabled: true, admintwofactors: { select: { id: true } } } }),
@@ -130,7 +131,7 @@ export default async function SecurityPage() {
         </Card>
 
         {isOwner ? (
-          <Card id="admins" title="Admin users" description="Only owners see this section. Admins manage products, quotes, content and media; owners also manage admin users and security.">
+          <Card id="admins" title="Admin users" description="Only owners see this section. Editors work on pages, homepage, portfolio, FAQs, navigation and media; admins also manage products, quotes, promotions and settings; owners also manage admin users and security.">
             <div className="space-y-6">
               <div className={table.wrap}>
                 <table className={table.table}>
@@ -157,7 +158,7 @@ export default async function SecurityPage() {
                             <span className="block text-xs text-neutral-500">{u.email}</span>
                           </td>
                           <td className={table.td}>
-                            {isSelf || lastOwner ? (u.role === "OWNER" ? "Owner" : "Admin") : <RoleSelect name={u.name} role={u.role} change={setAdminRole.bind(null, u.id)} />}
+                            {isSelf || lastOwner ? ROLE_LABELS[u.role] : <RoleSelect name={u.name} role={u.role} change={setAdminRole.bind(null, u.id)} />}
                           </td>
                           <td className={table.td}>
                             <span className="flex flex-wrap gap-1">
@@ -241,8 +242,9 @@ export default async function SecurityPage() {
                       label="Role"
                       defaultValue="ADMIN"
                       options={[
-                        { value: "ADMIN", label: "Admin — products, quotes, content and media" },
-                        { value: "OWNER", label: "Owner — everything, including admin users and security" },
+                        { value: "EDITOR", label: ROLE_DESCRIPTIONS.EDITOR },
+                        { value: "ADMIN", label: ROLE_DESCRIPTIONS.ADMIN },
+                        { value: "OWNER", label: ROLE_DESCRIPTIONS.OWNER },
                       ]}
                     />
                     <TextInput

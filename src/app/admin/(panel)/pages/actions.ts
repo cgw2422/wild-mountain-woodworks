@@ -3,8 +3,10 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
-import { AdminError, adminAction, fd } from "@/lib/admin/action";
-import { getPageDefinition, type PageDefinition } from "@/lib/cms/definitions";
+import { AdminError, permittedAction, fd } from "@/lib/admin/action";
+import { CUSTOM_PAGE_SECTIONS, RESERVED_PAGE_SLUGS, type PageDefinition } from "@/lib/cms/definitions";
+import { resolvePageDefinition } from "@/lib/cms/pages";
+import { isValidSlug, slugify } from "@/lib/slug";
 import { revalidateSite } from "@/lib/revalidate";
 import type { Prisma } from "@/generated/prisma/client";
 import {
@@ -17,8 +19,8 @@ import {
   reqText,
 } from "@/components/admin/content/validation";
 
-function requireDefinition(slug: string): PageDefinition {
-  const def = getPageDefinition(slug);
+async function requireDefinition(slug: string): Promise<PageDefinition> {
+  const def = await resolvePageDefinition(slug);
   if (!def) throw new AdminError("That page no longer exists.");
   return def;
 }
@@ -28,8 +30,13 @@ async function ensurePage(tx: Prisma.TransactionClient, def: PageDefinition) {
   return tx.page.upsert({
     where: { slug: def.slug },
     update: {},
-    create: { slug: def.slug, title: def.title, status: "PUBLISHED" },
+    create: { slug: def.slug, title: def.title, status: "PUBLISHED", publishedAt: new Date() },
   });
+}
+
+/** Record who last edited a page. */
+async function touch(slug: string, adminId: string) {
+  await prisma.page.updateMany({ where: { slug }, data: { updatedById: adminId } });
 }
 
 async function assertMediaExists(ids: Array<string | null | undefined>) {
@@ -63,8 +70,8 @@ const itemSchema = z.object({
   visible: z.boolean().default(true),
 });
 
-export const saveSection = adminAction(async (admin, slug: string, key: string, data: FormData) => {
-  const def = requireDefinition(slug);
+export const saveSection = permittedAction("content", async (admin, slug: string, key: string, data: FormData) => {
+  const def = await requireDefinition(slug);
   const sdef = def.sections.find((s) => s.key === key);
   if (!sdef) throw new AdminError("That section no longer exists on this page.");
   const has = (f: (typeof sdef.fields)[number]) => sdef.fields.includes(f);
@@ -180,6 +187,7 @@ export const saveSection = adminAction(async (admin, slug: string, key: string, 
     await tx.page.update({ where: { id: page.id }, data: { updatedAt: new Date() } });
   });
 
+  await touch(def.slug, admin.id);
   await logPage(def, admin, `${sdef.label} section`);
   revalidateSite();
   return { ok: true };
@@ -189,43 +197,186 @@ export const saveSection = adminAction(async (admin, slug: string, key: string, 
 /* Page settings, body, review                                                 */
 /* -------------------------------------------------------------------------- */
 
-export const savePageSettings = adminAction(async (admin, slug: string, data: FormData) => {
-  const def = requireDefinition(slug);
+export const savePageSettings = permittedAction("content", async (admin, slug: string, data: FormData) => {
+  const def = await requireDefinition(slug);
   const parsed = z
     .object({
       title: reqText(120, "Give the page a title."),
+      navLabel: optText(40),
       seoTitle: optText(SEO_TITLE_MAX),
       seoDescription: optText(SEO_DESCRIPTION_MAX),
       ogImageId: optMediaId,
-      status: z.enum(["PUBLISHED", "DRAFT"]).optional(),
     })
     .parse({
       title: fd.str(data, "title"),
+      navLabel: fd.str(data, "navLabel"),
       seoTitle: fd.str(data, "seoTitle"),
       seoDescription: fd.str(data, "seoDescription"),
       ogImageId: fd.str(data, "ogImageId"),
-      status: def.kind === "policy" ? fd.str(data, "status") || "PUBLISHED" : undefined,
     });
   await assertMediaExists([parsed.ogImageId]);
-  const update: Prisma.PageUncheckedUpdateInput = {
-    title: parsed.title,
-    seoTitle: parsed.seoTitle,
-    seoDescription: parsed.seoDescription,
-    ogImageId: parsed.ogImageId,
-    // System pages are always published; only policy pages can be drafts.
-    status: def.kind === "policy" ? parsed.status : "PUBLISHED",
-  };
+  const update: Prisma.PageUncheckedUpdateInput = { ...parsed, updatedById: admin.id };
+
+  // Only pages created in the admin can change their URL (code-defined pages have fixed routes).
+  let newSlug = slug;
+  if (def.kind === "custom" && data.has("slug")) {
+    newSlug = fd.str(data, "slug").toLowerCase();
+    if (newSlug !== slug) {
+      await assertSlugAvailable(newSlug);
+      update.slug = newSlug;
+    }
+  }
   await prisma.page.upsert({
     where: { slug },
     update,
-    create: { ...(update as Prisma.PageUncheckedCreateInput), slug },
+    create: { ...(update as Prisma.PageUncheckedCreateInput), slug, status: "PUBLISHED", publishedAt: new Date() },
   });
-  await logPage(def, admin, def.kind === "policy" && parsed.status === "DRAFT" ? "page settings (draft)" : "page settings & SEO");
+  await logActivity("page.updated", `${admin.name} updated ${parsed.title}: page settings & SEO${newSlug !== slug ? ` (URL /${slug} → /${newSlug})` : ""}`, {
+    actorId: admin.id,
+    entityType: "page",
+    entityId: newSlug,
+  });
   revalidateSite();
+  return newSlug !== slug ? { ok: true, id: newSlug, message: "Saved. The page address changed." } : { ok: true };
 });
 
-export const savePageBody = adminAction(async (admin, slug: string, data: FormData) => {
-  const def = requireDefinition(slug);
+/* -------------------------------------------------------------------------- */
+/* Create, status, duplicate                                                   */
+/* -------------------------------------------------------------------------- */
+
+async function assertSlugAvailable(slug: string, field = "slug") {
+  if (!isValidSlug(slug)) throw new AdminError("Please correct the highlighted fields.", { [field]: "Use lowercase letters, numbers and single hyphens." });
+  if (RESERVED_PAGE_SLUGS.has(slug)) throw new AdminError("Please correct the highlighted fields.", { [field]: "That address is used by another part of the site." });
+  if (await prisma.page.findUnique({ where: { slug }, select: { id: true } })) {
+    throw new AdminError("Please correct the highlighted fields.", { [field]: "Another page already uses this address." });
+  }
+}
+
+async function freeSlug(base: string): Promise<string> {
+  const root = slugify(base).slice(0, 60) || "page";
+  for (let i = 0; i < 100; i++) {
+    const candidate = i === 0 ? root : `${root}-${i + 1}`;
+    if (!RESERVED_PAGE_SLUGS.has(candidate) && !(await prisma.page.findUnique({ where: { slug: candidate }, select: { id: true } }))) return candidate;
+  }
+  throw new AdminError("Couldn't find a free address for this page. Please enter one.");
+}
+
+/** New pages start as drafts: invisible to visitors until published. */
+export const createPage = permittedAction("content", async (admin, data: FormData) => {
+  const title = reqText(120, "Give the page a title.").parse(fd.str(data, "title"));
+  const navLabel = optText(40).parse(fd.str(data, "navLabel"));
+  const typed = fd.str(data, "slug").toLowerCase();
+  const slug = typed || (await freeSlug(title));
+  if (typed) await assertSlugAvailable(slug);
+  await prisma.page.create({
+    data: { slug, title, navLabel, isCustom: true, status: "DRAFT", createdById: admin.id, updatedById: admin.id },
+  });
+  await logActivity("page.created", `${admin.name} created page “${title}” (/${slug}) as a draft`, { actorId: admin.id, entityType: "page", entityId: slug });
+  return { ok: true, id: slug, message: "Draft page created." };
+});
+
+const STATUS_LOG = { PUBLISHED: "page.published", DRAFT: "page.drafted", ARCHIVED: "page.archived" } as const;
+const STATUS_WORD = { PUBLISHED: "published", DRAFT: "moved to draft", ARCHIVED: "archived" } as const;
+
+/**
+ * Publish / move to draft / archive. Drafted and archived pages disappear
+ * from the public site, menus and sitemap at once (they're resolved per
+ * request) — the page and its content are kept.
+ */
+export const setPageStatus = permittedAction("content", async (admin, slug: string, status: "PUBLISHED" | "DRAFT" | "ARCHIVED") => {
+  const next = z.enum(["PUBLISHED", "DRAFT", "ARCHIVED"]).parse(status);
+  const def = await requireDefinition(slug);
+  if (!def.statusControl) throw new AdminError("This page is part of the site's structure and is always published.");
+  const current = await prisma.page.findUnique({ where: { slug }, select: { status: true, title: true } });
+  const before = current?.status ?? "PUBLISHED";
+  if (before === next) return { ok: true, message: "No change." };
+  await prisma.page.upsert({
+    where: { slug },
+    update: { status: next, updatedById: admin.id, ...(next === "PUBLISHED" ? { publishedAt: new Date() } : {}) },
+    create: { slug, title: def.title, status: next, updatedById: admin.id, ...(next === "PUBLISHED" ? { publishedAt: new Date() } : {}) },
+  });
+  const title = current?.title ?? def.title;
+  await logActivity(STATUS_LOG[next], `${admin.name} ${STATUS_WORD[next]} “${title}” (${before.toLowerCase()} → ${next.toLowerCase()})`, {
+    actorId: admin.id,
+    entityType: "page",
+    entityId: slug,
+  });
+  revalidateSite();
+  return {
+    ok: true,
+    message:
+      next === "PUBLISHED"
+        ? "Published — it's live on the site."
+        : next === "DRAFT"
+          ? "Moved to draft. It's no longer visible to visitors, and it's hidden from menus and the sitemap."
+          : "Archived. It's no longer visible to visitors.",
+  };
+});
+
+/** Copy a created or policy page into a new draft page (content, SEO and matching sections). */
+export const duplicatePage = permittedAction("content", async (admin, slug: string) => {
+  const def = await requireDefinition(slug);
+  if (def.kind === "system") throw new AdminError("Site pages with a fixed layout can't be duplicated. Create a new page instead.");
+  const src = await prisma.page.findUnique({ where: { slug }, include: { sections: { include: { items: true } } } });
+  if (!src) throw new AdminError("Save this page once before duplicating it.");
+  const newSlug = await freeSlug(`${slug}-copy`);
+  const keys = new Set(CUSTOM_PAGE_SECTIONS.map((s) => s.key));
+  const title = `Copy of ${src.title}`.slice(0, 120);
+  await prisma.page.create({
+    data: {
+      slug: newSlug,
+      title,
+      navLabel: src.navLabel,
+      body: src.body,
+      seoTitle: src.seoTitle,
+      seoDescription: src.seoDescription,
+      ogImageId: src.ogImageId,
+      isCustom: true,
+      status: "DRAFT",
+      createdById: admin.id,
+      updatedById: admin.id,
+      sections: {
+        create: src.sections
+          .filter((sec) => keys.has(sec.key))
+          .map((sec) => ({
+            key: sec.key,
+            visible: sec.visible,
+            displayOrder: sec.displayOrder,
+            eyebrow: sec.eyebrow,
+            heading: sec.heading,
+            subheading: sec.subheading,
+            body: sec.body,
+            imageId: sec.imageId,
+            primaryCtaLabel: sec.primaryCtaLabel,
+            primaryCtaHref: sec.primaryCtaHref,
+            secondaryCtaLabel: sec.secondaryCtaLabel,
+            secondaryCtaHref: sec.secondaryCtaHref,
+            items: {
+              create: sec.items.map((item) => ({
+                eyebrow: item.eyebrow,
+                title: item.title,
+                body: item.body,
+                imageId: item.imageId,
+                linkLabel: item.linkLabel,
+                linkHref: item.linkHref,
+                visible: item.visible,
+                displayOrder: item.displayOrder,
+              })),
+            },
+          })),
+      },
+    },
+  });
+  await logActivity("page.created", `${admin.name} duplicated “${src.title}” as “${title}” (/${newSlug}, draft)`, {
+    actorId: admin.id,
+    entityType: "page",
+    entityId: newSlug,
+  });
+  return { ok: true, id: newSlug, message: "Copied as a new draft page." };
+});
+
+export const savePageBody = permittedAction("content", async (admin, slug: string, data: FormData) => {
+  const def = await requireDefinition(slug);
   if (!def.hasBody) throw new AdminError("This page has no body text.");
   const body = optText(100000).parse(typeof data.get("body") === "string" ? String(data.get("body")) : "");
   await prisma.page.upsert({
@@ -233,30 +384,33 @@ export const savePageBody = adminAction(async (admin, slug: string, data: FormDa
     update: { body },
     create: { slug, title: def.title, body },
   });
+  await touch(def.slug, admin.id);
   await logPage(def, admin, "page text");
   revalidateSite();
 });
 
-export const markPageReviewed = adminAction(async (admin, slug: string) => {
-  const def = requireDefinition(slug);
+export const markPageReviewed = permittedAction("content", async (admin, slug: string) => {
+  const def = await requireDefinition(slug);
   await prisma.page.upsert({
     where: { slug },
     update: { reviewRequired: false },
     create: { slug, title: def.title, reviewRequired: false },
   });
+  await touch(def.slug, admin.id);
   await logPage(def, admin, "marked as reviewed");
   revalidateSite();
   return { ok: true, message: "Marked as reviewed." };
 });
 
-export const flagPageForReview = adminAction(async (admin, slug: string, data: FormData) => {
-  const def = requireDefinition(slug);
+export const flagPageForReview = permittedAction("content", async (admin, slug: string, data: FormData) => {
+  const def = await requireDefinition(slug);
   const reviewNotes = optText(2000).parse(fd.str(data, "reviewNotes"));
   await prisma.page.upsert({
     where: { slug },
     update: { reviewRequired: true, reviewNotes },
     create: { slug, title: def.title, reviewRequired: true, reviewNotes },
   });
+  await touch(def.slug, admin.id);
   await logPage(def, admin, "flagged for review");
   revalidateSite();
 });

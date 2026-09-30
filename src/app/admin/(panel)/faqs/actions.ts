@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
-import { AdminError, adminAction, fd } from "@/lib/admin/action";
+import { AdminError, permittedAction, fd } from "@/lib/admin/action";
 import { revalidateSite } from "@/lib/revalidate";
 import { uniqueSlug } from "@/lib/slug";
 import { reqText } from "@/components/admin/content/validation";
@@ -12,7 +12,7 @@ const ids = z.array(z.string().min(1).max(40)).max(1000);
 
 /* Categories ---------------------------------------------------------------- */
 
-export const createFaqCategory = adminAction(async (admin, data: FormData) => {
+export const createFaqCategory = permittedAction("content", async (admin, data: FormData) => {
   const name = reqText(80, "Enter a category name.").parse(fd.str(data, "name"));
   const slug = await uniqueSlug(name, async (s) => Boolean(await prisma.faqCategory.findUnique({ where: { slug: s }, select: { id: true } })));
   const last = await prisma.faqCategory.aggregate({ _max: { displayOrder: true } });
@@ -22,7 +22,7 @@ export const createFaqCategory = adminAction(async (admin, data: FormData) => {
   return { ok: true, message: `Category “${name}” added.` };
 });
 
-export const renameFaqCategory = adminAction(async (admin, id: string, data: FormData) => {
+export const renameFaqCategory = permittedAction("content", async (admin, id: string, data: FormData) => {
   const name = reqText(80, "Enter a category name.").parse(fd.str(data, "name"));
   await prisma.faqCategory.update({ where: { id }, data: { name } });
   await logActivity("faq.updated", `${admin.name} renamed an FAQ category to “${name}”`, { actorId: admin.id, entityType: "faqCategory", entityId: id });
@@ -30,7 +30,7 @@ export const renameFaqCategory = adminAction(async (admin, id: string, data: For
   return { ok: true, message: "Category renamed." };
 });
 
-export const deleteFaqCategory = adminAction(async (admin, id: string) => {
+export const deleteFaqCategory = permittedAction("content", async (admin, id: string) => {
   const cat = await prisma.faqCategory.findUnique({ where: { id }, select: { name: true } });
   if (!cat) throw new AdminError("This category was already deleted.");
   // FAQs are kept and become uncategorized (FK is ON DELETE SET NULL).
@@ -40,7 +40,7 @@ export const deleteFaqCategory = adminAction(async (admin, id: string) => {
   return { ok: true, message: "Category deleted. Its questions are now uncategorized." };
 });
 
-export const reorderFaqCategories = adminAction(async (admin, raw: string[]) => {
+export const reorderFaqCategories = permittedAction("content", async (admin, raw: string[]) => {
   const list = ids.parse(raw);
   await prisma.$transaction(list.map((id, i) => prisma.faqCategory.update({ where: { id }, data: { displayOrder: i } })));
   await logActivity("faq.updated", `${admin.name} reordered FAQ categories`, { actorId: admin.id, entityType: "faqCategory" });
@@ -61,7 +61,7 @@ const faqSchema = z.object({
   showOnProductPages: z.boolean(),
 });
 
-export const saveFaq = adminAction(async (admin, id: string | null, data: FormData) => {
+export const saveFaq = permittedAction("content", async (admin, id: string | null, data: FormData) => {
   const parsed = faqSchema.parse({
     question: fd.str(data, "question"),
     answer: typeof data.get("answer") === "string" ? String(data.get("answer")).trim() : "",
@@ -89,7 +89,7 @@ export const saveFaq = adminAction(async (admin, id: string | null, data: FormDa
   return { ok: true, message: id ? "Question saved." : "Question added." };
 });
 
-export const reorderFaqs = adminAction(async (admin, raw: string[]) => {
+export const reorderFaqs = permittedAction("content", async (admin, raw: string[]) => {
   const list = ids.parse(raw);
   await prisma.$transaction(list.map((id, i) => prisma.faq.update({ where: { id }, data: { displayOrder: i } })));
   await logActivity("faq.updated", `${admin.name} reordered FAQs`, { actorId: admin.id, entityType: "faq" });
@@ -97,14 +97,14 @@ export const reorderFaqs = adminAction(async (admin, raw: string[]) => {
   return { ok: true, message: "Order saved." };
 });
 
-export const setFaqArchived = adminAction(async (admin, id: string, archived: boolean) => {
+export const setFaqArchived = permittedAction("content", async (admin, id: string, archived: boolean) => {
   const faq = await prisma.faq.update({ where: { id }, data: { archivedAt: archived ? new Date() : null } });
   await logActivity("faq.updated", `${admin.name} ${archived ? "archived" : "restored"} FAQ “${faq.question}”`, { actorId: admin.id, entityType: "faq", entityId: id });
   revalidateSite();
   return { ok: true, message: archived ? "Question archived — hidden from the site." : "Question restored." };
 });
 
-export const deleteFaq = adminAction(async (admin, id: string) => {
+export const deleteFaq = permittedAction("content", async (admin, id: string) => {
   const faq = await prisma.faq.findUnique({ where: { id }, select: { question: true } });
   if (!faq) throw new AdminError("This question was already deleted.");
   await prisma.faq.delete({ where: { id } });

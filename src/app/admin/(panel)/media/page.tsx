@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import {requirePermission} from "@/lib/auth/session";
 import { getMediaUsageCounts } from "@/lib/media/service";
 import { cn } from "@/lib/cn";
 import type { Prisma } from "@/generated/prisma/client";
@@ -52,7 +52,7 @@ type FilterKey = keyof typeof FILTERS;
 type Props = { searchParams: Promise<{ q?: string; filter?: string; page?: string }> };
 
 export default async function MediaLibrary({ searchParams }: Props) {
-  await requireAdmin();
+  await requirePermission("media");
   const sp = await searchParams;
   const q = (sp.q ?? "").trim().slice(0, 100);
   const filter: FilterKey = sp.filter && sp.filter in FILTERS ? (sp.filter as FilterKey) : "all";

@@ -204,7 +204,11 @@ export default async function SettingsPage() {
                   <Condition
                     ok={commerce.checkoutUiReady}
                     label="Cart & checkout pages released"
-                    detail={commerce.checkoutUiReady ? "Released" : "Not yet released — the cart and checkout pages are still being built."}
+                    detail={
+                      commerce.checkoutUiReady
+                        ? "Released"
+                        : "Not yet released — the cart and checkout pages are built but held back until payments are finalized (CHECKOUT_UI_READY)."
+                    }
                   />
                 </ul>
               </div>

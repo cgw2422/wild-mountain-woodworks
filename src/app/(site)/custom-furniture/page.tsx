@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getPageContent } from "@/lib/cms/queries";
+import { NOT_FOUND_METADATA, getVisiblePage, requireVisiblePage, withPreviewRobots } from "@/lib/cms/pages";
 import { buildMetadata } from "@/lib/seo";
 import { getSettings } from "@/lib/settings";
 import { getCustomFormSuggestions } from "@/lib/catalog/form-options";
@@ -14,12 +14,14 @@ import { SectionHeading } from "@/components/site/SectionHeading";
 import { CustomBuildForm } from "@/components/forms/CustomBuildForm";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const page = await getPageContent("custom-furniture");
-  return buildMetadata({ title: page.seoTitle ?? "Custom Furniture", description: page.seoDescription, path: "/custom-furniture", image: page.ogImage ?? page.section("hero").image });
+  const visible = await getVisiblePage("custom-furniture");
+  if (!visible) return NOT_FOUND_METADATA;
+  const page = visible.page;
+  return withPreviewRobots(visible, buildMetadata({ title: page.seoTitle ?? "Custom Furniture", description: page.seoDescription, path: "/custom-furniture", image: page.ogImage ?? page.section("hero").image }));
 }
 
 export default async function CustomFurniturePage() {
-  const [page, settings, suggestions] = await Promise.all([getPageContent("custom-furniture"), getSettings(), getCustomFormSuggestions()]);
+  const [page, settings, suggestions] = await Promise.all([requireVisiblePage("custom-furniture").then((v) => v.page), getSettings(), getCustomFormSuggestions()]);
   const hero = page.section("hero");
   const intro = page.section("intro");
   const process = page.section("process");

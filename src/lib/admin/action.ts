@@ -2,24 +2,37 @@ import "server-only";
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { logger } from "@/lib/logger";
-import { requireAdmin, type CurrentAdmin } from "@/lib/auth/session";
+import { requireStaff, type CurrentAdmin } from "@/lib/auth/session";
+import { can, type Permission } from "@/lib/auth/permissions";
 import { fieldErrorsFrom } from "@/lib/validation/forms";
 import type { ActionResult } from "./types";
 
 export type { ActionResult } from "./types";
 
+const DENIED: ActionResult = { ok: false, message: "Your role doesn't allow that. Ask an owner if you need access." };
+
 /**
- * Wrap an admin server action: enforces authentication, converts validation
- * and known database errors into friendly `ActionResult`s, and logs the rest.
+ * Wrap an admin server action: enforces authentication and authorization,
+ * converts validation and known database errors into friendly
+ * `ActionResult`s, and logs the rest. The role is re-read from the database
+ * on every call (getSessionState).
+ *
+ * `allowed` decides who may run it — default deny.
  *
  * Note: `redirect()`/`notFound()` throw special errors that must propagate,
  * so they are rethrown untouched.
  */
-export function adminAction<Args extends unknown[]>(
+function guarded<Args extends unknown[]>(
+  allowed: (admin: CurrentAdmin) => boolean,
   fn: (admin: CurrentAdmin, ...args: Args) => Promise<ActionResult | void>,
+  denied: ActionResult = DENIED,
 ) {
   return async (...args: Args): Promise<ActionResult> => {
-    const admin = await requireAdmin();
+    const admin = await requireStaff();
+    if (!allowed(admin)) {
+      logger.warn("Admin action denied by role", { adminId: admin.id, role: admin.role });
+      return denied;
+    }
     try {
       return (await fn(admin, ...args)) ?? { ok: true };
     } catch (err) {
@@ -48,15 +61,25 @@ export function adminAction<Args extends unknown[]>(
 }
 
 /**
- * Like `adminAction`, but only for OWNER accounts (admin users, roles and
- * security). The role is re-read from the database for every call, and
- * anything other than OWNER is refused — hiding buttons is never the control.
+ * OWNER or ADMIN — ordinary site management (products, quotes, settings…).
+ * Editors are refused. The secure default for any action that hasn't been
+ * deliberately opened to editors with `permittedAction`.
+ */
+export function adminAction<Args extends unknown[]>(fn: (admin: CurrentAdmin, ...args: Args) => Promise<ActionResult | void>) {
+  return guarded((a) => a.role === "OWNER" || a.role === "ADMIN", fn);
+}
+
+/** Staff whose role has `permission` (src/lib/auth/permissions.ts), e.g. editors for "content". */
+export function permittedAction<Args extends unknown[]>(permission: Permission, fn: (admin: CurrentAdmin, ...args: Args) => Promise<ActionResult | void>) {
+  return guarded((a) => can(a.role, permission), fn);
+}
+
+/**
+ * OWNER accounts only (admin users, roles and security). Anything other than
+ * OWNER is refused — hiding buttons is never the control.
  */
 export function ownerAction<Args extends unknown[]>(fn: (admin: CurrentAdmin, ...args: Args) => Promise<ActionResult | void>) {
-  return adminAction(async (admin: CurrentAdmin, ...args: Args) => {
-    if (admin.role !== "OWNER") throw new AdminError("Only an owner can do that.");
-    return fn(admin, ...args);
-  });
+  return guarded((a) => a.role === "OWNER", fn, { ok: false, message: "Only an owner can do that." });
 }
 
 export class AdminError extends Error {

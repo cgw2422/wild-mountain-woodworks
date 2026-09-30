@@ -23,7 +23,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { createStorageFromEnv } from "../src/lib/storage/factory";
 import { validatePasswordStrength } from "../src/lib/auth/password";
 import { createPasswordAdmin } from "../src/lib/auth/accounts";
-import { ensurePages as ensureRequiredPages, ensureSettings as ensureRequiredSettings, ensureStarterAnnouncement } from "../src/lib/seed/defaults";
+import { ensureMenus, ensurePages as ensureRequiredPages, ensureSettings as ensureRequiredSettings, ensureStarterAnnouncement } from "../src/lib/seed/defaults";
 import { renderScene } from "./seed-data/images";
 import { ADD_ONS, CATEGORIES, FAQS, FAQ_CATEGORIES, IMAGE_SPECS, OPTION_GROUPS, PORTFOLIO, PRODUCTS, PRODUCT_TEXT } from "./seed-data/catalog";
 
@@ -321,6 +321,8 @@ async function main() {
   await ensureAdmin();
   if (withSample) await seedSampleCatalog();
   else log("sample content skipped (catalog not empty or SEED_SAMPLE_CONTENT=false)");
+  // After the sample catalog, so the footer menu can list its categories.
+  await ensureMenus(prisma, log);
   log("done");
 }
 

@@ -43,8 +43,14 @@ export interface PageDefinition {
   title: string;
   /** Public path, used for "View page" links and sitemap. */
   path: string;
-  kind: "system" | "policy";
+  /** system/policy: defined here in code. custom: created in Admin → Pages (see customPageDefinition). */
+  kind: "system" | "policy" | "custom";
   description: string;
+  /**
+   * Whether the page can be moved to Draft/Archived. Core templates (home,
+   * catalog, product and project templates, quote flow) are always on.
+   */
+  statusControl?: boolean;
   /** Policy/content pages have a markdown body. */
   hasBody?: boolean;
   sections: SectionDefinition[];
@@ -66,6 +72,7 @@ const policyPage = (slug: string, title: string, description: string): PageDefin
   kind: "policy",
   description,
   hasBody: true,
+  statusControl: true,
   sections: [hero({ fields: ["eyebrow", "heading", "body", "image"], imageHelp: "Optional header image." })],
 });
 
@@ -171,6 +178,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "custom-furniture",
+    statusControl: true,
     title: "Custom Furniture",
     path: "/custom-furniture",
     kind: "system",
@@ -237,6 +245,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "about",
+    statusControl: true,
     title: "About",
     path: "/about",
     kind: "system",
@@ -265,6 +274,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "faq",
+    statusControl: true,
     title: "FAQ",
     path: "/faq",
     kind: "system",
@@ -273,6 +283,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "contact",
+    statusControl: true,
     title: "Contact",
     path: "/contact",
     kind: "system",
@@ -301,3 +312,52 @@ export function getPageDefinition(slug: string): PageDefinition | undefined {
 }
 
 export const POLICY_SLUGS = PAGE_DEFINITIONS.filter((p) => p.kind === "policy").map((p) => p.slug);
+
+/**
+ * Pages created in Admin → Pages all share this template: a page header, the
+ * main text (Markdown), an optional feature block and an optional
+ * call-to-action band. Public at /{slug}.
+ */
+export const CUSTOM_PAGE_SECTIONS: SectionDefinition[] = [
+  hero({ imageHelp: "Optional wide image in the page header." }),
+  {
+    key: "feature",
+    label: "Feature block",
+    help: "Optional image-and-text block below the main text.",
+    fields: ["eyebrow", "heading", "body", "image", "primaryCta"],
+    imageSlot: "feature",
+    hideable: true,
+  },
+  {
+    key: "cta",
+    label: "Call to action",
+    help: "Optional closing band with a button.",
+    fields: ["heading", "body", "primaryCta"],
+    hideable: true,
+  },
+];
+
+export function customPageDefinition(page: { slug: string; title: string }): PageDefinition {
+  return {
+    slug: page.slug,
+    title: page.title,
+    path: `/${page.slug}`,
+    kind: "custom",
+    description: "Page created in the admin.",
+    hasBody: true,
+    statusControl: true,
+    sections: CUSTOM_PAGE_SECTIONS,
+  };
+}
+
+/**
+ * Slugs a custom page can never use: every top-level route, code-defined
+ * page, and reserved system path.
+ */
+export const RESERVED_PAGE_SLUGS = new Set([
+  ...PAGE_DEFINITIONS.map((p) => p.slug),
+  ...PAGE_DEFINITIONS.map((p) => p.path.split("/")[1]).filter(Boolean),
+  "admin", "api", "media-files", "cart", "checkout", "order", "orders", "account", "login", "logout",
+  "search", "preview", "sitemap.xml", "robots.txt", "manifest.webmanifest", "icon.svg", "apple-icon.png",
+  "favicon.ico", "brand", "_next", "static", "new",
+]);

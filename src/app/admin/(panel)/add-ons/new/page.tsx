@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import { PageHeader } from "@/components/admin/ui";
 import { createAddOn } from "../actions";
 import { AddOnForm } from "../AddOnForm";
 
 export const metadata: Metadata = { title: "New add-on" };
 
-export default function NewAddOnPage() {
+export default async function NewAddOnPage() {
+  await requireAdmin();
   return (
     <div className="max-w-3xl">
       <PageHeader title="New add-on" breadcrumbs={[{ label: "Add-ons", href: "/admin/add-ons" }, { label: "New" }]} />

@@ -5,51 +5,56 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { Logo } from "@/components/brand/Logo";
+import { can, type Permission, type Role } from "@/lib/auth/permissions";
 
 export type NavCounts = { quotes: number; customRequests: number; messages: number };
 
-const GROUPS: Array<{ label: string; items: Array<{ href: string; label: string; count?: keyof NavCounts }> }> = [
-  { label: "Overview", items: [{ href: "/admin", label: "Dashboard" }] },
+type NavItem = { href: string; label: string; count?: keyof NavCounts; permission: Permission | "admin" };
+
+/** Each item names the permission that unlocks it; the pages enforce the same rule server-side. */
+const GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  { label: "Overview", items: [{ href: "/admin", label: "Dashboard", permission: "dashboard" }] },
   {
     label: "Inbox",
     items: [
-      { href: "/admin/quotes", label: "Quotes", count: "quotes" },
-      { href: "/admin/custom-requests", label: "Custom Requests", count: "customRequests" },
-      { href: "/admin/messages", label: "Messages", count: "messages" },
+      { href: "/admin/quotes", label: "Quotes", count: "quotes", permission: "inbox" },
+      { href: "/admin/custom-requests", label: "Custom Requests", count: "customRequests", permission: "inbox" },
+      { href: "/admin/messages", label: "Messages", count: "messages", permission: "inbox" },
     ],
   },
   {
     label: "Catalog",
     items: [
-      { href: "/admin/products", label: "Products" },
-      { href: "/admin/categories", label: "Categories" },
-      { href: "/admin/options", label: "Options" },
-      { href: "/admin/add-ons", label: "Add-ons" },
-      { href: "/admin/promotions", label: "Promotions" },
+      { href: "/admin/products", label: "Products", permission: "catalog" },
+      { href: "/admin/categories", label: "Categories", permission: "catalog" },
+      { href: "/admin/options", label: "Options", permission: "catalog" },
+      { href: "/admin/add-ons", label: "Add-ons", permission: "catalog" },
+      { href: "/admin/promotions", label: "Promotions", permission: "promotions" },
     ],
   },
   {
     label: "Content",
     items: [
-      { href: "/admin/homepage", label: "Homepage" },
-      { href: "/admin/pages", label: "Pages" },
-      { href: "/admin/portfolio", label: "Portfolio / Our Work" },
-      { href: "/admin/faqs", label: "FAQs" },
-      { href: "/admin/media", label: "Media" },
+      { href: "/admin/homepage", label: "Homepage", permission: "content" },
+      { href: "/admin/pages", label: "Pages", permission: "content" },
+      { href: "/admin/navigation", label: "Navigation", permission: "navigation" },
+      { href: "/admin/portfolio", label: "Portfolio / Our Work", permission: "content" },
+      { href: "/admin/faqs", label: "FAQs", permission: "content" },
+      { href: "/admin/media", label: "Media", permission: "media" },
     ],
   },
   {
     label: "Business",
     items: [
-      { href: "/admin/pricing-calculator", label: "Pricing Calculator" },
-      { href: "/admin/settings", label: "Settings" },
-      { href: "/admin/security", label: "Security" },
-      { href: "/admin/orders", label: "Future Orders" },
+      { href: "/admin/pricing-calculator", label: "Pricing Calculator", permission: "catalog" },
+      { href: "/admin/settings", label: "Settings", permission: "settings" },
+      { href: "/admin/security", label: "Security", permission: "own_account" },
+      { href: "/admin/orders", label: "Future Orders", permission: "inbox" },
     ],
   },
 ];
 
-export function AdminNav({ counts, userName, logout }: { counts: NavCounts; userName: string; logout: () => Promise<void> }) {
+export function AdminNav({ counts, userName, role, logout }: { counts: NavCounts; userName: string; role: Role; logout: () => Promise<void> }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   // Close the mobile menu on navigation (state reset during render).
@@ -63,7 +68,9 @@ export function AdminNav({ counts, userName, logout }: { counts: NavCounts; user
 
   const nav = (
     <nav aria-label="Admin" className="flex-1 overflow-y-auto px-3 py-4">
-      {GROUPS.map((g) => (
+      {GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => i.permission === "admin" || can(role, i.permission)) }))
+        .filter((g) => g.items.length)
+        .map((g) => (
         <div key={g.label} className="mb-5">
           <p className="px-3 pb-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-white/40">{g.label}</p>
           <ul className="space-y-0.5">

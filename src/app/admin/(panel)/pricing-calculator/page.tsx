@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
@@ -16,6 +17,7 @@ export const dynamic = "force-dynamic";
 type SP = Promise<{ product?: string; quote?: string; view?: string }>;
 
 export default async function PricingCalculatorPage({ searchParams }: { searchParams: SP }) {
+  await requireAdmin();
   const sp = await searchParams;
   const ctx = await loadCalculatorContext();
   const showArchived = sp.view === "archived";

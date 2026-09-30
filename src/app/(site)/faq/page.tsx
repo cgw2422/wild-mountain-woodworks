@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getPageContent } from "@/lib/cms/queries";
+import { NOT_FOUND_METADATA, getVisiblePage, requireVisiblePage, withPreviewRobots } from "@/lib/cms/pages";
 import { buildMetadata, plainText } from "@/lib/seo";
 import { getFaqGroups } from "@/lib/catalog/queries";
 import { Container } from "@/components/ui/Container";
@@ -10,12 +10,14 @@ import { Accordion } from "@/components/site/Accordion";
 import { JsonLd } from "@/components/site/JsonLd";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const page = await getPageContent("faq");
-  return buildMetadata({ title: page.seoTitle ?? "FAQ", description: page.seoDescription, path: "/faq", image: page.ogImage });
+  const visible = await getVisiblePage("faq");
+  if (!visible) return NOT_FOUND_METADATA;
+  const page = visible.page;
+  return withPreviewRobots(visible, buildMetadata({ title: page.seoTitle ?? "FAQ", description: page.seoDescription, path: "/faq", image: page.ogImage }));
 }
 
 export default async function FaqPage() {
-  const [page, groups] = await Promise.all([getPageContent("faq"), getFaqGroups()]);
+  const [page, groups] = await Promise.all([requireVisiblePage("faq").then((v) => v.page), getFaqGroups()]);
   const cta = page.section("cta");
   const all = groups.flatMap((g) => g.faqs);
 

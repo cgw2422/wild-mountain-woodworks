@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import Link from "next/link";
 import type { CustomRequestStatus, Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -23,6 +24,7 @@ const TABS: Array<{ key: string; label: string; statuses?: CustomRequestStatus[]
 ];
 
 export default async function CustomRequestsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  await requireAdmin();
   const sp = await searchParams;
   const statusKey = TABS.find((t) => t.key === param(sp, "status"))?.key ?? "";
   const tab = TABS.find((t) => t.key === statusKey)!;

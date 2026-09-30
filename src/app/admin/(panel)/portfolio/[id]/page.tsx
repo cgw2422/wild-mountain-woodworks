@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import {requirePermission} from "@/lib/auth/session";
 import { ActionButton, ActionForm, ConfirmAction, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { MarkdownEditor } from "@/components/admin/content/MarkdownEditor";
 import { SeoFields } from "@/components/admin/content/SeoFields";
@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function EditProject({ params }: Props) {
-  await requireAdmin();
+  await requirePermission("content");
   const { id } = await params;
   const project = await prisma.portfolioProject.findUnique({
     where: { id },

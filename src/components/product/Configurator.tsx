@@ -1,5 +1,6 @@
 "use client";
 
+
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -22,7 +23,7 @@ import {
   TextField,
 } from "@/components/forms/fields";
 
-export type PurchaseMode = "quote" | "cart" | "contact";
+export type PurchaseMode = "quote" | "contact";
 
 export interface ConfiguratorProps {
   product: ConfigurableProduct;
@@ -30,7 +31,6 @@ export interface ConfiguratorProps {
   priceDisclaimer: string | null;
   /**
    * quote   → "Request This Configuration" (launch)
-   * cart    → "Add to Cart" (future; only when e-commerce is fully enabled)
    * contact → quotes disabled; send customers to the contact page
    */
   mode: PurchaseMode;
@@ -101,7 +101,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
   const total = pricing.totalCents;
   const showTotal = pricesVisible && total != null;
   const regularTotal = showTotal && pricing.savingsCents > 0 ? total! + pricing.savingsCents : null;
-  const ctaLabel = mode === "cart" ? "Add to Cart" : "Request This Configuration";
+  const ctaLabel = "Request This Configuration";
 
   return (
     <div className="space-y-10">
@@ -253,7 +253,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
               onClick={requestConfiguration}
               className="min-h-12 shrink-0 bg-charcoal px-5 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ivory"
             >
-              {mode === "cart" ? "Add to Cart" : "Request"}
+              Request
             </button>
           </div>
         </div>
