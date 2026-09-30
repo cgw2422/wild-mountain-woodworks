@@ -12,7 +12,7 @@ import { isValidSlug } from "@/lib/slug";
 import { cleanupVideoFiles, deleteProductVideo } from "@/lib/media/video";
 import { intText, moneyText, optionalText, requiredText } from "./_lib/schemas";
 import { parseSaleInput } from "./_lib/sale";
-import { saleStatus } from "@/lib/pricing/sale";
+import { formatPercent, saleStatus } from "@/lib/pricing/sale";
 import { lastSaleDay, siteDateInput } from "@/lib/site-time";
 import {
   addOnsPayloadSchema,
@@ -210,7 +210,7 @@ async function syncAddOns(tx: Tx, productId: string, rows: AddOnState[]) {
 async function publishProblems(productId: string) {
   const p = await prisma.product.findUnique({
     where: { id: productId },
-    select: { name: true, categoryId: true, basePriceCents: true, saleEnabled: true, salePriceCents: true, _count: { select: { images: true } } },
+    select: { name: true, categoryId: true, basePriceCents: true, saleEnabled: true, saleType: true, salePercentBps: true, salePriceCents: true, _count: { select: { images: true } } },
   });
   if (!p) throw new AdminError("That product no longer exists.");
   const problems: string[] = [];
@@ -291,7 +291,7 @@ export const saveProduct = adminAction(async (admin, productId: string, data: Fo
   });
   const existing = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, basePriceCents: true, saleEnabled: true, saleLabel: true, salePriceCents: true, saleStartsAt: true, saleEndsAt: true },
+    select: { id: true, basePriceCents: true, saleEnabled: true, saleLabel: true, saleType: true, salePercentBps: true, salePriceCents: true, saleStartsAt: true, saleEndsAt: true },
   });
   if (!existing) throw new AdminError("That product no longer exists.");
 
@@ -311,16 +311,25 @@ export const saveProduct = adminAction(async (admin, productId: string, data: Fo
   const saleChanged =
     existing.saleEnabled !== sale.saleEnabled ||
     existing.saleLabel !== sale.saleLabel ||
+    existing.saleType !== sale.saleType ||
+    existing.salePercentBps !== sale.salePercentBps ||
     existing.salePriceCents !== sale.salePriceCents ||
     existing.saleStartsAt?.getTime() !== sale.saleStartsAt?.getTime() ||
     existing.saleEndsAt?.getTime() !== sale.saleEndsAt?.getTime();
   if (saleChanged) {
-    const describe = (s: { saleEnabled: boolean; salePriceCents: number | null; saleStartsAt: Date | null; saleEndsAt: Date | null }) =>
-      s.salePriceCents == null
+    const describe = (s: {
+      saleEnabled: boolean;
+      saleType: "PERCENT" | "FIXED_PRICE" | null;
+      salePercentBps: number | null;
+      salePriceCents: number | null;
+      saleStartsAt: Date | null;
+      saleEndsAt: Date | null;
+    }) =>
+      !s.saleType
         ? "none"
-        : `${s.saleEnabled ? "on" : "off"}, ${formatCents(s.salePriceCents)}${s.saleStartsAt ? ` from ${siteDateInput(s.saleStartsAt)}` : ""}${s.saleEndsAt ? ` through ${siteDateInput(lastSaleDay(s.saleEndsAt))}` : ""}`;
+        : `${s.saleEnabled ? "on" : "off"}, ${s.saleType === "PERCENT" ? `${formatPercent(s.salePercentBps! / 100)}% off` : formatCents(s.salePriceCents!)}${s.saleStartsAt ? ` from ${siteDateInput(s.saleStartsAt)}` : ""}${s.saleEndsAt ? ` through ${siteDateInput(lastSaleDay(s.saleEndsAt))}` : ""}`;
     await logActivity(
-      sale.salePriceCents == null || !sale.saleEnabled ? "product.sale_removed" : "product.sale_updated",
+      !sale.saleType || !sale.saleEnabled ? "product.sale_removed" : "product.sale_updated",
       `${admin.name} changed the sale price of "${input.name}" (${describe(existing)} → ${describe(sale)})`,
       { actorId: admin.id, entityType: "product", entityId: productId },
     );
@@ -451,6 +460,8 @@ export const duplicateProduct = adminAction(async (admin, productId: string) => 
         basePriceCents: src.basePriceCents,
         saleEnabled: src.saleEnabled,
         saleLabel: src.saleLabel,
+        saleType: src.saleType,
+        salePercentBps: src.salePercentBps,
         salePriceCents: src.salePriceCents,
         saleStartsAt: src.saleStartsAt,
         saleEndsAt: src.saleEndsAt,

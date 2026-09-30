@@ -39,7 +39,7 @@ export interface ProductCardData {
   startingPriceCents: number | null;
   /** The regular "from" price while a sale is active (shown struck through), else null. */
   regularPriceCents: number | null;
-  /** Set only while a sale is active AND prices are shown. */
+  /** Set only while a sale is active AND prices are shown. `percentOff` is what's advertised (e.g. 30 or 12.5). */
   sale: { label: string | null; percentOff: number } | null;
 }
 
@@ -54,7 +54,9 @@ function withAlt(img: { media: MediaRef; alt: string | null } | undefined): Medi
 /**
  * Display prices, resolved server-side at request time: an expired or
  * scheduled sale is simply absent, so nothing needs a redeploy. Sales are
- * only shown where prices are shown.
+ * only shown where prices are shown. The advertised discount is the entered
+ * percentage for percent sales (never recalculated from the rounded price),
+ * and derived from the "from" prices for fixed-price sales.
  */
 function salePricing(configurable: ConfigurableProduct, visible: boolean) {
   const start = visible ? startingPrice(configurable) : null;
@@ -62,7 +64,10 @@ function salePricing(configurable: ConfigurableProduct, visible: boolean) {
   return {
     startingPriceCents: start,
     regularPriceCents: regular,
-    sale: start != null && regular != null && regular > start ? { label: configurable.sale!.label, percentOff: percentOff(regular, start) } : null,
+    sale:
+      start != null && regular != null && regular > start
+        ? { label: configurable.sale!.label, percentOff: configurable.sale!.percent ?? percentOff(regular, start) }
+        : null,
   };
 }
 
@@ -130,9 +135,20 @@ export async function getCatalogProducts(categoryId?: string) {
 export function activeSaleWhere(now: Date = new Date()) {
   return {
     saleEnabled: true,
-    salePriceCents: { not: null, gt: 0, lt: prisma.product.fields.basePriceCents },
     basePriceCents: { not: null },
-    AND: [{ OR: [{ saleStartsAt: null }, { saleStartsAt: { lte: now } }] }, { OR: [{ saleEndsAt: null }, { saleEndsAt: { gt: now } }] }],
+    AND: [
+      { OR: [{ saleStartsAt: null }, { saleStartsAt: { lte: now } }] },
+      { OR: [{ saleEndsAt: null }, { saleEndsAt: { gt: now } }] },
+      {
+        OR: [
+          { saleType: "FIXED_PRICE", salePriceCents: { not: null, gt: 0, lt: prisma.product.fields.basePriceCents } },
+          // Percent sales derive their price from the regular price; the rare
+          // case where rounding reaches the regular price is filtered out by
+          // the pricing engine (getSaleProducts re-checks every card).
+          { saleType: "PERCENT", salePercentBps: { gt: 0, lt: 10_000 } },
+        ],
+      },
+    ],
   } satisfies Prisma.ProductWhereInput;
 }
 

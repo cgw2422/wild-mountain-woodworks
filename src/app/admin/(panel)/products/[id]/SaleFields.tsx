@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { MoneyInput, TextInput, Toggle } from "@/components/admin/forms";
 import { formatCents, parseDollarsToCents } from "@/lib/money";
-import { parseSaleAmount, percentOff, saleCaption } from "@/lib/pricing/sale";
+import { formatPercent, parseSaleAmount, percentOff, saleCaption } from "@/lib/pricing/sale";
 
 /**
  * Regular price + Sale section of the product editor, with a live preview.
@@ -32,7 +32,8 @@ export function SaleFields({
   const regular = parseDollarsToCents(basePrice);
   const regularCents = regular == null || Number.isNaN(regular) || regular <= 0 ? null : regular;
   const amount = parseSaleAmount(salePrice, regularCents);
-  const saleCents = amount && "cents" in amount ? amount.cents : null;
+  const valid = amount && !("error" in amount) ? amount : null;
+  const saleCents = valid?.cents ?? null;
   const error = amount && "error" in amount ? amount.error : enabled && !salePrice.trim() ? "Enter a sale price, or switch the sale off." : null;
   const datesBackwards = Boolean(starts && ends && ends < starts);
 
@@ -44,7 +45,8 @@ export function SaleFields({
   else if (ends && ends < today) status = { tone: "off", text: `Ended ${fmtDay(ends)} — customers see the regular price.` };
   else status = { tone: "live", text: ends ? `On sale now, through ${fmtDay(ends)}.` : "On sale now, until you switch it off." };
 
-  const pct = regularCents != null && saleCents != null ? percentOff(regularCents, saleCents) : 0;
+  // Percent sales advertise the entered percentage; fixed prices derive it (rounded down).
+  const pct = valid?.kind === "PERCENT" ? valid.percent : regularCents != null && saleCents != null ? percentOff(regularCents, saleCents) : 0;
 
   return (
     <>
@@ -76,7 +78,7 @@ export function SaleFields({
             value={salePrice}
             onChange={(e) => setSalePrice(e.target.value)}
             placeholder="e.g. 979 or 30%"
-            help="Dollars, or a percent off like 30% (rounded to the dollar)."
+            help="A fixed price like 979, or a percent off like 30% (price rounded to the dollar; 30% is what customers see)."
           />
           <TextInput
             label="Sale label"
@@ -108,8 +110,13 @@ export function SaleFields({
                 <PreviewStat term="Regular" value={formatCents(regularCents)} />
                 <PreviewStat term="Sale" value={formatCents(saleCents)} />
                 <PreviewStat term="Savings" value={formatCents(regularCents - saleCents)} />
-                <PreviewStat term="Discount" value={`${pct}%`} />
+                <PreviewStat term="Discount" value={`${formatPercent(pct)}%`} />
               </dl>
+              <p className="mt-2 text-xs text-neutral-500">
+                {valid?.kind === "PERCENT"
+                  ? `Percent sale: ${formatPercent(valid.percent)}% off ${formatCents(regularCents)} = ${Number.isInteger(valid.exactCents) ? "" : "about "}${formatCents(Math.round(valid.exactCents), { showZeroCents: true })}${valid.exactCents !== valid.cents ? `, rounded to ${formatCents(valid.cents)}` : ""}. Advertised as ${formatPercent(valid.percent)}% off, and follows the regular price if it changes.`
+                  : "Fixed sale price: the discount shown is calculated from the two prices."}
+              </p>
               <p className="mt-3 border-t border-neutral-200 pt-3 text-base">
                 <span className="text-muted">From </span>
                 <del className="text-muted decoration-1">{formatCents(regularCents)}</del>{" "}

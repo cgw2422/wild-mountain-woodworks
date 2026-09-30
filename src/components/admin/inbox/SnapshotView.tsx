@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Badge, formatDate } from "@/components/admin/ui";
+import { formatPercent } from "@/lib/pricing/sale";
 import { formatCents, formatModifier } from "@/lib/money";
 import type { ConfigurationSnapshot } from "@/lib/pricing/snapshot";
 
@@ -98,7 +99,7 @@ export function SnapshotView({
 
       <dl className="space-y-1 border-t border-neutral-200 pt-3">
         <div className="flex justify-between gap-4">
-          <dt className="text-neutral-500">{s.sale ? `Base price (${s.sale.label || "sale"})` : "Base price"}</dt>
+          <dt className="text-neutral-500">{s.sale ? `Base price (${s.sale.label || "sale"}${s.sale.percent ? ` · ${formatPercent(s.sale.percent)}% off` : ""})` : "Base price"}</dt>
           <dd className="tabular-nums">
             {s.sale ? <del className="mr-2 text-neutral-400">{formatCents(s.sale.regularBasePriceCents)}</del> : null}
             {s.basePriceCents != null ? formatCents(s.basePriceCents) : "Priced by quote"}

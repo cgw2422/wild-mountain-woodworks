@@ -7,7 +7,7 @@ export interface SaleInput {
   basePriceCents: number | null;
   saleEnabled: boolean;
   saleLabel: string;
-  /** "979", "1,095.00" or a percentage off the regular price like "30%" (rounded to the dollar). */
+  /** "979", "1,095.00" (fixed sale price) or a percentage off the regular price like "30%" (percent sale). */
   salePrice: string;
   /** "YYYY-MM-DD" in the site time zone, or blank for "starts now". */
   saleStarts: string;
@@ -18,6 +18,11 @@ export interface SaleInput {
 export interface SaleFields {
   saleEnabled: boolean;
   saleLabel: string | null;
+  /** How the sale was entered; the entered value is what's stored. */
+  saleType: "PERCENT" | "FIXED_PRICE" | null;
+  /** PERCENT: the entered percentage in hundredths (3000 = 30%). */
+  salePercentBps: number | null;
+  /** FIXED_PRICE: the entered sale price. Null for percent sales (derived from the regular price). */
   salePriceCents: number | null;
   saleStartsAt: Date | null;
   saleEndsAt: Date | null;
@@ -39,7 +44,7 @@ export function parseSaleInput(input: SaleInput): SaleFields {
   if (amount == null) {
     if (input.saleEnabled) errors.salePrice = "Enter a sale price, or switch the sale off.";
     if (Object.keys(errors).length) throw new AdminError("Please correct the highlighted fields.", errors);
-    return { saleEnabled: false, saleLabel, salePriceCents: null, saleStartsAt: null, saleEndsAt: null };
+    return { saleEnabled: false, saleLabel, saleType: null, salePercentBps: null, salePriceCents: null, saleStartsAt: null, saleEndsAt: null };
   }
   if ("error" in amount) errors.salePrice = amount.error;
 
@@ -51,6 +56,8 @@ export function parseSaleInput(input: SaleInput): SaleFields {
   if (endDay && !saleEndsAt) errors.saleEnds = "Choose a valid date.";
   if (saleStartsAt && saleEndsAt && saleEndsAt <= saleStartsAt) errors.saleEnds = "The end date must be on or after the start date.";
 
-  if (Object.keys(errors).length || !("cents" in amount)) throw new AdminError("Please correct the highlighted fields.", errors);
-  return { saleEnabled: input.saleEnabled, saleLabel, salePriceCents: amount.cents, saleStartsAt, saleEndsAt };
+  if (Object.keys(errors).length || "error" in amount) throw new AdminError("Please correct the highlighted fields.", errors);
+  return amount.kind === "PERCENT"
+    ? { saleEnabled: input.saleEnabled, saleLabel, saleType: "PERCENT", salePercentBps: amount.bps, salePriceCents: null, saleStartsAt, saleEndsAt }
+    : { saleEnabled: input.saleEnabled, saleLabel, saleType: "FIXED_PRICE", salePercentBps: null, salePriceCents: amount.cents, saleStartsAt, saleEndsAt };
 }

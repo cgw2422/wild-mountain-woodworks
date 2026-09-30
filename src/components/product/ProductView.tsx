@@ -121,7 +121,7 @@ export async function ProductView({ data }: { data: Data }) {
             <h1 className="display-lg mt-4">{product.name}</h1>
             {startingPriceCents != null ? (
               <p className="mt-4 text-lg">
-                <PriceTag cents={startingPriceCents} regularCents={regularPriceCents} label={sale?.label} />
+                <PriceTag cents={startingPriceCents} regularCents={regularPriceCents} label={sale?.label} percent={sale?.percentOff} />
                 {regularPriceCents != null && saleEndsAt ? (
                   <span className="block text-sm text-muted">Sale ends {siteDateLabel(lastSaleDay(new Date(saleEndsAt)))}</span>
                 ) : null}

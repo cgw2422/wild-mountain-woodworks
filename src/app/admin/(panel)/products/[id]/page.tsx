@@ -6,7 +6,7 @@ import { getSettings } from "@/lib/settings";
 import { centsToDollarInput, formatCents } from "@/lib/money";
 import { loadConfigurableProduct } from "@/lib/pricing/load";
 import { defaultSelection, priceConfiguration, startingPrice } from "@/lib/pricing/engine";
-import { saleStatus } from "@/lib/pricing/sale";
+import { saleInputValue, saleStatus } from "@/lib/pricing/sale";
 import { lastSaleDay, siteDateInput, siteTimeZone } from "@/lib/site-time";
 import { ActionButton, ActionForm, ConfirmAction, MoneyInput, Select, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { AdminLinkButton, Badge, Card, PageHeader, StatusBadge, formatDate } from "@/components/admin/ui";
@@ -170,7 +170,7 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
                 initial={{
                   basePrice: centsToDollarInput(product.basePriceCents),
                   saleEnabled: product.saleEnabled,
-                  salePrice: centsToDollarInput(product.salePriceCents),
+                  salePrice: saleInputValue(product),
                   saleStarts: siteDateInput(product.saleStartsAt),
                   saleEnds: product.saleEndsAt ? siteDateInput(lastSaleDay(product.saleEndsAt)) : "",
                   saleLabel: product.saleLabel ?? "",

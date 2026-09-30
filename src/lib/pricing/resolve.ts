@@ -23,6 +23,8 @@ export interface ProductConfigRecord {
   sku: string | null;
   basePriceCents: number | null;
   saleEnabled?: boolean;
+  saleType?: "PERCENT" | "FIXED_PRICE" | null;
+  salePercentBps?: number | null;
   salePriceCents?: number | null;
   saleStartsAt?: Date | null;
   saleEndsAt?: Date | null;
@@ -169,7 +171,7 @@ export function resolveConfigurableProduct(record: ProductConfigRecord, now: Dat
     slug: record.slug,
     sku: record.sku,
     basePriceCents: sale ? sale.priceCents : record.basePriceCents,
-    sale: sale ? { regularBasePriceCents: sale.regularPriceCents, endsAt: sale.endsAt, label: sale.label } : null,
+    sale: sale ? { regularBasePriceCents: sale.regularPriceCents, endsAt: sale.endsAt, label: sale.label, percent: sale.percent } : null,
     optionGroups,
     addOns,
   };

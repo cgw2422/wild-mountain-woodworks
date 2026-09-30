@@ -5,12 +5,14 @@ import { cn } from "@/lib/cn";
 /**
  * "From $1,399", or during a sale "From ~~$1,399~~ $979  SALE · 30% OFF".
  * Prices come from the server-side pricing engine; this only formats them.
- * The percentage is derived from the two prices shown, rounded down.
+ * The percentage is the entered one for percent sales (passed as `percent`);
+ * otherwise it's derived from the two prices shown, rounded down.
  */
 export function PriceTag({
   cents,
   regularCents,
   label,
+  percent,
   prefix = "From ",
   showCaption = true,
   className,
@@ -18,6 +20,8 @@ export function PriceTag({
   cents: number;
   regularCents?: number | null;
   label?: string | null;
+  /** The advertised discount (the entered % for percent sales). Derived from the two prices when omitted. */
+  percent?: number | null;
   prefix?: string;
   /** The "SALE · 30% OFF" caption (hidden on cards, where the image badge carries it). */
   showCaption?: boolean;
@@ -44,7 +48,7 @@ export function PriceTag({
         )}
       </span>
       {onSale && showCaption ? (
-        <span className="text-[0.66rem] font-semibold uppercase tracking-[0.18em] text-bronze-text">{saleCaption(label, percentOff(regularCents, cents))}</span>
+        <span className="text-[0.66rem] font-semibold uppercase tracking-[0.18em] text-bronze-text">{saleCaption(label, percent ?? percentOff(regularCents, cents))}</span>
       ) : null}
     </span>
   );

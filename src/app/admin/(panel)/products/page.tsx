@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { Prisma, ProductStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { cn } from "@/lib/cn";
-import { saleStatus } from "@/lib/pricing/sale";
+import { salePriceFor, saleStatus } from "@/lib/pricing/sale";
 import { formatCents } from "@/lib/money";
 import { AdminLinkButton, Badge, EmptyState, PageHeader, StatusBadge, adminButton, formatDate, table } from "@/components/admin/ui";
 import { CatalogThumb } from "@/components/admin/catalog/CatalogThumb";
@@ -205,7 +205,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                             saleStatus(p) === "active" ? (
                               <span title={`Regular ${formatCents(p.basePriceCents)}`}>
                                 <del className="mr-1.5 text-neutral-400">{formatCents(p.basePriceCents)}</del>
-                                <span className="font-semibold text-bronze-text">{formatCents(p.salePriceCents!)}</span>
+                                <span className="font-semibold text-bronze-text">{formatCents(salePriceFor(p)!)}</span>
                               </span>
                             ) : (
                               formatCents(p.basePriceCents)

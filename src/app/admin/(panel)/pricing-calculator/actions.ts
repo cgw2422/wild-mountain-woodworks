@@ -6,6 +6,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { AdminError, adminAction, fd } from "@/lib/admin/action";
+import { salePriceFor } from "@/lib/pricing/sale";
 import { formatCents, parseDollarsToCents } from "@/lib/money";
 import { computeEstimate, fmtPct, type EstimateInputs } from "@/lib/pricing/estimator";
 import { estimateInputsSchema, estimateMetaSchema } from "@/lib/pricing/estimate-schema";
@@ -228,16 +229,18 @@ export const convertEstimateToQuote = adminAction(async (admin, estimateId: stri
  * the product is live and prices are shown.
  */
 export const updateProductPricing = adminAction(async (admin, productId: string, data: FormData) => {
-  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, name: true, saleEnabled: true, salePriceCents: true } });
+  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, name: true, saleEnabled: true, saleType: true, salePercentBps: true, salePriceCents: true } });
   if (!product) throw new AdminError("That product no longer exists.");
   const update: Prisma.ProductUpdateInput = {};
   const changes: string[] = [];
   if (fd.bool(data, "applyBasePrice")) {
     const cents = parseDollarsToCents(fd.str(data, "basePrice"));
     if (cents == null || Number.isNaN(cents) || cents <= 0) throw new AdminError("Enter a valid base price.", { basePrice: "Enter an amount." });
-    if (product.salePriceCents != null && cents <= product.salePriceCents) {
+    // Percent sales follow the new regular price; a fixed sale price must stay below it.
+    const salePrice = salePriceFor({ ...product, basePriceCents: cents });
+    if (salePrice != null && cents <= salePrice) {
       throw new AdminError(
-        `“${product.name}” has a sale price of ${formatCents(product.salePriceCents)}. The regular price must be higher — change or remove the sale in the product editor first.`,
+        `“${product.name}” has a sale price of ${formatCents(salePrice)}. The regular price must be higher — change or remove the sale in the product editor first.`,
         { basePrice: "Must be higher than the product's sale price." },
       );
     }

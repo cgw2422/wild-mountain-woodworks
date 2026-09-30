@@ -55,6 +55,7 @@ describe.skipIf(!hasTestDb)("scheduled sales and announcements", () => {
       where: { id: seeded.product.id },
       data: {
         saleEnabled: true,
+        saleType: "FIXED_PRICE",
         salePriceCents: 84000,
         saleStartsAt: START,
         saleEndsAt: END,
@@ -189,6 +190,73 @@ describe.skipIf(!hasTestDb)("scheduled sales and announcements", () => {
     });
     at(AFTER);
     expect((await priceCart([tampered])).subtotalCents).toBe(120000);
+  });
+
+  it("advertises a percent sale's entered percentage everywhere, priced at the rounded amount", async () => {
+    const { product, ids } = await seedRidge();
+    const selection = {
+      options: { [ids.size]: ids.s60, [ids.wood]: ids.pine },
+      addOns: {},
+      customDetails: {},
+    };
+    const customer = {
+      name: "Pat",
+      email: "pat@example.com",
+      phone: null,
+      zipCode: "43215",
+      timeline: null,
+      notes: "",
+    };
+    at(DURING);
+    const cases = [
+      // [regular, input, rounded sale price, advertised %]
+      [22500, { saleType: "PERCENT", salePercentBps: 3000 }, 15800, 30], // exact $157.50
+      [139900, { saleType: "PERCENT", salePercentBps: 3000 }, 97900, 30], // exact $979.30
+      [22500, { saleType: "PERCENT", salePercentBps: 3100 }, 15500, 31], // exact $155.25
+      [22500, { saleType: "PERCENT", salePercentBps: 1250 }, 19700, 12.5], // exact $196.875
+      [22500, { saleType: "FIXED_PRICE", salePriceCents: 15800 }, 15800, 29], // fixed: derived
+    ] as const;
+    for (const [regular, sale, price, pct] of cases) {
+      await prisma.product.update({
+        where: { id: product.id },
+        data: {
+          basePriceCents: regular,
+          saleEnabled: true,
+          salePercentBps: null,
+          salePriceCents: null,
+          saleStartsAt: null,
+          saleEndsAt: null,
+          ...sale,
+        },
+      });
+      const [card] = await getCatalogProducts();
+      expect(card, `${regular} ${JSON.stringify(sale)}`).toMatchObject({
+        startingPriceCents: price,
+        regularPriceCents: regular,
+        sale: { percentOff: pct },
+      });
+      const [onSale] = await getSaleProducts(DURING);
+      expect(onSale?.sale?.percentOff).toBe(pct);
+      const page = (await getProductPage({ slug: "ridge-dining-table" }))!;
+      expect(page).toMatchObject({
+        startingPriceCents: price,
+        sale: { percentOff: pct },
+      }); // JSON-LD price = startingPriceCents
+      const quote = await createConfigurationQuote({
+        ...customer,
+        productId: product.id,
+        selection,
+      });
+      expect(quote.estimatedTotalCents).toBe(price);
+      const snapshot = (
+        await priceCart([{ productId: product.id, selection, quantity: 1 }])
+      ).lines[0]!.snapshot;
+      expect(snapshot.basePriceCents).toBe(price);
+      expect(snapshot.sale).toMatchObject({
+        regularBasePriceCents: regular,
+        percent: sale.saleType === "PERCENT" ? pct : null,
+      });
+    }
   });
 
   it("shows the announcement on schedule, honours dismissal, and re-shows new wording", async () => {

@@ -219,6 +219,11 @@ enum ProductStatus {
   ARCHIVED
 }
 
+enum SaleType {
+  PERCENT
+  FIXED_PRICE
+}
+
 model Product {
   id                   String        @id @default(cuid())
   name                 String
@@ -232,10 +237,17 @@ model Product {
   basePriceCents       Int?
   showPrice            Boolean       @default(true)
   // Sale: while saleEnabled and saleStartsAt <= now < saleEndsAt (either
-  // bound may be open), salePriceCents replaces the base (regular) price;
-  // options and add-ons are unchanged. The discount % is always derived.
+  // bound may be open), the sale price replaces the base (regular) price;
+  // options and add-ons are unchanged.
   saleEnabled          Boolean       @default(false)
-  salePriceCents       Int?
+  // How the sale was entered. PERCENT: salePercentBps (hundredths of a
+  // percent, 3000 = 30%) is the source of truth; the sale price is derived
+  // from the current regular price and rounded to the dollar, and the
+  // advertised discount is always the entered percentage. FIXED_PRICE:
+  // salePriceCents is the source of truth and the discount % is derived.
+  saleType             SaleType?
+  salePercentBps       Int?
+  salePriceCents       Int? // FIXED_PRICE only
   saleStartsAt         DateTime?
   saleEndsAt           DateTime?
   saleLabel            String? // e.g. "Fall Sale" — shown instead of "Sale"
