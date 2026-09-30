@@ -350,8 +350,14 @@ export function Dialog({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      onClose={onClose}
+      // React propagates dialog events through the component tree, so a nested
+      // dialog (e.g. the image picker inside a value editor) closing would also
+      // close this one. Only react to events from this dialog itself.
+      onClose={(e) => {
+        if (e.target === ref.current) onClose();
+      }}
       onCancel={(e) => {
+        if (e.target !== ref.current) return;
         e.preventDefault();
         onClose();
       }}
