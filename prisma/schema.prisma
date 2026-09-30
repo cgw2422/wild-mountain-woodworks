@@ -231,6 +231,11 @@ model Product {
   description          String        @default("") // Markdown
   basePriceCents       Int?
   showPrice            Boolean       @default(true)
+  // Sale: replaces the base price (options/add-ons unchanged) while
+  // saleStartsAt <= now < saleEndsAt. Either bound may be open.
+  salePriceCents       Int?
+  saleStartsAt         DateTime?
+  saleEndsAt           DateTime?
   featured             Boolean       @default(false)
   featuredOrder        Int           @default(0)
   // Future commerce: individual products can be excluded from online

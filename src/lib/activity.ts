@@ -7,6 +7,8 @@ import { clientIpFromHeaders } from "@/lib/auth/client-ip";
 export type ActivityType =
   | "product.created"
   | "product.updated"
+  | "product.sale_updated"
+  | "product.sale_removed"
   | "product.published"
   | "product.unpublished"
   | "product.archived"

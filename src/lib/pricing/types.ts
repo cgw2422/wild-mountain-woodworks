@@ -61,7 +61,10 @@ export interface ConfigurableProduct {
   name: string;
   slug: string;
   sku: string | null;
+  /** The base price charged now — the sale price while a sale is active. */
   basePriceCents: number | null;
+  /** Set while a sale is active: the regular base price and when the sale ends. */
+  sale: { regularBasePriceCents: number; endsAt: string | null } | null;
   optionGroups: ConfigOptionGroup[];
   addOns: ConfigAddOn[];
 }
@@ -92,6 +95,8 @@ export interface PricingResult {
   lines: PriceLine[];
   /** null when the product has no base price (price on request). */
   totalCents: number | null;
+  /** Amount saved by an active sale (0 when none). Regular total = totalCents + savingsCents. */
+  savingsCents: number;
   /** True when a custom value was chosen — final price requires a quote. */
   requiresCustomQuote: boolean;
 }

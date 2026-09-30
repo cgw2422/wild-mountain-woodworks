@@ -100,6 +100,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
 
   const total = pricing.totalCents;
   const showTotal = pricesVisible && total != null;
+  const regularTotal = showTotal && pricing.savingsCents > 0 ? total! + pricing.savingsCents : null;
   const ctaLabel = mode === "cart" ? "Add to Cart" : "Request This Configuration";
 
   return (
@@ -140,9 +141,23 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
             <div className="flex items-baseline justify-between gap-4">
               <span className="text-[0.78rem] font-semibold uppercase tracking-[0.14em]">Estimated total</span>
               <span className="nums font-display text-[2.2rem] leading-none" aria-live="polite">
+                {regularTotal != null ? (
+                  <>
+                    <del className="mr-3 align-middle text-[1.3rem] text-muted decoration-1">
+                      <span className="sr-only">Regular price </span>
+                      {formatCents(regularTotal)}
+                    </del>
+                    <span className="sr-only">Sale price </span>
+                  </>
+                ) : null}
                 {formatCents(total!)}
               </span>
             </div>
+            {regularTotal != null ? (
+              <p className="mt-2 text-right text-sm font-semibold text-bronze-text">
+                On sale — you save <span className="nums">{formatCents(pricing.savingsCents)}</span>
+              </p>
+            ) : null}
             <details className="group mt-4">
               <summary className="inline-flex min-h-8 cursor-pointer list-none items-center gap-2 py-1 text-sm text-muted hover:text-charcoal [&::-webkit-details-marker]:hidden">
                 <span className="link-quiet">Price breakdown</span>
@@ -154,7 +169,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
                 {pricing.lines.map((l, i) => (
                   <div key={i} className="flex justify-between gap-4">
                     <dt className="text-muted">
-                      {l.kind === "base" ? "Base price" : l.kind === "option" ? `${l.label}: ${l.detail}` : `${l.label}${l.quantity > 1 ? ` × ${l.quantity}` : ""}`}
+                      {l.kind === "base" ? (pricing.savingsCents > 0 ? "Base price (sale)" : "Base price") : l.kind === "option" ? `${l.label}: ${l.detail}` : `${l.label}${l.quantity > 1 ? ` × ${l.quantity}` : ""}`}
                     </dt>
                     <dd className="nums">{l.kind === "base" ? formatCents(l.amountCents) : l.amountCents === 0 ? "Included" : formatModifier(l.amountCents)}</dd>
                   </div>
@@ -225,7 +240,12 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
               <p className="truncate font-display text-lg leading-tight">{product.name}</p>
-              {showTotal ? <p className="text-sm nums text-muted">Est. {formatCents(total!)}</p> : null}
+              {showTotal ? (
+                <p className="text-sm nums text-muted">
+                  Est. {regularTotal != null ? <del className="mr-1 decoration-1">{formatCents(regularTotal)}</del> : null}
+                  {formatCents(total!)}
+                </p>
+              ) : null}
             </div>
             <button
               type="button"

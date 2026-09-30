@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CmsImage } from "@/components/media/CmsImage";
-import { formatCents } from "@/lib/money";
+import { PriceTag } from "@/components/product/PriceTag";
 import type { ProductCardData } from "@/lib/catalog/queries";
 import { cn } from "@/lib/cn";
 
@@ -30,10 +30,7 @@ export function ProductCard({ product, priority, className }: { product: Product
             <span className="link-underline group-hover:[background-size:100%_1px]">View Piece</span>
           </span>
           {product.startingPriceCents != null ? (
-            <span className="nums text-[0.9rem] text-charcoal">
-              <span className="text-muted">From </span>
-              {formatCents(product.startingPriceCents)}
-            </span>
+            <PriceTag cents={product.startingPriceCents} regularCents={product.regularPriceCents} className="justify-end text-right text-[0.9rem] text-charcoal" />
           ) : null}
         </div>
       </div>

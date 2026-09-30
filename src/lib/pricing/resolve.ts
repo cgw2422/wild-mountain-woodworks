@@ -1,3 +1,4 @@
+import { activeSale } from "./sale";
 import type { ConfigImage, ConfigurableProduct, OptionInputType } from "./types";
 
 /**
@@ -21,6 +22,9 @@ export interface ProductConfigRecord {
   slug: string;
   sku: string | null;
   basePriceCents: number | null;
+  salePriceCents?: number | null;
+  saleStartsAt?: Date | null;
+  saleEndsAt?: Date | null;
   optionGroups: Array<{
     displayOrder: number;
     requiredOverride: boolean | null;
@@ -96,7 +100,8 @@ function toImage(m: MediaLike | null, fallbackAlt: string): ConfigImage | null {
  *   default; values without an override row inherit global settings
  * - add-ons can be disabled or have price/required/quantity overridden
  */
-export function resolveConfigurableProduct(record: ProductConfigRecord): ConfigurableProduct {
+export function resolveConfigurableProduct(record: ProductConfigRecord, now: Date = new Date()): ConfigurableProduct {
+  const sale = activeSale(record, now);
   const optionGroups = [...record.optionGroups]
     .filter((pog) => pog.optionGroup.active)
     .sort((a, b) => a.displayOrder - b.displayOrder)
@@ -161,7 +166,8 @@ export function resolveConfigurableProduct(record: ProductConfigRecord): Configu
     name: record.name,
     slug: record.slug,
     sku: record.sku,
-    basePriceCents: record.basePriceCents,
+    basePriceCents: sale ? sale.priceCents : record.basePriceCents,
+    sale: sale ? { regularBasePriceCents: sale.regularPriceCents, endsAt: sale.endsAt } : null,
     optionGroups,
     addOns,
   };

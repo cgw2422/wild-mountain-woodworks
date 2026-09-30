@@ -1,7 +1,6 @@
 import { getPageContent } from "@/lib/cms/queries";
 import type { getProductPage } from "@/lib/catalog/queries";
 import { commerceState, getSettings } from "@/lib/settings";
-import { formatCents } from "@/lib/money";
 import { siteUrl } from "@/lib/site-url";
 import { Container } from "@/components/ui/Container";
 import { ButtonLink } from "@/components/ui/Button";
@@ -14,14 +13,16 @@ import { JsonLd } from "@/components/site/JsonLd";
 import { SectionHeading } from "@/components/site/SectionHeading";
 import { RidgeLine } from "@/components/brand/Logo";
 import { isoDuration } from "@/lib/media/video";
+import { lastSaleDay, siteDateInput, siteDateLabel } from "@/lib/site-time";
 import { ProductGallery } from "./ProductGallery";
+import { PriceTag } from "./PriceTag";
 import { Configurator, type PurchaseMode } from "./Configurator";
 
 type Data = NonNullable<Awaited<ReturnType<typeof getProductPage>>>;
 
 export async function ProductView({ data }: { data: Data }) {
   const [settings, shared, quotePage] = await Promise.all([getSettings(), getPageContent("product"), getPageContent("request-quote")]);
-  const { product, images, videos, configurable, pricesVisible, startingPriceCents, related, faqs } = data;
+  const { product, images, videos, configurable, pricesVisible, startingPriceCents, regularPriceCents, saleEndsAt, related, faqs } = data;
   const flags = commerceState(settings);
   const mode: PurchaseMode = flags.ecommerce && product.purchasable ? "cart" : flags.quotes ? "quote" : "contact";
 
@@ -82,6 +83,7 @@ export async function ProductView({ data }: { data: Data }) {
                   "@type": "Offer",
                   priceCurrency: "USD",
                   price: (startingPriceCents / 100).toFixed(2),
+                  ...(regularPriceCents != null && saleEndsAt ? { priceValidUntil: siteDateInput(lastSaleDay(new Date(saleEndsAt))) } : {}),
                   availability: "https://schema.org/MadeToOrder",
                   url: siteUrl(`/furniture/${product.slug}`),
                   seller: { "@type": "Organization", name: settings.businessName },
@@ -117,8 +119,10 @@ export async function ProductView({ data }: { data: Data }) {
             <h1 className="display-lg mt-4">{product.name}</h1>
             {startingPriceCents != null ? (
               <p className="mt-4 text-lg">
-                <span className="text-muted">From </span>
-                <span className="nums">{formatCents(startingPriceCents)}</span>
+                <PriceTag cents={startingPriceCents} regularCents={regularPriceCents} showPercent />
+                {regularPriceCents != null && saleEndsAt ? (
+                  <span className="block text-sm text-muted">Sale ends {siteDateLabel(lastSaleDay(new Date(saleEndsAt)))}</span>
+                ) : null}
               </p>
             ) : null}
             {product.shortDescription ? <p className="lede mt-5 text-muted">{product.shortDescription}</p> : null}

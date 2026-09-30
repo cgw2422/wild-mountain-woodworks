@@ -35,6 +35,8 @@ export interface ProductCardData {
   secondaryImage: MediaRef | null;
   /** null when prices are hidden (globally or per product) or unpriced. */
   startingPriceCents: number | null;
+  /** The regular "from" price while a sale is active (shown struck through), else null. */
+  regularPriceCents: number | null;
 }
 
 const cardInclude = { ...configurableProductInclude, ...imageInclude, category: true } satisfies Prisma.ProductInclude;
@@ -47,6 +49,7 @@ function withAlt(img: { media: MediaRef; alt: string | null } | undefined): Medi
 
 function toCard(p: CardRecord, pricesVisible: boolean): ProductCardData {
   const configurable = resolveConfigurableProduct(p);
+  const visible = pricesVisible && p.showPrice;
   return {
     id: p.id,
     name: p.name,
@@ -55,7 +58,8 @@ function toCard(p: CardRecord, pricesVisible: boolean): ProductCardData {
     categoryName: p.category?.name ?? null,
     image: withAlt(p.images[0]),
     secondaryImage: withAlt(p.images[1]),
-    startingPriceCents: pricesVisible && p.showPrice ? startingPrice(configurable) : null,
+    startingPriceCents: visible ? startingPrice(configurable) : null,
+    regularPriceCents: visible && configurable.sale ? startingPrice(configurable, { regular: true }) : null,
   };
 }
 
@@ -166,6 +170,8 @@ export const getProductPage = cache(async (where: { slug: string } | { id: strin
     configurable,
     pricesVisible,
     startingPriceCents: pricesVisible ? startingPrice(configurable) : null,
+    regularPriceCents: pricesVisible && configurable.sale ? startingPrice(configurable, { regular: true }) : null,
+    saleEndsAt: pricesVisible ? (configurable.sale?.endsAt ?? null) : null,
     related: relatedCards,
     faqs,
   };

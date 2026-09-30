@@ -34,6 +34,7 @@ export function describeSnapshot(s: ConfigurationSnapshot, showPrices: boolean):
   for (const a of s.addOns) lines.push(`Add-on: ${a.name}${a.quantity > 1 ? ` × ${a.quantity}` : ""}`);
   if (showPrices && s.totalCents != null) {
     lines.push(`Estimated price: ${formatCents(s.totalCents)}${s.requiresCustomQuote ? " (custom details priced separately)" : ""}`);
+    if (s.sale) lines.push(`Sale price applied — ${formatCents(s.sale.savingsCents)} off the regular price.`);
   }
   return lines;
 }

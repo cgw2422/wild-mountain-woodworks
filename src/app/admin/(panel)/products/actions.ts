@@ -11,6 +11,8 @@ import { formatCents, parseDollarsToCents } from "@/lib/money";
 import { isValidSlug } from "@/lib/slug";
 import { cleanupVideoFiles, deleteProductVideo } from "@/lib/media/video";
 import { intText, moneyText, optionalText, requiredText } from "./_lib/schemas";
+import { parseSaleInput } from "./_lib/sale";
+import { lastSaleDay, siteDateInput } from "@/lib/site-time";
 import {
   addOnsPayloadSchema,
   imagesPayloadSchema,
@@ -277,13 +279,22 @@ export const saveProduct = adminAction(async (admin, productId: string, data: Fo
   const addOns = hasAddOns ? parseJson(fd.str(data, "addOnsJson"), addOnsPayloadSchema, "add-ons") : null;
 
   const { basePrice, estMaterialCost, featuredOrder, ...rest } = input;
-  const existing = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, basePriceCents: true } });
+  const sale = parseSaleInput({
+    basePriceCents: basePrice,
+    salePrice: fd.str(data, "salePrice"),
+    saleStarts: fd.str(data, "saleStarts"),
+    saleEnds: fd.str(data, "saleEnds"),
+  });
+  const existing = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { id: true, basePriceCents: true, salePriceCents: true, saleStartsAt: true, saleEndsAt: true },
+  });
   if (!existing) throw new AdminError("That product no longer exists.");
 
   await prisma.$transaction(async (tx) => {
     await tx.product.update({
       where: { id: productId },
-      data: { ...rest, slug, basePriceCents: basePrice, estMaterialCostCents: estMaterialCost, featuredOrder: featuredOrder ?? 0 },
+      data: { ...rest, ...sale, slug, basePriceCents: basePrice, estMaterialCostCents: estMaterialCost, featuredOrder: featuredOrder ?? 0 },
     });
     if (options) await syncOptions(tx, productId, options);
     if (addOns) await syncAddOns(tx, productId, addOns);
@@ -293,6 +304,21 @@ export const saveProduct = adminAction(async (admin, productId: string, data: Fo
       ? ` (base price ${existing.basePriceCents == null ? "none" : formatCents(existing.basePriceCents)} → ${basePrice == null ? "none" : formatCents(basePrice)})`
       : "";
   await logActivity("product.updated", `${admin.name} updated "${input.name}"${priceNote}`, { actorId: admin.id, entityType: "product", entityId: productId });
+  const saleChanged =
+    existing.salePriceCents !== sale.salePriceCents ||
+    existing.saleStartsAt?.getTime() !== sale.saleStartsAt?.getTime() ||
+    existing.saleEndsAt?.getTime() !== sale.saleEndsAt?.getTime();
+  if (saleChanged) {
+    const describe = (s: { salePriceCents: number | null; saleStartsAt: Date | null; saleEndsAt: Date | null }) =>
+      s.salePriceCents == null
+        ? "none"
+        : `${formatCents(s.salePriceCents)}${s.saleStartsAt ? ` from ${siteDateInput(s.saleStartsAt)}` : ""}${s.saleEndsAt ? ` through ${siteDateInput(lastSaleDay(s.saleEndsAt))}` : ""}`;
+    await logActivity(
+      sale.salePriceCents == null ? "product.sale_removed" : "product.sale_updated",
+      `${admin.name} changed the sale price of "${input.name}" (${describe(existing)} → ${describe(sale)})`,
+      { actorId: admin.id, entityType: "product", entityId: productId },
+    );
+  }
 
   if (intent === "publish") {
     const res = await publish(admin.id, admin.name, productId);
@@ -417,6 +443,9 @@ export const duplicateProduct = adminAction(async (admin, productId: string) => 
         shortDescription: src.shortDescription,
         description: src.description,
         basePriceCents: src.basePriceCents,
+        salePriceCents: src.salePriceCents,
+        saleStartsAt: src.saleStartsAt,
+        saleEndsAt: src.saleEndsAt,
         showPrice: src.showPrice,
         featured: false,
         featuredOrder: src.featuredOrder,

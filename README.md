@@ -229,6 +229,7 @@ If a section is added to the code later, the site still renders it with empty va
   - Values without an override follow the library automatically.
 - **Add-ons** are reusable or product-specific, with required, minimum and maximum quantities. Products can override the price, required flag and quantities.
 - **Pricing engine** (`src/lib/pricing/engine.ts`): base price + option modifiers + add-ons × quantity.
+- **Sale prices** (`src/lib/pricing/sale.ts`): a product's optional sale price (dollars or "20%", optional start/end dates) replaces the base price while it runs; options and add-ons are unchanged. It's applied server-side when the product is loaded, so the storefront, quotes and checkout all charge it, and quote snapshots record the regular price and savings. The site shows the regular price struck through.
   - The same pure function gives the live estimate in the browser.
   - The server always re-prices from the database before storing anything. **Prices sent by a browser are never trusted** — there isn't even a price field to send.
 - **Showing prices.** Prices appear when Settings → Show prices *and* the product's own Show price setting are both on.
@@ -329,6 +330,7 @@ See `.env.example` for a commented template.
 | `ADMIN_URL` | no | e.g. `https://admin.wildmountainwoodworks.com` to serve the admin on its own subdomain ([details](#admin-subdomain-optional)) |
 | `ADMIN_SESSION_IDLE_HOURS`, `ADMIN_SESSION_MAX_HOURS` | no | Admin session idle timeout (default 4) and absolute lifetime (default 168 = 7 days) |
 | `TRUST_CLOUDFLARE` | no | `true` only when the site is behind Cloudflare **and** the origin only accepts Cloudflare traffic; then `CF-Connecting-IP` is used as the client IP |
+| `SITE_TIME_ZONE` | no | IANA time zone for sale start/end dates, e.g. `America/Denver` (default `America/New_York`). A sale "Oct 1 – Oct 14" runs from local midnight Oct 1 to local midnight after Oct 14 |
 | `NEXT_PUBLIC_SITE_URL` | **yes (prod)** | Public origin, e.g. `https://wildmountainwoodworks.com`. Used for canonical URLs, sitemap, OpenGraph and email links. If missing, `RAILWAY_PUBLIC_DOMAIN` is used |
 | `STORAGE_DRIVER` | yes (prod) | `r2` in production, `local` in development |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | with R2 | Keep these secret |
@@ -441,7 +443,7 @@ Security is a first-class requirement. The design assumes attackers know `/admin
 - password changes and resets;
 - admin creation, role changes and deactivation;
 - session revocations;
-- product changes (including base price before and after), publishing and archiving;
+- product changes (including base price and sale price before and after), publishing and archiving;
 - quote status changes;
 - settings, page and homepage edits;
 - media uploads, replacements and deletions.

@@ -6,6 +6,8 @@ import { getSettings } from "@/lib/settings";
 import { centsToDollarInput, formatCents } from "@/lib/money";
 import { loadConfigurableProduct } from "@/lib/pricing/load";
 import { defaultSelection, priceConfiguration, startingPrice } from "@/lib/pricing/engine";
+import { saleStatus } from "@/lib/pricing/sale";
+import { lastSaleDay, siteDateInput, siteTimeZone } from "@/lib/site-time";
 import { ActionButton, ActionForm, ConfirmAction, MoneyInput, Select, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { AdminLinkButton, Badge, Card, PageHeader, StatusBadge, formatDate } from "@/components/admin/ui";
 import { CountedInput, CountedTextArea } from "@/components/admin/catalog/CountedField";
@@ -90,6 +92,7 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
 
   // Pricing preview from SAVED settings, using the same engine as the storefront.
   const start = config ? startingPrice(config) : null;
+  const sale = saleStatus(product);
   const defaults = config ? priceConfiguration(config, defaultSelection(config)) : null;
 
   return (
@@ -165,6 +168,33 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
                 />
                 <div className="sm:pt-7">
                   <Toggle label="Show price" name="showPrice" defaultChecked={product.showPrice} description="When off, customers see “Request a quote” instead of prices for this product." />
+                </div>
+              </div>
+              <div className="mt-5 rounded-md border border-neutral-200 p-4">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-neutral-800">Sale</p>
+                  {sale === "active" ? <Badge tone="green">On sale now</Badge> : null}
+                  {sale === "scheduled" ? <Badge tone="amber">Scheduled</Badge> : null}
+                  {sale === "ended" ? <Badge tone="neutral">Ended</Badge> : null}
+                  {sale === "invalid" ? <Badge tone="red">Not applied — not below the base price</Badge> : null}
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <TextInput
+                    label="Sale price"
+                    name="salePrice"
+                    inputMode="decimal"
+                    defaultValue={centsToDollarInput(product.salePriceCents)}
+                    placeholder="e.g. 1095 or 20%"
+                    help="Replaces the base price; options and add-ons are unchanged. Enter dollars, or a percent off like 20% (rounded to the dollar). Leave blank for no sale."
+                  />
+                  <TextInput label="Starts" name="saleStarts" type="date" defaultValue={siteDateInput(product.saleStartsAt)} help="Blank = starts right away." />
+                  <TextInput
+                    label="Ends after"
+                    name="saleEnds"
+                    type="date"
+                    defaultValue={product.saleEndsAt ? siteDateInput(lastSaleDay(product.saleEndsAt)) : ""}
+                    help={`Last day of the sale (${siteTimeZone().replace(/_/g, " ")} time). Blank = until you remove it.`}
+                  />
                 </div>
               </div>
               <div className="mt-5 rounded-md border border-dashed border-neutral-300 p-4">
@@ -491,7 +521,10 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
               ) : (
                 <div className="grid gap-2 text-sm">
                   <p>
-                    <span className="text-neutral-500">Starting at</span> <strong className="tabular-nums">{start != null ? formatCents(start) : "—"}</strong>
+                    <span className="text-neutral-500">Starting at</span>{" "}
+                    {config.sale ? <del className="tabular-nums text-neutral-400">{formatCents(startingPrice(config, { regular: true }) ?? 0)}</del> : null}{" "}
+                    <strong className="tabular-nums">{start != null ? formatCents(start) : "—"}</strong>
+                    {config.sale ? <span className="ml-1 text-xs text-emerald-700">sale</span> : null}
                   </p>
                   <p>
                     <span className="text-neutral-500">Default configuration</span>{" "}

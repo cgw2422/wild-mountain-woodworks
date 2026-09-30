@@ -10,6 +10,9 @@ import type {
  *
  *   base price + Σ option modifiers + Σ (add-on price × quantity)
  *
+ * The base price is already the sale price when a sale is active (applied by
+ * resolveConfigurableProduct with the server's clock).
+ *
  * Pure and deterministic. Used by the configurator for live estimates and by
  * the server (with freshly loaded data) as the source of truth for quotes and,
  * later, orders.
@@ -26,7 +29,7 @@ export function priceConfiguration(
   lines.push({
     kind: "base",
     label: product.name,
-    detail: "Base price",
+    detail: product.sale ? "Sale price" : "Base price",
     quantity: 1,
     unitCents: base ?? 0,
     amountCents: base ?? 0,
@@ -99,6 +102,7 @@ export function priceConfiguration(
     errors,
     lines,
     totalCents,
+    savingsCents: product.sale && base != null ? product.sale.regularBasePriceCents - base : 0,
     requiresCustomQuote,
   };
 }
@@ -118,10 +122,13 @@ export function defaultSelection(product: ConfigurableProduct): ConfigurationSel
   return { options, addOns, customDetails: {} };
 }
 
-/** "From" price: base + cheapest required choices + required add-ons. */
-export function startingPrice(product: ConfigurableProduct): number | null {
+/**
+ * "From" price: base + cheapest required choices + required add-ons.
+ * `regular: true` prices it at the regular base price, ignoring a sale.
+ */
+export function startingPrice(product: ConfigurableProduct, opts: { regular?: boolean } = {}): number | null {
   if (product.basePriceCents == null) return null;
-  let total = product.basePriceCents;
+  let total = opts.regular && product.sale ? product.sale.regularBasePriceCents : product.basePriceCents;
   for (const group of product.optionGroups) {
     if (!group.required) continue;
     const priced = group.values.filter((v) => !v.isCustom).map((v) => v.priceModifierCents);
