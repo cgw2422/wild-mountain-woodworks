@@ -23,8 +23,8 @@ export interface InspectedImage {
 }
 
 /**
- * Validates the real content of an uploaded image and extracts dimensions.
- * The original bytes are preserved untouched; cropping for each design
+ * Validates the real content of an uploaded image, extracts dimensions and
+ * strips embedded metadata (e.g. GPS location). Cropping for each design
  * location happens at display time (focal point + aspect ratio).
  */
 export async function inspectImage(file: File, maxBytes: number): Promise<InspectedImage> {
@@ -50,10 +50,29 @@ export async function inspectImage(file: File, maxBytes: number): Promise<Inspec
   const width = rotated ? meta.height : meta.width;
   const height = rotated ? meta.width : meta.height;
 
-  const blur = await sharp(buffer).rotate().resize(16, 16, { fit: "inside" }).webp({ quality: 40 }).toBuffer();
+  // Strip metadata (EXIF GPS location, camera serial, timestamps) by
+  // re-encoding: sharp drops metadata unless asked to keep it. Orientation is
+  // applied to the pixels first, and the colour profile is kept so colours
+  // don't shift.
+  let clean: Buffer;
+  try {
+    const pipeline = sharp(buffer, { limitInputPixels: MAX_IMAGE_PIXELS, animated: detected === "image/webp" }).rotate().keepIccProfile();
+    clean = await (detected === "image/jpeg"
+      ? pipeline.jpeg({ quality: 92, mozjpeg: true })
+      : detected === "image/png"
+        ? pipeline.png({ compressionLevel: 9 })
+        : detected === "image/webp"
+          ? pipeline.webp({ quality: 90 })
+          : pipeline.avif({ quality: 70 })
+    ).toBuffer();
+  } catch {
+    throw new UploadError(`${file.name} could not be processed.`);
+  }
+
+  const blur = await sharp(clean).resize(16, 16, { fit: "inside" }).webp({ quality: 40 }).toBuffer();
 
   return {
-    buffer,
+    buffer: clean,
     mimeType: detected,
     extension: ALLOWED_IMAGE_TYPES[detected][0],
     width,

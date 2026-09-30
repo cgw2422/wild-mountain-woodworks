@@ -126,23 +126,58 @@ Useful scripts:
 
 ## Admin accounts
 
-There are no customer accounts. Only administrators sign in, at `/admin/login`.
+There are no customer accounts. Only administrators sign in, at `/admin/login` (or `admin.<domain>/admin/login` with an [admin subdomain](#admin-subdomain-optional)).
 
-**First admin.** Choose one:
-- Set `ADMIN_EMAIL`, `ADMIN_PASSWORD` (and optionally `ADMIN_NAME`) and run `npm run db:seed`. The account is created only if that email doesn't exist yet.
-- Run `npm run admin:create -- --email owner@example.com --name "Your Name"`. It prompts for a hidden password.
+Authentication uses [Better Auth](https://better-auth.com), a maintained library, not home-grown session or password code (`src/lib/auth/auth.ts`).
 
-**Password rules:** at least 12 characters, with letters and at least one number or symbol.
+**Two-factor authentication is mandatory.**
+- Every admin must enrol an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy…) before any admin page, action or API works. After the first password sign-in the only reachable page is `/admin/setup-mfa`.
+- Enrolment shows a QR code and **10 one-time backup codes, displayed once** (they can be regenerated, which invalidates the old ones).
+- Every sign-in then needs a 6-digit code or a backup code. After 5 wrong codes the account is locked for 15 minutes.
 
-**Forgotten password:** `npm run admin:create -- --email owner@example.com --reset`. This also signs out that user's existing sessions.
+**Creating admins (no public sign-up):**
+- **First owner (controlled bootstrap):** set `ADMIN_EMAIL`, `ADMIN_PASSWORD` (and optionally `ADMIN_NAME`) and run `npm run db:seed`, or run `npm run admin:create -- --email owner@example.com --name "Your Name"`, which prompts for a hidden password.
+- **Everyone else:** an owner adds them in **Admin → Security → Admin users**. They set up two-factor at first sign-in.
 
-**More admins:** owners can add, deactivate and reactivate admins in **Settings → Admin users**. Everyone can change their own password in **Settings → Your account**.
+**Roles:**
+- **Owner:** full control, including admin users, roles, two-factor resets and the audit log.
+- **Admin:** products, quotes, content, media and ordinary site management. Admins can't see or use admin-user or security controls, and can't raise their own role. There must always be at least one active owner, and nobody can change their own role or deactivate themselves.
 
-Sessions last 7 days and extend while you use them. Login is rate-limited per IP address and per email.
+**Security page (`/admin/security`):**
+- Change your password (signs out your other devices).
+- Generate new backup codes, or replace your authenticator.
+- See where you're signed in and sign out other sessions.
+- Owners also:
+  - add admins and change roles;
+  - deactivate or reactivate admins;
+  - reset another admin's password or two-factor;
+  - sign someone out everywhere if you suspect a compromise;
+  - read the **audit log** (`/admin/security/audit`).
 
-**How admin pages are protected:**
-- A lightweight `src/proxy.ts` redirects signed-out visitors away from `/admin`.
-- The real check is `requireAdmin()`. It validates the session against the database on every admin page, server action and admin API route.
+**Passwords:**
+- At least 12 characters, with letters and a number or symbol.
+- Stored as scrypt hashes. Older bcrypt hashes still work and are upgraded on the next sign-in.
+
+**Sessions:**
+- Server-side and revocable.
+- End after **4 hours without activity** and always after **7 days** (`ADMIN_SESSION_IDLE_HOURS`, `ADMIN_SESSION_MAX_HOURS`).
+- Every sign-in creates a new session.
+- Signing out deletes the session on the server.
+- Cookie: `HttpOnly`, `SameSite=Lax`, `Secure` with the `__Secure-` prefix in production, and signed with `BETTER_AUTH_SECRET`.
+
+**Sign-in throttling:**
+- Limits per IP address and per email address.
+- After 3 failures each further attempt is slowed down; after 10 the address is locked for 15 minutes.
+- Every failure gets the same message, so responses never reveal whether an account exists.
+
+**Break-glass recovery** (run from a trusted machine with production credentials, e.g. `railway ssh`):
+- `npm run admin:create -- --email you@example.com --reset`: new password, signed out everywhere.
+- `npm run admin:create -- --email you@example.com --reset-mfa`: lost phone *and* backup codes. Two-factor is cleared, and must be re-enrolled at next sign-in.
+
+**How admin access is enforced:**
+- Every admin page, server action and admin API route checks the session, two-factor enrolment, account status and role **on the server** (`src/lib/auth/session.ts`, `adminAction` / `ownerAction`, `guardAdminApi`).
+- Role and status are re-read from the database on every request, so a deactivation or demotion takes effect immediately.
+- `src/proxy.ts` only redirects signed-out visitors early; it's a convenience, not the security boundary.
 
 ## How the site is organized
 
@@ -289,7 +324,11 @@ See `.env.example` for a commented template.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | **yes** | PostgreSQL connection string. On Railway: `${{Postgres.DATABASE_URL}}` |
+| `DATABASE_URL` | **yes** | PostgreSQL connection string. On Railway: `${{Postgres.DATABASE_URL}}` (the private-network URL) |
+| `BETTER_AUTH_SECRET` | **yes (prod)** | 32+ random characters (`openssl rand -base64 48`). Signs session cookies and encrypts two-factor secrets. Without it, admin sign-in is disabled in production (the public site still works). Changing it signs everyone out and invalidates enrolled authenticators |
+| `ADMIN_URL` | no | e.g. `https://admin.wildmountainwoodworks.com` to serve the admin on its own subdomain ([details](#admin-subdomain-optional)) |
+| `ADMIN_SESSION_IDLE_HOURS`, `ADMIN_SESSION_MAX_HOURS` | no | Admin session idle timeout (default 4) and absolute lifetime (default 168 = 7 days) |
+| `TRUST_CLOUDFLARE` | no | `true` only when the site is behind Cloudflare **and** the origin only accepts Cloudflare traffic; then `CF-Connecting-IP` is used as the client IP |
 | `NEXT_PUBLIC_SITE_URL` | **yes (prod)** | Public origin, e.g. `https://wildmountainwoodworks.com`. Used for canonical URLs, sitemap, OpenGraph and email links. If missing, `RAILWAY_PUBLIC_DOMAIN` is used |
 | `STORAGE_DRIVER` | yes (prod) | `r2` in production, `local` in development |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | with R2 | Keep these secret |
@@ -314,7 +353,8 @@ Secrets are only read on the server. Only variables prefixed `NEXT_PUBLIC_` are 
 
 1. **Create a project** in Railway, **add PostgreSQL**, then **Deploy from GitHub** with this repository.
 2. **Set service variables** on the web service:
-   - `DATABASE_URL = ${{Postgres.DATABASE_URL}}`
+   - `DATABASE_URL = ${{Postgres.DATABASE_URL}}`. This is the **private-network** URL (`*.railway.internal`), so app↔database traffic never crosses the public internet.
+   - `BETTER_AUTH_SECRET = <openssl rand -base64 48>`
    - `NEXT_PUBLIC_SITE_URL = https://your-domain` (or your Railway domain at first)
    - `STORAGE_DRIVER = r2` plus the `R2_*` variables ([see below](#cloudflare-r2-setup))
    - Optionally the email variables.
@@ -326,8 +366,9 @@ Secrets are only read on the server. Only variables prefixed `NEXT_PUBLIC_` are 
    ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='…' npm run db:seed
    ```
    Or open a shell in the running service with `railway ssh` and run `npm run db:seed` there; it then uses the service's own variables and private network. (`railway run` executes on your computer, where the private `*.railway.internal` database host isn't reachable.) Add `SEED_SAMPLE_CONTENT=false` if you want to start with an empty catalog.
-5. **Custom domain:** add it in Railway → Settings → Networking, then update `NEXT_PUBLIC_SITE_URL`.
-6. Sign in at `/admin`, work through the dashboard's **Launch checklist**, and replace the sample content.
+5. **Custom domain:** add it in Railway → Settings → Networking, then update `NEXT_PUBLIC_SITE_URL`. Railway issues the TLS certificate automatically and redirects HTTP to HTTPS.
+6. **Keep the database private:** after seeding, remove the Postgres service's public TCP proxy (Railway → Postgres → Settings → Networking) so the database is reachable only over Railway's private network. Re-enable it temporarily if you ever need a direct connection, or use `railway ssh` instead.
+7. Sign in at `/admin`, set up two-factor authentication, work through the dashboard's **Launch checklist**, and replace the sample content.
 
 Notes:
 - The app listens on Railway's `PORT` automatically.
@@ -353,25 +394,128 @@ Uploads go from the server to R2, so no bucket CORS configuration is needed.
 
 ## Backups and recovery
 
-- **Database:** turn on Railway's PostgreSQL backups for your plan, and also take periodic off-site dumps:
+**Database**
+- Turn on Railway's PostgreSQL backups for your plan.
+- Also keep your own off-site copies, e.g. weekly and before big changes:
   ```bash
-  pg_dump "$DATABASE_PUBLIC_URL" -Fc -f wildmountain-$(date +%F).dump      # backup
-  pg_restore --clean --no-owner -d "$TARGET_DATABASE_URL" wildmountain-YYYY-MM-DD.dump   # restore
+  pg_dump "$DATABASE_PUBLIC_URL" -Fc -f wildmountain-$(date +%F).dump
   ```
-  The database holds all products, content, quotes, requests and messages.
-- **Images (R2):** turn on bucket **object versioning** or lifecycle rules, or periodically copy the bucket with `rclone sync` to a second bucket or your computer. Replacing or deleting an image in admin removes the old object.
-- **Local development only:** the `./storage` folder holds uploaded files and is git-ignored.
-- **Test a restore** once before launch.
+  The dump holds all products, content, quotes, requests, messages, estimates, admin accounts and the audit log. Store it encrypted, because it contains customer details.
+
+**Restoring the database**
+1. Create a fresh PostgreSQL service in Railway (or pick an existing empty database) and temporarily enable its public TCP proxy.
+2. Restore into it:
+   ```bash
+   pg_restore --clean --if-exists --no-owner -d "$TARGET_DATABASE_URL" wildmountain-YYYY-MM-DD.dump
+   ```
+3. Check it: `DATABASE_URL="$TARGET_DATABASE_URL" npx prisma migrate status` should report the schema is up to date.
+4. Point the web service's `DATABASE_URL` at the restored database (`${{NewPostgres.DATABASE_URL}}`) and redeploy.
+5. Sign in and spot-check products, recent quotes and the audit log. Then remove the temporary public TCP proxy.
+6. Keep `BETTER_AUTH_SECRET` unchanged. Two-factor secrets are encrypted with it, so a restored database only works with the same secret.
+
+**Images and videos (R2)**
+- Turn on bucket **object versioning** or lifecycle rules, or periodically copy the bucket with `rclone sync` to a second bucket or your computer.
+- Replacing or deleting an image in admin removes the old object, so versioning is what makes deletions recoverable.
+
+**Also back up (outside the repository):** your Railway variables, especially `BETTER_AUTH_SECRET`, in a password manager.
+
+**Local development only:** the `./storage` folder holds uploaded files and is git-ignored.
+
+**Test a restore** once before launch, and again after major changes.
 
 ## Security
 
-- **Admin access:** routes are protected on the server. Sessions use httpOnly, Secure (in production) and SameSite=Lax cookies, and only token hashes are stored. Accounts can be deactivated. Login is rate-limited and the timing of failed attempts is evened out.
-- **Input:** every input is validated on the server with Zod; the same rules also run in the browser. Markdown is rendered without raw HTML, and link fields reject `javascript:` URLs.
-- **Public forms:** a honeypot, a minimum fill time (a submit that's too fast is asked to try again, never silently dropped), and PostgreSQL-backed per-IP rate limits.
-- **Uploads:** checked by type, extension, actual decoded contents, size and pixel limits.
-- **HTTP headers:** a Content-Security-Policy, HSTS (in production), `X-Frame-Options: DENY`, `nosniff`, a Referrer-Policy and a Permissions-Policy. Admin pages send `X-Robots-Tag: noindex`.
-- **Prices** are always recalculated on the server. **Stripe** is hosted Checkout only, and no card data is ever stored.
-- **Secrets** exist only in environment variables and are never shown in the admin.
+Security is a first-class requirement. The design assumes attackers know `/admin` exists: protection comes from authentication, authorization, rate limiting, session security, infrastructure isolation and audit controls, not obscurity.
+
+**Admin authentication and authorization.** See [Admin accounts](#admin-accounts):
+- a maintained library (Better Auth);
+- mandatory TOTP two-factor with one-time backup codes;
+- no public sign-up;
+- Owner/Admin roles, enforced server-side on every page, action and API, and deny-by-default;
+- revocable sessions with idle and absolute timeouts;
+- throttling and lockout with generic errors.
+
+**Audit log** (`/admin/security/audit`, owners only). Records:
+- successful and failed sign-ins, lockouts and sign-outs;
+- two-factor enrolment, resets, backup-code use and regeneration;
+- password changes and resets;
+- admin creation, role changes and deactivation;
+- session revocations;
+- product changes (including base price before and after), publishing and archiving;
+- quote status changes;
+- settings, page and homepage edits;
+- media uploads, replacements and deletions.
+
+Each entry has the admin, the time, the target record, the client IP and the user agent. Passwords, codes, tokens and card data are never logged.
+
+**CSRF.**
+- Server actions are protected by Next.js origin checks.
+- Admin API routes reject cross-origin requests themselves.
+- Better Auth checks origins against `trustedOrigins`.
+- Cookies are `SameSite=Lax`.
+
+**Input.**
+- Every input is validated on the server with Zod; lightweight versions of the same rules run in the browser.
+- The browser is never trusted for prices, product IDs, roles, quote statuses, filenames or MIME types.
+- Prices are always recalculated on the server.
+- Prisma parameterizes every query.
+- Markdown is rendered without raw HTML, and there's no `dangerouslySetInnerHTML` on user content.
+- Link fields reject `javascript:` URLs.
+
+**Uploads.**
+- Allowed MIME types and extensions, checked against the file's actual contents (magic bytes / decoding).
+- Size and pixel limits.
+- Random generated storage names.
+- Stored in object storage, never in an executable path.
+- Images are re-encoded to **strip metadata** such as GPS location. (Videos can't be re-encoded without a server-side tool, so strip location on the phone before uploading, or export without it.)
+- Customers can upload images only.
+- Customer reference photos are private and served only to signed-in admins.
+
+**HTTP headers.**
+- Content-Security-Policy (including `frame-ancestors 'none'`), HSTS with preload (in production), `X-Frame-Options: DENY`, `nosniff`, Referrer-Policy, Permissions-Policy and `Cross-Origin-Opener-Policy`.
+- Admin pages and APIs send `Cache-Control: private, no-store` and `X-Robots-Tag: noindex`.
+
+**Client IP.** Rate limits and audit entries use `X-Real-IP` set by Railway, or `CF-Connecting-IP` with `TRUST_CLOUDFLARE=true`. Never the client-controlled first `X-Forwarded-For` entry.
+
+**Errors.**
+- Users see generic messages; details go only to the server logs.
+- Production builds never show stack traces, SQL, internal paths or environment values.
+
+**Secrets.**
+- Only in Railway variables. Never committed (`.env*` is git-ignored), never logged, never shown in the admin.
+- CI fails if any secret value or server-only pattern appears in the browser bundles (`npm run check:bundle`).
+
+**Dependencies.**
+- CI (`.github/workflows/ci.yml`) runs `npm audit --audit-level=high`, lint, type checks, the full test suite (including the auth and authorization security tests), a production build and the bundle-secret scan on every push and pull request.
+- Dependabot opens weekly update PRs.
+- Two vulnerable transitive packages in Prisma's tooling are pinned to patched versions via `overrides` in `package.json`.
+
+**Payments.** Stripe is hosted Checkout only; no card data is ever handled or stored.
+
+### Cloudflare in front of Railway (recommended)
+
+1. Add the domain to Cloudflare. Point DNS (**proxied**, orange cloud) at the Railway custom domain target.
+2. **SSL/TLS: Full (strict)**, **Always Use HTTPS** on, minimum TLS 1.2.
+3. **Security → Bots:** Bot Fight Mode (or Super Bot Fight Mode) on.
+4. **WAF managed rules** on. Add custom rules:
+   - `/admin*`: block requests from countries you never work from, or require a Managed Challenge. If you have a fixed IP, allow only that. For stronger protection, put the admin behind **Cloudflare Access** (Zero Trust, free for small teams) so only your email or device can even reach the login page.
+   - Block `/api/admin*` requests that aren't from a browser session (e.g. missing `Sec-Fetch-Site`).
+5. **Rate limiting rules** (on top of the app's own limits):
+   - `/admin/login*`: about 10 requests/minute per IP.
+   - Quote, custom-request and contact form posts (`/request-quote`, `/custom-furniture`, `/contact`, product pages; POST): about 10/minute per IP.
+   - `/api/admin/*` uploads: about 30/minute per IP.
+6. **Caching:** bypass the cache for `/admin*` and `/api/*`. The app already sends `no-store` there.
+7. DDoS protection is automatic once traffic is proxied.
+8. Then set `TRUST_CLOUDFLARE=true`, and make sure the origin is only reachable through Cloudflare (remove any public Railway domain you don't use), so `CF-Connecting-IP` can't be spoofed.
+
+### Admin subdomain (optional)
+
+Set `ADMIN_URL=https://admin.yourdomain.com` and add that domain to the Railway service. Then:
+- `/admin` paths on the public domain redirect to the admin host;
+- public pages on the admin host redirect to `/admin`;
+- the session cookie is **host-only** on the admin host, so it's never sent to the public site.
+
+This is not a security boundary by itself (authentication and authorization still apply everywhere), but it keeps admin traffic separate and makes admin-only Cloudflare rules (Access, stricter WAF) easy.
 
 ## Testing and QA
 
@@ -385,7 +529,7 @@ npm run check          # eslint + tsc + vitest
   - Configuration snapshots and their immunity to later edits.
   - Form validation and upload rules.
   - Money, slug and reference helpers.
-  - Password and session token handling.
+  - Password hashing and strength rules, and trusted client-IP parsing (the client-controlled `X-Forwarded-For` entry is ignored).
   - Stripe webhook signature verification.
 - **Integration tests** (`tests/integration`) run against `TEST_DATABASE_URL`; migrations are applied automatically, and the tests are skipped if the variable isn't set. They cover:
   - Creating quotes with server-side re-pricing and stored snapshots.
@@ -394,7 +538,17 @@ npm run check          # eslint + tsc + vitest
   - Private attachment storage and rejection of disguised files.
   - Public visibility and archive rules, and slug collisions.
   - Media usage, safe and forced delete, and replace.
-  - Session authentication (forged, expired and deactivated sessions) and rate limiting.
+  - **Admin security** (`tests/integration/auth.test.ts`), using real Better Auth calls and real TOTP codes:
+    - two-factor enrolment is forced before any admin access;
+    - sign-in requires a code; wrong codes lock the account; backup codes work once;
+    - the same generic error for wrong passwords and unknown emails, failures logged, lockout after repeated failures;
+    - no public sign-up; deactivated accounts refused;
+    - forged, idle, over-age and revoked sessions rejected; sign-out deletes the server session;
+    - password change signs out other devices;
+    - admins can't manage admins or elevate themselves; last-owner and self protections hold;
+    - admin APIs reject unauthenticated and cross-origin requests;
+    - legacy bcrypt passwords are upgraded.
+  - Upload metadata (GPS) stripping, and product video validation.
 - **Site QA crawler:** `QA_BASE_URL=http://localhost:3000 npm run qa` checks every public page at 1440, 1024, 768 and 390px wide for:
   - HTTP errors and console errors.
   - Horizontal overflow.
@@ -402,7 +556,8 @@ npm run check          # eslint + tsc + vitest
   - Tap targets smaller than 24px.
   - Missing `h1`s, alt attributes and form labels.
 
-  Add `QA_ADMIN_COOKIE="wm_admin_session=…"` to check admin pages too; `npx tsx scripts/dev-session.ts` prints a cookie in development.
+  Add `QA_ADMIN_COOKIE="$(npx tsx scripts/dev-session.ts)"` to check admin pages too. It signs in as a dedicated development-only `qa@localhost` owner. The crawler fails if an admin page lands on the sign-in screen, so a bad cookie can't pass silently.
+- **Security checks:** `npm run audit:deps` (dependency vulnerabilities) and `npm run build && npm run check:bundle` (no secrets in browser bundles). Both run in CI.
 
 ## Sample content
 

@@ -1,23 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const jar = new Map<string, string>();
-vi.mock("next/headers", () => ({
-  cookies: async () => ({
-    get: (name: string) => (jar.has(name) ? { name, value: jar.get(name)! } : undefined),
-    set: (name: string, value: string) => void jar.set(name, value),
-    delete: (name: string) => void jar.delete(name),
-  }),
-  headers: async () => new Headers({ "user-agent": "vitest" }),
-}));
-vi.mock("next/navigation", () => ({
-  redirect: (url: string) => {
-    throw Object.assign(new Error(`REDIRECT ${url}`), { digest: `NEXT_REDIRECT;${url}` });
-  },
-}));
-vi.mock("next/cache", () => ({ revalidatePath: () => undefined, revalidateTag: () => undefined }));
+vi.mock("next/headers", async () => (await import("../support/next-request")).nextHeaders);
+vi.mock("next/navigation", async () => (await import("../support/next-request")).nextNavigation);
+vi.mock("next/cache", async () => (await import("../support/next-request")).nextCache);
 
 const { prisma } = await import("@/lib/db");
-const { createAdminSession } = await import("@/lib/auth/session");
+const { createSignedInAdmin, jar, resetRequest } = await import("../support/next-request");
 const { defaultEstimateInputs } = await import("@/lib/pricing/estimator");
 const actions = await import("@/app/admin/(panel)/pricing-calculator/actions");
 const { hasTestDb, resetDb } = await import("../support/db");
@@ -52,10 +40,9 @@ const inputs = {
 describe.skipIf(!hasTestDb)("pricing calculator actions", () => {
   beforeEach(async () => {
     await resetDb();
-    jar.clear();
+    resetRequest();
     await prisma.siteSetting.create({ data: { id: "default" } });
-    const u = await prisma.adminUser.create({ data: { email: "owner@example.com", name: "Owner", passwordHash: "x" } });
-    await createAdminSession(u.id);
+    await createSignedInAdmin();
   });
 
   it("requires an admin session", async () => {

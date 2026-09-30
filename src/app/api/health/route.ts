@@ -24,7 +24,10 @@ export async function GET() {
         { status: 503, headers },
       );
     }
-    return Response.json({ status: "ok", database: "ok", latencyMs: Date.now() - started }, { headers });
+    // Whether admin sign-in is configured (never the secret itself). The public site works either way.
+    const secret = process.env.BETTER_AUTH_SECRET;
+    const adminAuth = secret && secret.length >= 32 ? "ok" : process.env.NODE_ENV === "production" ? "missing_secret" : "development_secret";
+    return Response.json({ status: "ok", database: "ok", adminAuth, latencyMs: Date.now() - started }, { headers });
   } catch (error) {
     logger.error("Health check failed", { error });
     const code = (error as { code?: string })?.code;

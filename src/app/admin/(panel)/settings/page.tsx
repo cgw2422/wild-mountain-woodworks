@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth/session";
-import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password";
 import { commerceState, getSettings } from "@/lib/settings";
 import { getStorage } from "@/lib/storage";
-import { ActionButton, ActionForm, ConfirmAction, Select, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
+import { ActionForm, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { ImageField } from "@/components/admin/media/ImageField";
 import { CountedField } from "@/components/admin/content/CountedField";
 import {
@@ -13,9 +12,9 @@ import {
   SEO_TITLE_MAX,
   SEO_TITLE_RECOMMENDED,
 } from "@/components/admin/content/validation";
-import { AdminLinkButton, Badge, Card, PageHeader, formatDate, humanizeEnum, table } from "@/components/admin/ui";
+import { AdminLinkButton, Badge, Card, PageHeader, formatDate } from "@/components/admin/ui";
 import { editorMediaSelect } from "../pages/data";
-import { changePassword, createAdminUser, saveSettings, setAdminActive } from "./actions";
+import { saveSettings } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -41,18 +40,12 @@ function emailStatus() {
 }
 
 export default async function SettingsPage() {
-  const admin = await requireAdmin();
+  await requireAdmin();
   await getSettings(); // ensures the row exists
-  const [settings, admins] = await Promise.all([
-    prisma.siteSetting.findUniqueOrThrow({ where: { id: "default" }, include: { defaultOgImage: { select: editorMediaSelect } } }),
-    admin.role === "OWNER"
-      ? prisma.adminUser.findMany({ orderBy: [{ active: "desc" }, { createdAt: "asc" }], select: { id: true, name: true, email: true, role: true, active: true, lastLoginAt: true } })
-      : Promise.resolve([]),
-  ]);
+  const settings = await prisma.siteSetting.findUniqueOrThrow({ where: { id: "default" }, include: { defaultOgImage: { select: editorMediaSelect } } });
   const commerce = commerceState(settings);
   const storage = storageStatus();
   const email = emailStatus();
-  const activeOwners = admins.filter((a) => a.role === "OWNER" && a.active).length;
   const s = (v: string | null) => v ?? "";
 
   return (
@@ -70,8 +63,7 @@ export default async function SettingsPage() {
           ["seo", "SEO"],
           ["quotes", "Pricing & quotes"],
           ["features", "Features"],
-          ["account", "Your account"],
-          ...(admin.role === "OWNER" ? [["admins", "Admin users"]] : []),
+          ["security", "Security"],
           ["system", "System status"],
         ].map(([id, label]) => (
           <a key={id} href={`#${id}`} className="inline-block py-1 text-neutral-700 underline hover:text-neutral-900">
@@ -223,120 +215,9 @@ export default async function SettingsPage() {
           </ActionForm>
         </Card>
 
-        <Card id="account" title="Your account" description={`Signed in as ${admin.name} (${admin.email}) · ${humanizeEnum(admin.role)}`}>
-          <ActionForm action={changePassword} resetOnSuccess className="max-w-md space-y-4" successMessage={null}>
-            <input type="text" name="username" autoComplete="username" defaultValue={admin.email} hidden readOnly />
-            <TextInput name="currentPassword" label="Current password" type="password" autoComplete="current-password" required />
-            <TextInput
-              name="newPassword"
-              label="New password"
-              type="password"
-              autoComplete="new-password"
-              required
-              help={`At least ${PASSWORD_MIN_LENGTH} characters, with letters and a number or symbol. A passphrase works well.`}
-            />
-            <TextInput name="confirmPassword" label="Confirm new password" type="password" autoComplete="new-password" required />
-            <p className="text-xs text-neutral-500">Changing your password signs you out on every other device.</p>
-            <SubmitButton pendingLabel="Changing…">Change password</SubmitButton>
-          </ActionForm>
+        <Card id="security" title="Security & admin users" description="Your password, two-factor authentication, signed-in devices, admin users and the audit log.">
+          <AdminLinkButton href="/admin/security">Open security settings</AdminLinkButton>
         </Card>
-
-        {admin.role === "OWNER" ? (
-          <Card id="admins" title="Admin users" description="People who can sign in to this admin. Only owners can see this section.">
-            <div className="space-y-6">
-              <div className={`${table.wrap} relative`}>
-                <table className={table.table}>
-                  <thead className={table.thead}>
-                    <tr>
-                      <th scope="col" className={table.th}>
-                        Name
-                      </th>
-                      <th scope="col" className={table.th}>
-                        Role
-                      </th>
-                      <th scope="col" className={table.th}>
-                        Status
-                      </th>
-                      <th scope="col" className={table.th}>
-                        Last sign-in
-                      </th>
-                      <th scope="col" className={table.th}>
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className={table.tbody}>
-                    {admins.map((u) => {
-                      const isSelf = u.id === admin.id;
-                      const lastOwner = u.role === "OWNER" && u.active && activeOwners <= 1;
-                      return (
-                        <tr key={u.id} className={table.tr}>
-                          <td className={table.td}>
-                            <span className="font-medium text-neutral-900">{u.name}</span>
-                            {isSelf ? <span className="ml-1 text-xs text-neutral-500">(you)</span> : null}
-                            <span className="block text-xs text-neutral-500">{u.email}</span>
-                          </td>
-                          <td className={table.td}>{humanizeEnum(u.role)}</td>
-                          <td className={table.td}>{u.active ? <Badge tone="green">Active</Badge> : <Badge tone="neutral">Deactivated</Badge>}</td>
-                          <td className={`${table.td} whitespace-nowrap`}>{u.lastLoginAt ? formatDate(u.lastLoginAt, true) : "Never"}</td>
-                          <td className={`${table.td} text-right`}>
-                            {isSelf ? (
-                              <span className="text-xs text-neutral-400">—</span>
-                            ) : !u.active ? (
-                              <ActionButton action={setAdminActive.bind(null, u.id, true)} variant="small" pendingLabel="Saving…">
-                                Reactivate
-                              </ActionButton>
-                            ) : lastOwner ? (
-                              <span className="text-xs text-neutral-500">Last owner</span>
-                            ) : (
-                              <ConfirmAction
-                                action={setAdminActive.bind(null, u.id, false)}
-                                label="Deactivate"
-                                variant="small"
-                                title={`Deactivate ${u.name}?`}
-                                body="They'll be signed out immediately and won't be able to sign in until reactivated. Their activity history is kept."
-                                confirmLabel="Deactivate"
-                              />
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div>
-                <h3 className="mb-3 text-sm font-semibold text-neutral-900">Add an admin</h3>
-                <ActionForm action={createAdminUser} resetOnSuccess className="space-y-4" successMessage={null}>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <TextInput name="name" label="Name" required maxLength={120} autoComplete="off" />
-                    <TextInput name="email" label="Email" type="email" required maxLength={254} autoComplete="off" />
-                    <Select
-                      name="role"
-                      label="Role"
-                      defaultValue="ADMIN"
-                      options={[
-                        { value: "ADMIN", label: "Admin — manages everything except admin users" },
-                        { value: "EDITOR", label: "Editor — content and catalog editing" },
-                        { value: "OWNER", label: "Owner — full access, including admin users" },
-                      ]}
-                    />
-                    <TextInput
-                      name="password"
-                      label="Initial password"
-                      type="password"
-                      required
-                      autoComplete="new-password"
-                      help={`At least ${PASSWORD_MIN_LENGTH} characters. Share it privately and ask them to change it after signing in.`}
-                    />
-                  </div>
-                  <SubmitButton pendingLabel="Adding…">Add admin</SubmitButton>
-                </ActionForm>
-              </div>
-            </div>
-          </Card>
-        ) : null}
 
         <Card id="system" title="System status" description="Read-only. These are configured by your developer through environment variables.">
           <dl className="grid gap-4 sm:grid-cols-3">

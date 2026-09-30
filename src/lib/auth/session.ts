@@ -1,106 +1,107 @@
 import "server-only";
 import { cache } from "react";
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import {
-  SESSION_COOKIE,
-  SESSION_REFRESH_MS,
-  SESSION_TTL_MS,
-  generateSessionToken,
-  hashSessionToken,
-} from "./tokens";
+import { AuthConfigError, SESSION_IDLE_SECONDS, SESSION_MAX_AGE_SECONDS, getAuth } from "./auth";
+import { clientIpFromHeaders } from "./client-ip";
+
+export { clientIpFromHeaders } from "./client-ip";
+
+export type AdminRole = "OWNER" | "ADMIN";
 
 export type CurrentAdmin = {
   id: string;
   email: string;
   name: string;
-  role: "OWNER" | "ADMIN" | "EDITOR";
+  role: AdminRole;
   sessionId: string;
 };
 
-const cookieOptions = (expires: Date) => ({
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "lax" as const,
-  path: "/",
-  expires,
-});
+type SessionState = { admin: CurrentAdmin; mfaEnrolled: boolean };
 
-export async function createAdminSession(userId: string) {
-  const token = generateSessionToken();
-  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
-  const h = await headers();
-  await prisma.adminSession.create({
-    data: {
-      tokenHash: hashSessionToken(token),
-      userId,
-      expiresAt,
-      ipAddress: clientIpFromHeaders(h),
-      userAgent: h.get("user-agent")?.slice(0, 300) ?? null,
-    },
-  });
-  await prisma.adminUser.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
-  (await cookies()).set(SESSION_COOKIE, token, cookieOptions(expiresAt));
-}
+/** How often last-activity is written (keeps idle tracking cheap). */
+const ACTIVITY_WRITE_MS = 60_000;
 
 /**
- * Validates the session cookie against the database. Memoized per request.
- * Returns null when not signed in, expired, or the user was deactivated.
+ * Resolve the signed-in admin for this request, or null. Memoized per request.
+ *
+ * Default deny: any error, a missing/expired/revoked session, a deactivated
+ * account, or a session past its idle or absolute limit → null. The user's
+ * role and status are re-read from the database on every request, so a
+ * demotion or deactivation takes effect immediately.
  */
-export const getCurrentAdmin = cache(async (): Promise<CurrentAdmin | null> => {
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token || token.length > 200) return null;
+export const getSessionState = cache(async (): Promise<SessionState | null> => {
   try {
-    const session = await prisma.adminSession.findUnique({
-      where: { tokenHash: hashSessionToken(token) },
-      include: { user: true },
-    });
-    if (!session || session.expiresAt < new Date() || !session.user.active) return null;
+    const h = await headers();
+    const result = await getAuth().api.getSession({ headers: h });
+    if (!result) return null;
+    const { session } = result;
+    const now = Date.now();
 
-    // Sliding expiration, written at most once a day.
-    if (Date.now() - session.lastSeenAt.getTime() > SESSION_REFRESH_MS) {
+    const idleFor = now - new Date(session.updatedAt).getTime();
+    const age = now - new Date(session.createdAt).getTime();
+    if (idleFor > SESSION_IDLE_SECONDS * 1000 || age > SESSION_MAX_AGE_SECONDS * 1000) {
+      await prisma.adminSession.deleteMany({ where: { id: session.id } });
+      return null;
+    }
+
+    const user = await prisma.adminUser.findUnique({
+      where: { id: session.userId },
+      select: { id: true, email: true, name: true, role: true, active: true, twoFactorEnabled: true },
+    });
+    if (!user || !user.active) {
+      await prisma.adminSession.deleteMany({ where: { userId: session.userId } });
+      return null;
+    }
+
+    if (idleFor > ACTIVITY_WRITE_MS) {
       await prisma.adminSession
-        .update({
-          where: { id: session.id },
-          data: { lastSeenAt: new Date(), expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
-        })
+        .update({ where: { id: session.id }, data: { updatedAt: new Date(), ipAddress: clientIpFromHeaders(h) } })
         .catch(() => undefined);
     }
+
     return {
-      id: session.user.id,
-      email: session.user.email,
-      name: session.user.name,
-      role: session.user.role,
-      sessionId: session.id,
+      admin: { id: user.id, email: user.email, name: user.name, role: user.role, sessionId: session.id },
+      mfaEnrolled: user.twoFactorEnabled,
     };
   } catch (error) {
-    logger.error("Session lookup failed", { error });
+    if (error instanceof AuthConfigError) logger.error(error.message);
+    else logger.error("Session lookup failed", { error });
     return null;
   }
 });
 
+/**
+ * The fully authenticated admin (signed in AND two-factor enrolled), or null.
+ * A session without two-factor enrolment grants nothing but the enrolment page.
+ */
+export async function getCurrentAdmin(): Promise<CurrentAdmin | null> {
+  const state = await getSessionState();
+  return state?.mfaEnrolled ? state.admin : null;
+}
+
 /** Use in every admin page, layout, server action and API route. */
 export async function requireAdmin(): Promise<CurrentAdmin> {
-  const admin = await getCurrentAdmin();
-  if (!admin) redirect("/admin/login");
+  const state = await getSessionState();
+  if (!state) redirect("/admin/login");
+  if (!state.mfaEnrolled) redirect("/admin/setup-mfa");
+  return state.admin;
+}
+
+/** Owner-only pages and actions. Non-owners get a 404-style redirect to the dashboard. */
+export async function requireOwner(): Promise<CurrentAdmin> {
+  const admin = await requireAdmin();
+  if (admin.role !== "OWNER") redirect("/admin");
   return admin;
 }
 
-export async function destroyCurrentSession() {
-  const jar = await cookies();
-  const token = jar.get(SESSION_COOKIE)?.value;
-  if (token) {
-    await prisma.adminSession.deleteMany({ where: { tokenHash: hashSessionToken(token) } }).catch(() => undefined);
-  }
-  jar.delete(SESSION_COOKIE);
-}
-
-export function clientIpFromHeaders(h: Headers): string {
-  const fwd = h.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim().slice(0, 64);
-  return (h.get("x-real-ip") ?? "unknown").slice(0, 64);
+/** Signed in, two-factor enrolment possibly still pending (enrolment page only). */
+export async function requireSignedIn(): Promise<SessionState> {
+  const state = await getSessionState();
+  if (!state) redirect("/admin/login");
+  return state;
 }
 
 export async function getClientIp(): Promise<string> {

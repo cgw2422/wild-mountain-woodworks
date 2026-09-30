@@ -39,3 +39,17 @@ export async function rateLimit(
 export async function purgeExpiredRateLimits() {
   await prisma.rateLimitBucket.deleteMany({ where: { resetAt: { lt: new Date() } } });
 }
+
+/** Current count in an active window (0 if none), without recording a hit. */
+export async function peekRateLimit(key: string): Promise<number> {
+  try {
+    const row = await prisma.rateLimitBucket.findUnique({ where: { key } });
+    return row && row.resetAt > new Date() ? row.count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function resetRateLimit(key: string) {
+  await prisma.rateLimitBucket.deleteMany({ where: { key } }).catch(() => undefined);
+}

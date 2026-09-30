@@ -15,6 +15,21 @@ describe.skipIf(!hasTestDb)("media library safety", () => {
     expect(stored?.body.length).toBe(media.size);
   });
 
+  it("strips embedded metadata such as GPS location from uploads", async () => {
+    const sharp = (await import("sharp")).default;
+    const withExif = await sharp({ create: { width: 80, height: 60, channels: 3, background: "#7a5a42" } })
+      .withExif({ IFD0: { Copyright: "Home workshop", Artist: "Owner's phone" }, IFD3: { GPSLatitudeRef: "N", GPSLatitude: "40/1 17/1 0/1" } })
+      .jpeg()
+      .toBuffer();
+    expect((await sharp(withExif).metadata()).exif).toBeDefined();
+    const media = await createMediaFromFile(new File([new Uint8Array(withExif)], "shop.jpg", { type: "image/jpeg" }));
+    const stored = await getStorage().get(media.storageKey);
+    const meta = await sharp(stored!.body).metadata();
+    expect(meta.exif).toBeUndefined();
+    expect(stored!.body.includes(Buffer.from("Home workshop"))).toBe(false);
+    expect({ width: meta.width, height: meta.height }).toEqual({ width: 80, height: 60 });
+  });
+
   it("reports usage and refuses to delete an image that is in use", async () => {
     const media = await createMediaFromFile(await imageFile());
     const category = await prisma.category.create({ data: { name: "Benches", slug: "benches", imageId: media.id } });

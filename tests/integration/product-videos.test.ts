@@ -1,23 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const jar = new Map<string, string>();
-vi.mock("next/headers", () => ({
-  cookies: async () => ({
-    get: (name: string) => (jar.has(name) ? { name, value: jar.get(name)! } : undefined),
-    set: (name: string, value: string) => void jar.set(name, value),
-    delete: (name: string) => void jar.delete(name),
-  }),
-  headers: async () => new Headers({ "user-agent": "vitest" }),
-}));
-vi.mock("next/navigation", () => ({
-  redirect: (url: string) => {
-    throw Object.assign(new Error(`REDIRECT ${url}`), { digest: `NEXT_REDIRECT;${url}` });
-  },
-}));
-vi.mock("next/cache", () => ({ revalidatePath: () => undefined, revalidateTag: () => undefined }));
+vi.mock("next/headers", async () => (await import("../support/next-request")).nextHeaders);
+vi.mock("next/navigation", async () => (await import("../support/next-request")).nextNavigation);
+vi.mock("next/cache", async () => (await import("../support/next-request")).nextCache);
 
 const { prisma } = await import("@/lib/db");
-const { createAdminSession } = await import("@/lib/auth/session");
+const { createSignedInAdmin, resetRequest } = await import("../support/next-request");
 const { getStorage } = await import("@/lib/storage");
 const { createProductVideo } = await import("@/lib/media/video");
 const { UploadError } = await import("@/lib/media/process");
@@ -34,9 +22,8 @@ const meta = { width: 1920, height: 1080, durationSec: 42.37, title: "Walkaround
 describe.skipIf(!hasTestDb)("product videos", () => {
   beforeEach(async () => {
     await resetDb();
-    jar.clear();
-    const u = await prisma.adminUser.create({ data: { email: "owner@example.com", name: "Owner", passwordHash: "x" } });
-    await createAdminSession(u.id);
+    resetRequest();
+    await createSignedInAdmin();
   });
 
   it("stores the file and poster, and rejects files whose contents don't match", async () => {

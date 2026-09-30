@@ -23,47 +23,107 @@ datasource db {
 // Administration
 // ---------------------------------------------------------------------------
 
+/// OWNER: full control, including admin users, roles and security.
+/// ADMIN: products, quotes, content, media and ordinary site management.
 enum AdminRole {
   OWNER
   ADMIN
-  EDITOR
 }
 
+/// Admin accounts. Authentication (password hashing, sessions, two-factor)
+/// is handled by Better Auth (src/lib/auth/auth.ts); these tables follow its
+/// schema. There is no public sign-up: accounts are created by an owner in
+/// Admin → Security or by the controlled bootstrap (seed / admin:create).
 model AdminUser {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String
-  passwordHash String
-  role         AdminRole @default(ADMIN)
-  active       Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  email            String    @unique
+  name             String
+  emailVerified    Boolean   @default(true)
+  image            String?
+  role             AdminRole @default(ADMIN)
+  active           Boolean   @default(true)
+  twoFactorEnabled Boolean   @default(false)
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  sessions     AdminSession[]
-  activities   ActivityLog[]
-  notes        InternalNote[]
-  statusEvents StatusEvent[]
-  mediaUploads Media[]
-  videoUploads ProductVideo[]
-  estimates    PriceEstimate[]
+  // Relation names follow Better Auth's Prisma adapter convention
+  // (lower-cased model name + "s"), which it uses for joins.
+  adminsessions   AdminSession[]
+  adminaccounts   AdminAccount[]
+  admintwofactors AdminTwoFactor[]
+  activities      ActivityLog[]
+  notes           InternalNote[]
+  statusEvents    StatusEvent[]
+  mediaUploads    Media[]
+  videoUploads    ProductVideo[]
+  estimates       PriceEstimate[]
 }
 
+/// Server-side admin sessions (Better Auth). The cookie holds the token plus
+/// an HMAC signature made with BETTER_AUTH_SECRET, so a database leak alone
+/// can't be turned into a valid cookie. Revoking = deleting the row.
 model AdminSession {
-  id         String    @id @default(cuid())
-  // SHA-256 of the random session token. The raw token only lives in the
-  // user's httpOnly cookie.
-  tokenHash  String    @unique
-  userId     String
-  user       AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt  DateTime
-  lastSeenAt DateTime  @default(now())
-  ipAddress  String?
-  userAgent  String?
-  createdAt  DateTime  @default(now())
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  user      AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+/// Credential store (Better Auth "account"). `password` is a scrypt hash
+/// (legacy bcrypt hashes are still verified and upgraded on next sign-in).
+model AdminAccount {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+/// Short-lived verification values (e.g. the pending two-factor challenge).
+model AdminVerification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+/// TOTP secret and backup codes, both encrypted with BETTER_AUTH_SECRET.
+model AdminTwoFactor {
+  id                      String    @id @default(cuid())
+  secret                  String
+  backupCodes             String
+  userId                  String
+  user                    AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified                Boolean   @default(true)
+  failedVerificationCount Int       @default(0)
+  lockedUntil             DateTime?
+
+  @@index([userId])
+  @@index([secret])
 }
 
 model ActivityLog {
@@ -74,6 +134,8 @@ model ActivityLog {
   entityId   String?
   actorId    String?
   actor      AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  ipAddress  String?
+  userAgent  String?
   createdAt  DateTime   @default(now())
 
   @@index([createdAt])

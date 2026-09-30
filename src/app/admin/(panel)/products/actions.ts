@@ -7,7 +7,7 @@ import { logActivity } from "@/lib/activity";
 import { revalidateSite } from "@/lib/revalidate";
 import { AdminError, adminAction, fd } from "@/lib/admin/action";
 import { isFurnitureSlugTaken, uniqueFurnitureSlug } from "@/lib/catalog/slugs";
-import { parseDollarsToCents } from "@/lib/money";
+import { formatCents, parseDollarsToCents } from "@/lib/money";
 import { isValidSlug } from "@/lib/slug";
 import { cleanupVideoFiles, deleteProductVideo } from "@/lib/media/video";
 import { intText, moneyText, optionalText, requiredText } from "./_lib/schemas";
@@ -277,7 +277,7 @@ export const saveProduct = adminAction(async (admin, productId: string, data: Fo
   const addOns = hasAddOns ? parseJson(fd.str(data, "addOnsJson"), addOnsPayloadSchema, "add-ons") : null;
 
   const { basePrice, estMaterialCost, featuredOrder, ...rest } = input;
-  const existing = await prisma.product.findUnique({ where: { id: productId }, select: { id: true } });
+  const existing = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, basePriceCents: true } });
   if (!existing) throw new AdminError("That product no longer exists.");
 
   await prisma.$transaction(async (tx) => {
@@ -288,7 +288,11 @@ export const saveProduct = adminAction(async (admin, productId: string, data: Fo
     if (options) await syncOptions(tx, productId, options);
     if (addOns) await syncAddOns(tx, productId, addOns);
   });
-  await logActivity("product.updated", `${admin.name} updated "${input.name}"`, { actorId: admin.id, entityType: "product", entityId: productId });
+  const priceNote =
+    existing && existing.basePriceCents !== basePrice
+      ? ` (base price ${existing.basePriceCents == null ? "none" : formatCents(existing.basePriceCents)} → ${basePrice == null ? "none" : formatCents(basePrice)})`
+      : "";
+  await logActivity("product.updated", `${admin.name} updated "${input.name}"${priceNote}`, { actorId: admin.id, entityType: "product", entityId: productId });
 
   if (intent === "publish") {
     const res = await publish(admin.id, admin.name, productId);

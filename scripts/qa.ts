@@ -3,7 +3,7 @@
  *
  *   QA_BASE_URL=http://localhost:3000 npm run qa
  *   QA_SCREENSHOTS=./qa-shots npm run qa      # also save screenshots
- *   QA_ADMIN_COOKIE="wm_admin_session=…"      # also check admin pages
+ *   QA_ADMIN_COOKIE="$(npx tsx scripts/dev-session.ts)"   # also check admin pages (dev only)
  *
  * Crawls public pages (starting from a seed list + discovered links) and,
  * at desktop / laptop / tablet / phone widths, checks:
@@ -60,6 +60,8 @@ const ADMIN_PATHS = [
   "/admin/orders",
   "/admin/pricing-calculator",
   "/admin/settings/pricing",
+  "/admin/security",
+  "/admin/security/audit",
 ];
 
 type Problem = { path: string; width?: number; kind: string; detail: string };
@@ -68,8 +70,14 @@ const problems: Problem[] = [];
 async function checkPage(browser: Browser, pagePath: string, width: number, cookie?: string) {
   const context = await browser.newContext({ viewport: { width, height: width < 700 ? 844 : 900 } });
   if (cookie) {
-    const [name, ...rest] = cookie.split("=");
-    await context.addCookies([{ name: name!, value: rest.join("="), url: BASE }]);
+    // Production builds use the "__Secure-" cookie name; send both so QA works against dev and prod servers.
+    const [rawName, ...rest] = cookie.split("=");
+    const name = rawName!.replace(/^__Secure-/, "");
+    const value = rest.join("=");
+    await context.addCookies([
+      { name, value, url: BASE },
+      { name: `__Secure-${name}`, value, domain: new URL(BASE).hostname, path: "/", secure: true, httpOnly: true, sameSite: "Lax" },
+    ]);
   }
   const page = await context.newPage();
   const errors: string[] = [];
@@ -80,6 +88,10 @@ async function checkPage(browser: Browser, pagePath: string, width: number, cook
   const res = await page.goto(BASE + pagePath, { waitUntil: "networkidle", timeout: 60000 });
   const status = res?.status() ?? 0;
   if (status >= 400) problems.push({ path: pagePath, width, kind: "status", detail: String(status) });
+  // An admin page that lands on the sign-in (or two-factor) screen wasn't actually checked.
+  if (cookie && pagePath.startsWith("/admin") && /\/admin\/(login|setup-mfa)/.test(new URL(page.url()).pathname)) {
+    problems.push({ path: pagePath, width, kind: "auth", detail: `redirected to ${new URL(page.url()).pathname} — the QA session cookie wasn't accepted` });
+  }
 
   await autoScroll(page);
   const result = await page.evaluate(() => {

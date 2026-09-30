@@ -47,6 +47,18 @@ export function adminAction<Args extends unknown[]>(
   };
 }
 
+/**
+ * Like `adminAction`, but only for OWNER accounts (admin users, roles and
+ * security). The role is re-read from the database for every call, and
+ * anything other than OWNER is refused — hiding buttons is never the control.
+ */
+export function ownerAction<Args extends unknown[]>(fn: (admin: CurrentAdmin, ...args: Args) => Promise<ActionResult | void>) {
+  return adminAction(async (admin: CurrentAdmin, ...args: Args) => {
+    if (admin.role !== "OWNER") throw new AdminError("Only an owner can do that.");
+    return fn(admin, ...args);
+  });
+}
+
 export class AdminError extends Error {
   constructor(
     message: string,

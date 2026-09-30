@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Security, lint, types, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: wm
+          POSTGRES_PASSWORD: wm
+          POSTGRES_DB: wildmountain_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U wm" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Throwaway CI-only values; real secrets live only in Railway.
+      DATABASE_URL: postgresql://wm:wm@localhost:5432/wildmountain_test
+      TEST_DATABASE_URL: postgresql://wm:wm@localhost:5432/wildmountain_test
+      BETTER_AUTH_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Dependency vulnerabilities (fails on high/critical)
+        run: npm audit --audit-level=high
+      - name: Lint, typecheck and tests (incl. auth/authorization security tests)
+        run: npm run check
+      - name: Production build
+        run: npm run build
+      - name: No secrets in client bundles
+        run: npm run check:bundle

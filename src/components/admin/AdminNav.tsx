@@ -42,6 +42,7 @@ const GROUPS: Array<{ label: string; items: Array<{ href: string; label: string;
     items: [
       { href: "/admin/pricing-calculator", label: "Pricing Calculator" },
       { href: "/admin/settings", label: "Settings" },
+      { href: "/admin/security", label: "Security" },
       { href: "/admin/orders", label: "Future Orders" },
     ],
   },

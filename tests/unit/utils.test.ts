@@ -4,8 +4,9 @@ import { centsToDollarInput, formatCents, formatModifier, parseDollarsToCents } 
 import { isValidSlug, slugify, uniqueSlug } from "@/lib/slug";
 import { generateReference } from "@/lib/references";
 import { verifyStripeWebhook } from "@/lib/commerce/payments/stripe";
-import { hashPassword, validatePasswordStrength, verifyPassword } from "@/lib/auth/password";
-import { generateSessionToken, hashSessionToken } from "@/lib/auth/tokens";
+import { verifyPassword } from "better-auth/crypto";
+import { hashAdminPassword, validatePasswordStrength } from "@/lib/auth/password";
+import { clientIpFromHeaders } from "@/lib/auth/client-ip";
 
 describe("money", () => {
   it("formats and parses cents without floating point drift", () => {
@@ -45,23 +46,25 @@ describe("references", () => {
 });
 
 describe("auth primitives", () => {
-  it("hashes and verifies passwords", async () => {
-    const hash = await hashPassword("correct horse 42");
+  it("hashes passwords with scrypt (salted, never plain text)", async () => {
+    const hash = await hashAdminPassword("correct horse 42");
     expect(hash).not.toContain("correct horse");
-    expect(await verifyPassword("correct horse 42", hash)).toBe(true);
-    expect(await verifyPassword("wrong", hash)).toBe(false);
+    expect(hash).not.toBe(await hashAdminPassword("correct horse 42"));
+    expect(await verifyPassword({ hash, password: "correct horse 42" })).toBe(true);
+    expect(await verifyPassword({ hash, password: "wrong" })).toBe(false);
   });
   it("enforces password strength", () => {
     expect(validatePasswordStrength("short1")).not.toBeNull();
     expect(validatePasswordStrength("longpasswordonly")).not.toBeNull();
     expect(validatePasswordStrength("a-much-better-passphrase-7")).toBeNull();
   });
-  it("stores only a hash of session tokens", () => {
-    const token = generateSessionToken();
-    expect(token.length).toBeGreaterThanOrEqual(40);
-    expect(hashSessionToken(token)).toMatch(/^[a-f0-9]{64}$/);
-    expect(hashSessionToken(token)).not.toBe(token);
+  it("never trusts the client-supplied first X-Forwarded-For entry", () => {
+    expect(clientIpFromHeaders(new Headers({ "x-forwarded-for": "6.6.6.6, 203.0.113.9" }))).toBe("203.0.113.9");
+    expect(clientIpFromHeaders(new Headers({ "x-real-ip": "198.51.100.4", "x-forwarded-for": "6.6.6.6" }))).toBe("198.51.100.4");
+    expect(clientIpFromHeaders(new Headers({ "cf-connecting-ip": "6.6.6.6", "x-real-ip": "198.51.100.4" }))).toBe("198.51.100.4"); // not behind Cloudflare
+    expect(clientIpFromHeaders(new Headers())).toBe("unknown");
   });
+
 });
 
 describe("Stripe webhook verification", () => {

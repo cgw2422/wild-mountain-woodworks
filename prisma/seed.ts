@@ -20,7 +20,8 @@ import sharp from "sharp";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { createStorageFromEnv } from "../src/lib/storage/factory";
-import { hashPassword, validatePasswordStrength } from "../src/lib/auth/password";
+import { validatePasswordStrength } from "../src/lib/auth/password";
+import { createPasswordAdmin } from "../src/lib/auth/accounts";
 import { PAGE_DEFINITIONS } from "../src/lib/cms/definitions";
 import { renderScene } from "./seed-data/images";
 import { SEED_PAGES } from "./seed-data/pages";
@@ -187,10 +188,9 @@ async function ensureAdmin() {
   if (existing) return;
   const problem = validatePasswordStrength(password);
   if (problem) throw new Error(`ADMIN_PASSWORD is too weak: ${problem}`);
-  await prisma.adminUser.create({
-    data: { email, name: process.env.ADMIN_NAME?.trim() || "Owner", passwordHash: await hashPassword(password), role: "OWNER" },
-  });
-  log(`created owner account ${email}`);
+  // Controlled bootstrap: the first owner. Two-factor enrolment is forced at first sign-in.
+  await createPasswordAdmin(prisma, { email, name: process.env.ADMIN_NAME?.trim() || "Owner", role: "OWNER" }, password);
+  log(`created owner account ${email} (two-factor setup required at first sign-in)`);
 }
 
 /* ------------------------------------------------------------ sample catalog */

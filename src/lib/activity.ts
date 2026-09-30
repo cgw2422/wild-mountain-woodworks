@@ -1,6 +1,8 @@
 import "server-only";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { clientIpFromHeaders } from "@/lib/auth/client-ip";
 
 export type ActivityType =
   | "product.created"
@@ -47,17 +49,43 @@ export type ActivityType =
   | "order.production_status_changed"
   | "note.added"
   | "note.deleted"
-  | "sample_content.removed";
+  | "sample_content.removed"
+  // Security events
+  | "admin.login_failed"
+  | "admin.logout"
+  | "admin.mfa_enabled"
+  | "admin.mfa_failed"
+  | "admin.mfa_reset"
+  | "admin.backup_codes_regenerated"
+  | "admin.backup_code_used"
+  | "admin.sessions_revoked"
+  | "admin.role_changed"
+  | "admin.password_reset"
+  | "admin.login_locked";
 
-/** Record an event for the dashboard's Recent Activity. Never throws. */
+/**
+ * Record an event in the audit log (also shown as the dashboard's Recent
+ * Activity). Captures the originating IP and user agent when called during a
+ * request. Never throws, and must never be given passwords, tokens, codes or
+ * other secrets.
+ */
 export async function logActivity(
   type: ActivityType,
   message: string,
   opts: { actorId?: string | null; entityType?: string; entityId?: string } = {},
 ) {
+  let ipAddress: string | null = null;
+  let userAgent: string | null = null;
+  try {
+    const h = await headers();
+    ipAddress = clientIpFromHeaders(h);
+    userAgent = h.get("user-agent")?.slice(0, 300) ?? null;
+  } catch {
+    // Outside a request (scripts, background work): no origin to record.
+  }
   try {
     await prisma.activityLog.create({
-      data: { type, message: message.slice(0, 500), actorId: opts.actorId ?? null, entityType: opts.entityType, entityId: opts.entityId },
+      data: { type, message: message.slice(0, 500), actorId: opts.actorId ?? null, entityType: opts.entityType, entityId: opts.entityId, ipAddress, userAgent },
     });
   } catch (error) {
     logger.warn("Failed to record activity", { error, type });
