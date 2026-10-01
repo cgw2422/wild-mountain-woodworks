@@ -9,6 +9,7 @@ const { createSignedInAdmin, resetRequest, request, jar } = await import("../sup
 const { getVisiblePage, isPathPublic, unpublishedPagePaths } = await import("@/lib/cms/pages");
 const { PAGE_DEFINITIONS, canChangeStatus } = await import("@/lib/cms/definitions");
 const { visibleCrumbs } = await import("@/components/site/Breadcrumbs");
+const { getPageContent } = await import("@/lib/cms/queries");
 const { IfPublic } = await import("@/components/site/IfPublic");
 const { getMenu } = await import("@/lib/navigation/menus");
 const pageActions = await import("@/app/admin/(panel)/pages/actions");
@@ -182,6 +183,16 @@ describe.skipIf(!hasTestDb)("CMS pages, preview and navigation", () => {
     await pageActions.setPageStatus("furniture", "DRAFT");
     jar.clear();
     expect(await visibleCrumbs([{ label: "Furniture", href: "/furniture" }, { label: "FAQ", href: "/faq" }, { label: "Ridge Table" }])).toEqual([{ label: "FAQ", href: "/faq" }, { label: "Ridge Table" }]);
+    // Editor-authored section buttons and item links to drafted pages are dropped too.
+    const home = await prisma.page.findUniqueOrThrow({ where: { slug: "home" } });
+    await prisma.pageSection.upsert({
+      where: { pageId_key: { pageId: home.id, key: "about" } },
+      update: { primaryCtaLabel: "Our Story", primaryCtaHref: "/about", secondaryCtaLabel: "FAQ", secondaryCtaHref: "/faq" },
+      create: { pageId: home.id, key: "about", primaryCtaLabel: "Our Story", primaryCtaHref: "/about", secondaryCtaLabel: "FAQ", secondaryCtaHref: "/faq" },
+    });
+    const section = (await getPageContent("home")).section("about");
+    expect(section.primaryCta).toBeNull();
+    expect(section.secondaryCta).toEqual({ label: "FAQ", href: "/faq" });
     // IfPublic hides built-in links to drafted pages.
     expect(await IfPublic({ path: "/furniture", children: "link" })).toMatchObject({ props: { children: null } });
     expect(await IfPublic({ path: "/faq", children: "link" })).toMatchObject({ props: { children: "link" } });

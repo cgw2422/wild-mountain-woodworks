@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { getPageDefinition } from "./definitions";
+import { normalizePath, unpublishedPagePaths } from "./visibility";
 
 export const mediaFields = {
   id: true,
@@ -75,13 +76,18 @@ function emptySection(key: string): SectionContent {
   };
 }
 
-function cta(label: string | null, href: string | null) {
-  return label?.trim() && href?.trim() ? { label: label.trim(), href: href.trim() } : null;
+/** A button/link, or null when incomplete or pointing at a Draft/Archived page. */
+function cta(label: string | null, href: string | null, hidden: ReadonlySet<string>) {
+  const h = href?.trim();
+  if (!label?.trim() || !h) return null;
+  if (h.startsWith("/") && hidden.has(normalizePath(h))) return null;
+  return { label: label.trim(), href: h };
 }
 
 /** Load a CMS page with all sections. Memoized per request. */
 export const getPageContent = cache(async (slug: string): Promise<PageContent> => {
   const def = getPageDefinition(slug);
+  const hidden = await unpublishedPagePaths();
   const page = await prisma.page.findUnique({
     where: { slug },
     include: {
@@ -105,17 +111,12 @@ export const getPageContent = cache(async (slug: string): Promise<PageContent> =
       subheading: s.subheading,
       body: s.body,
       image: s.image,
-      primaryCta: cta(s.primaryCtaLabel, s.primaryCtaHref),
-      secondaryCta: cta(s.secondaryCtaLabel, s.secondaryCtaHref),
-      items: s.items.map((i) => ({
-        id: i.id,
-        eyebrow: i.eyebrow,
-        title: i.title,
-        body: i.body,
-        image: i.image,
-        linkLabel: i.linkLabel,
-        linkHref: i.linkHref,
-      })),
+      primaryCta: cta(s.primaryCtaLabel, s.primaryCtaHref, hidden),
+      secondaryCta: cta(s.secondaryCtaLabel, s.secondaryCtaHref, hidden),
+      items: s.items.map((i) => {
+        const link = cta(i.linkLabel, i.linkHref, hidden);
+        return { id: i.id, eyebrow: i.eyebrow, title: i.title, body: i.body, image: i.image, linkLabel: link?.label ?? null, linkHref: link?.href ?? null };
+      }),
     });
   }
 

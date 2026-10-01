@@ -50,31 +50,7 @@ export function isLinkablePage(page: { slug: string; isCustom: boolean }): boole
   return Boolean(def && !def.template);
 }
 
-/** "/About/?x#y" → "/about": the form paths are compared in. */
-export function normalizePath(path: string): string {
-  const clean = path.split("#")[0]!.split("?")[0]!.replace(/\/+$/, "").toLowerCase();
-  return clean || "/";
-}
-
-/**
- * Public paths of every page that is currently Draft or Archived. Menus,
- * breadcrumbs, the sitemap and site CTAs use this to suppress links to
- * pages visitors can't open. Memoized per request.
- */
-export const unpublishedPagePaths = cache(async (): Promise<Set<string>> => {
-  const rows = await prisma.page.findMany({ where: { status: { not: "PUBLISHED" } }, select: { slug: true, title: true, isCustom: true } });
-  const paths = new Set<string>();
-  for (const row of rows) {
-    const def = row.isCustom ? customPageDefinition(row) : getPageDefinition(row.slug);
-    if (def && canChangeStatus(def)) paths.add(normalizePath(pagePath(row)));
-  }
-  return paths;
-});
-
-/** Whether an internal link points at a page visitors can currently open. */
-export async function isPathPublic(path: string): Promise<boolean> {
-  return !(await unpublishedPagePaths()).has(normalizePath(path));
-}
+export { isPathPublic, normalizePath, unpublishedPagePaths } from "./visibility";
 
 /** For page components: the visible page, or the site's 404. */
 export async function requireVisiblePage(slug: string): Promise<VisiblePage> {
