@@ -6,8 +6,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { formatCents, formatModifier } from "@/lib/money";
-import { defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
-import type { ConfigAddOn, ConfigOptionGroup, ConfigurableProduct, ConfigurationSelection } from "@/lib/pricing/types";
+import { chosenQuantity, defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
+import type { ConfigAddOn, ConfigOptionGroup, ConfigOptionValue, ConfigurableProduct, ConfigurationSelection, OptionQuantitySpec } from "@/lib/pricing/types";
 import { TIMELINE_OPTIONS, clientRules } from "@/lib/validation/shared";
 import { submitConfigurationQuote } from "@/app/(site)/actions";
 import { clientValidator, usePublicForm } from "@/components/forms/usePublicForm";
@@ -69,10 +69,22 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
   function setOption(groupId: string, valueId: string | null) {
     update((s) => {
       const options = { ...s.options };
+      const optionQuantities = { ...s.optionQuantities };
       if (valueId) options[groupId] = valueId;
       else delete options[groupId];
-      return { ...s, options };
+      // Switching style keeps the chosen quantity when it still fits; otherwise the new value's default.
+      const value = valueId ? product.optionGroups.find((g) => g.id === groupId)?.values.find((v) => v.id === valueId) : undefined;
+      if (value?.quantity) {
+        const current = optionQuantities[groupId];
+        const fits = current !== undefined && current >= value.quantity.min && current <= value.quantity.max && (current - value.quantity.min) % value.quantity.step === 0;
+        optionQuantities[groupId] = fits ? current : value.quantity.default;
+      } else delete optionQuantities[groupId];
+      return { ...s, options, optionQuantities };
     });
+  }
+
+  function setOptionQuantity(groupId: string, qty: number) {
+    update((s) => ({ ...s, optionQuantities: { ...s.optionQuantities, [groupId]: qty } }));
   }
 
   function setAddOn(addOnId: string, qty: number) {
@@ -114,6 +126,8 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
           group={group}
           selectedId={selection.options[group.id] ?? null}
           customText={selection.customDetails?.[group.id] ?? ""}
+          quantity={selection.optionQuantities?.[group.id]}
+          onQuantity={(q) => setOptionQuantity(group.id, q)}
           onSelect={(v) => setOption(group.id, v)}
           onCustomText={(t) => setCustom(group.id, t)}
           error={errors[group.id]}
@@ -172,7 +186,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
                 {pricing.lines.map((l, i) => (
                   <div key={i} className="flex justify-between gap-4">
                     <dt className="text-muted">
-                      {l.kind === "base" ? (pricing.savingsCents > 0 ? "Base price (sale)" : "Base price") : l.kind === "option" ? `${l.label}: ${l.detail}` : `${l.label}${l.quantity > 1 ? ` × ${l.quantity}` : ""}`}
+                      {l.kind === "base" ? (pricing.savingsCents > 0 ? "Base price (sale)" : "Base price") : l.kind === "option" ? `${l.label}: ${l.detail}${l.quantity !== 1 ? ` × ${l.quantity}` : ""}` : `${l.label}${l.quantity > 1 ? ` × ${l.quantity}` : ""}`}
                     </dt>
                     <dd className="nums">{l.kind === "base" ? formatCents(l.amountCents) : l.amountCents === 0 ? "Included" : formatModifier(l.amountCents)}</dd>
                   </div>
@@ -290,6 +304,8 @@ function OptionGroupField({
   group,
   selectedId,
   customText,
+  quantity,
+  onQuantity,
   onSelect,
   onCustomText,
   error,
@@ -298,6 +314,9 @@ function OptionGroupField({
   group: ConfigOptionGroup;
   selectedId: string | null;
   customText: string;
+  /** Chosen quantity for a quantity-based value (undefined → the value's default). */
+  quantity: number | undefined;
+  onQuantity: (q: number) => void;
   onSelect: (id: string | null) => void;
   onCustomText: (t: string) => void;
   error?: string;
@@ -305,7 +324,10 @@ function OptionGroupField({
 }) {
   const name = useId();
   const selected = group.values.find((v) => v.id === selectedId);
-  const mod = (cents: number) => (pricesVisible && cents !== 0 ? formatModifier(cents) : "");
+  const modOnly = (cents: number) => (pricesVisible && cents !== 0 ? formatModifier(cents) : "");
+  // Quantity-based values are priced per unit ("$192.50 each"); others as a modifier ("+$350").
+  const priceOf = (v: ConfigOptionValue) => (v.quantity ? (pricesVisible && v.priceModifierCents ? `${formatCents(v.priceModifierCents)} each` : "") : modOnly(v.priceModifierCents));
+  const qty = selected?.quantity ? (quantity ?? selected.quantity.default) : null;
   const errorId = `${name}-err`;
 
   const radio = (valueId: string | null) => ({
@@ -337,7 +359,7 @@ function OptionGroupField({
             {group.values.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.displayName}
-                {mod(v.priceModifierCents) ? ` (${mod(v.priceModifierCents)})` : ""}
+                {priceOf(v) ? ` (${priceOf(v)})` : ""}
               </option>
             ))}
           </select>
@@ -362,7 +384,7 @@ function OptionGroupField({
                 {v.image ? <Image src={v.image.url} alt="" fill sizes="48px" className="object-cover" /> : null}
               </span>
               <span className="text-xs leading-tight text-charcoal">{v.displayName}</span>
-              {mod(v.priceModifierCents) ? <span className="-mt-1.5 text-[0.7rem] text-muted">{mod(v.priceModifierCents)}</span> : null}
+              {priceOf(v) ? <span className="-mt-1.5 text-[0.7rem] text-muted">{priceOf(v)}</span> : null}
             </label>
           ))}
         </div>
@@ -389,7 +411,7 @@ function OptionGroupField({
                   ) : null}
                 </span>
                 <span className="mt-2 block px-0.5 text-[0.82rem] font-medium leading-tight">{v.displayName}</span>
-                <span className="block px-0.5 pb-0.5 text-[0.72rem] text-muted">{mod(v.priceModifierCents) || (v.isCustom ? "Quoted" : " ")}</span>
+                <span className="block px-0.5 pb-0.5 text-[0.72rem] text-muted">{priceOf(v) || (v.isCustom ? "Quoted" : " ")}</span>
               </span>
             </label>
           ))}
@@ -415,7 +437,7 @@ function OptionGroupField({
                 <span className="block text-[0.95rem]">{v.displayName}</span>
                 {v.description ? <span className="block text-sm text-muted">{v.description}</span> : null}
               </span>
-              <span className="text-sm nums text-muted">{mod(v.priceModifierCents)}</span>
+              <span className="text-sm nums text-muted">{priceOf(v)}</span>
             </label>
           ))}
         </div>
@@ -431,9 +453,9 @@ function OptionGroupField({
               <input {...radio(v.id)} />
               <span className="flex min-h-[3.75rem] flex-col justify-center border border-stone bg-paper px-3.5 py-2.5 transition hover:border-stone-dark peer-checked:border-charcoal peer-checked:bg-charcoal peer-checked:text-ivory peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-bronze-text">
                 <span className="text-[0.92rem] font-medium leading-tight">{v.displayName}</span>
-                {v.description || mod(v.priceModifierCents) ? (
+                {v.description || priceOf(v) ? (
                   <span className="mt-0.5 text-[0.72rem] leading-snug opacity-75">
-                    {[v.description, mod(v.priceModifierCents)].filter(Boolean).join(" · ")}
+                    {[v.description, priceOf(v)].filter(Boolean).join(" · ")}
                   </span>
                 ) : null}
               </span>
@@ -457,10 +479,28 @@ function OptionGroupField({
       <GroupLegend
         group={group}
         error={error}
-        selectedLabel={selected ? `${selected.displayName}${mod(selected.priceModifierCents) ? ` · ${mod(selected.priceModifierCents)}` : ""}` : undefined}
+        selectedLabel={
+          selected
+            ? selected.quantity
+              ? `${selected.displayName} × ${qty}`
+              : `${selected.displayName}${modOnly(selected.priceModifierCents) ? ` · ${modOnly(selected.priceModifierCents)}` : ""}`
+            : undefined
+        }
       />
       {group.description ? <p className="-mt-2 mb-4 text-sm text-muted">{group.description}</p> : null}
       {control}
+      {selected?.quantity && qty != null ? (
+        <QuantityStepper
+          id={`${name}-qty`}
+          label={`How many — ${selected.displayName}`}
+          spec={selected.quantity}
+          value={qty}
+          onChange={onQuantity}
+          unitCents={pricesVisible ? selected.priceModifierCents : null}
+          invalid={Boolean(error)}
+          describedBy={error ? errorId : undefined}
+        />
+      ) : null}
       {selected?.isCustom ? (
         <div className="mt-4">
           <label htmlFor={`${name}-custom`} className="mb-2 block text-sm font-medium">
@@ -485,6 +525,97 @@ function OptionGroupField({
         </p>
       ) : null}
     </fieldset>
+  );
+}
+
+/**
+ * Quantity for a quantity-based value: − / + buttons plus a typed number,
+ * within the value's min/max/step (zero allowed when the minimum is 0, e.g.
+ * the table without chairs). The server re-checks every quantity.
+ */
+function QuantityStepper({
+  id,
+  label,
+  spec,
+  value,
+  onChange,
+  unitCents,
+  invalid,
+  describedBy,
+}: {
+  id: string;
+  label: string;
+  spec: OptionQuantitySpec;
+  value: number;
+  onChange: (q: number) => void;
+  unitCents: number | null;
+  invalid: boolean;
+  describedBy?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const clamp = (q: number) => Math.min(spec.max, Math.max(spec.min, q));
+  const commit = (raw: string) => {
+    setDraft(null);
+    const n = Number.parseInt(raw, 10);
+    if (Number.isNaN(n)) return;
+    // Snap onto the step grid (from the minimum) so the result is always valid.
+    const c = clamp(n);
+    onChange(spec.min + Math.floor((c - spec.min) / spec.step) * spec.step);
+  };
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border border-stone bg-paper px-4 py-3">
+      <label htmlFor={id} className="text-sm">
+        <span className="block font-medium text-charcoal">Quantity</span>
+        <span className="block text-xs text-muted">{spec.min === 0 ? `Choose 0 for none · up to ${spec.max}` : `${spec.min}–${spec.max}`}{spec.step > 1 ? ` · in steps of ${spec.step}` : ""}</span>
+      </label>
+      <div className="flex items-center gap-4">
+        <div className="flex items-center" role="group" aria-label={label}>
+          <button
+            type="button"
+            onClick={() => onChange(clamp(value - spec.step))}
+            disabled={value - spec.step < spec.min}
+            className="flex h-11 w-11 items-center justify-center border border-stone text-lg disabled:opacity-40"
+            aria-label="Decrease quantity"
+          >
+            −
+          </button>
+          <input
+            id={id}
+            type="number"
+            inputMode="numeric"
+            min={spec.min}
+            max={spec.max}
+            step={spec.step}
+            value={draft ?? String(value)}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={(e) => commit(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commit((e.target as HTMLInputElement).value);
+              }
+            }}
+            aria-invalid={invalid ? true : undefined}
+            aria-describedby={describedBy}
+            className="h-11 w-16 border-y border-stone bg-paper text-center nums [appearance:textfield] focus:border-charcoal focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          />
+          <button
+            type="button"
+            onClick={() => onChange(clamp(value + spec.step))}
+            disabled={value + spec.step > spec.max}
+            className="flex h-11 w-11 items-center justify-center border border-stone text-lg disabled:opacity-40"
+            aria-label="Increase quantity"
+          >
+            +
+          </button>
+        </div>
+        {unitCents != null && unitCents > 0 ? (
+          <span className="min-w-[5.5rem] text-right text-sm nums text-muted" aria-live="polite">
+            {value === 0 ? "None" : formatModifier(unitCents * value)}
+          </span>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -637,11 +768,13 @@ function RequestPanel({
       {product.optionGroups.map((g) => {
         const v = g.values.find((x) => x.id === selection.options[g.id]);
         if (!v) return null;
+        const q = v.quantity ? chosenQuantity(v, selection, g.id) : null;
         return (
           <div key={g.id} className="contents">
             <dt className="text-muted">{g.displayName}</dt>
             <dd>
-              {v.displayName}
+              {q === 0 ? "None" : v.displayName}
+              {q != null && q > 0 ? ` × ${q}` : ""}
               {v.isCustom && selection.customDetails?.[g.id] ? ` — ${selection.customDetails[g.id]}` : ""}
             </dd>
           </div>

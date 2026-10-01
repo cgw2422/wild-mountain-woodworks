@@ -263,6 +263,7 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
                     displayOrder: v.displayOrder,
                     active: v.active,
                     isCustom: v.isCustom,
+                    quantityEnabled: v.quantityEnabled,
                   })),
                 }))}
                 initial={product.optionGroups.map((pog) => ({

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import type { ActionResult } from "@/lib/admin/types";
-import { centsToDollarInput, formatModifier } from "@/lib/money";
+import { centsToDollarInput, formatCents, formatModifier } from "@/lib/money";
 import { ActionButton, ActionForm, ConfirmAction, Dialog, MoneyInput, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { Badge, EmptyState, adminButton } from "@/components/admin/ui";
 import { ImageField, type ImageValue } from "@/components/admin/media/ImageField";
@@ -17,6 +17,12 @@ export type ValueRow = {
   description: string;
   priceModifierCents: number;
   isCustom: boolean;
+  /** Quantity-based: the customer picks a style and how many; the price is per unit. */
+  quantityEnabled: boolean;
+  quantityMin: number;
+  quantityMax: number;
+  quantityStep: number;
+  quantityDefault: number;
   active: boolean;
   swatchColor: string;
   image: ImageValue | null;
@@ -82,12 +88,17 @@ export function ValuesEditor({
                     {v.name !== v.displayName ? <span className="ml-2 text-xs font-normal text-neutral-500">({v.name})</span> : null}
                   </p>
                   <p className="text-xs text-neutral-500">
-                    {v.priceModifierCents ? formatModifier(v.priceModifierCents) : "No price change"}
+                    {v.quantityEnabled
+                      ? `${formatCents(v.priceModifierCents)} each · quantity ${v.quantityMin}–${v.quantityMax}${v.quantityStep > 1 ? ` (step ${v.quantityStep})` : ""}, default ${v.quantityDefault}`
+                      : v.priceModifierCents
+                        ? formatModifier(v.priceModifierCents)
+                        : "No price change"}
                     {v.overrideCount ? ` · customized on ${v.overrideCount} product${v.overrideCount === 1 ? "" : "s"}` : ""}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {v.isCustom ? <Badge tone="violet">Custom</Badge> : null}
+                  {v.quantityEnabled ? <Badge tone="blue">Quantity</Badge> : null}
                   {!v.active ? <Badge tone="amber">Inactive</Badge> : null}
                   {inputType === "IMAGE" && !v.image ? <Badge tone="red">No image</Badge> : null}
                   {inputType === "SWATCH" && !v.swatchColor && !v.image ? <Badge tone="red">No swatch</Badge> : null}
@@ -139,10 +150,10 @@ export function ValuesEditor({
             />
             <TextArea label="Description" name="description" defaultValue={current?.description} rows={2} maxLength={1000} wrapperClassName="sm:col-span-2" help="Optional. Shown in radio lists and tooltips." />
             <MoneyInput
-              label="Price modifier"
+              label="Price modifier / price per unit"
               name="priceModifier"
               defaultValue={centsToDollarInput(current?.priceModifierCents ?? 0)}
-              help="Added to the base price. Use a negative amount (e.g. -50) for a discount. 0 = no change."
+              help="Added to the base price. For a quantity-based value this is the price of ONE (e.g. 192.50 per chair) and is multiplied by the quantity chosen. Use a negative amount for a discount. 0 = no change."
             />
             <ColorField name="swatchColor" label="Swatch color" defaultValue={current?.swatchColor} help={inputType === "SWATCH" ? "Shown as the swatch for this value." : "Used when the group displays color swatches."} />
             <ImageField
@@ -163,6 +174,7 @@ export function ValuesEditor({
               />
               <Toggle label="Active" name="active" defaultChecked={current?.active ?? true} description="Inactive values are hidden on every product." />
             </div>
+            <QuantitySettings current={current} />
             <div className="flex justify-end gap-2 border-t border-neutral-200 pt-4 sm:col-span-2">
               <button type="button" className={adminButton.secondary} onClick={() => setEditing(null)}>
                 Cancel
@@ -173,6 +185,36 @@ export function ValuesEditor({
         ) : null}
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * Quantity-based values (e.g. "Cross Back Chair — $192.50 each"): the
+ * customer picks this style and how many, instead of you creating separate
+ * "2 chairs / 4 chairs / 6 chairs" values. The fields stay hidden (and
+ * aren't submitted) while the switch is off.
+ */
+function QuantitySettings({ current }: { current: ValueRow | null }) {
+  const [on, setOn] = useState(current?.quantityEnabled ?? false);
+  return (
+    <fieldset className="grid gap-3 rounded border border-neutral-200 p-4 sm:col-span-2">
+      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Quantity</legend>
+      <Toggle
+        label="Customer chooses a quantity"
+        name="quantityEnabled"
+        checked={on}
+        onChange={setOn}
+        description="For things like dining chairs: the price above is per unit and the total is price × quantity. Allow 0 so the piece can be ordered without them."
+      />
+      {on ? (
+        <div className="grid gap-3 sm:grid-cols-4">
+          <TextInput label="Minimum" name="quantityMin" type="number" inputMode="numeric" min={0} max={999} step={1} required defaultValue={String(current?.quantityEnabled ? current.quantityMin : 0)} help="0 allows none." />
+          <TextInput label="Maximum" name="quantityMax" type="number" inputMode="numeric" min={1} max={999} step={1} required defaultValue={String(current?.quantityEnabled ? current.quantityMax : 8)} />
+          <TextInput label="Step" name="quantityStep" type="number" inputMode="numeric" min={1} max={999} step={1} required defaultValue={String(current?.quantityEnabled ? current.quantityStep : 1)} help="e.g. 2 for pairs." />
+          <TextInput label="Default" name="quantityDefault" type="number" inputMode="numeric" min={0} max={999} step={1} required defaultValue={String(current?.quantityEnabled ? current.quantityDefault : 0)} help="Pre-selected amount." />
+        </div>
+      ) : null}
+    </fieldset>
   );
 }
 

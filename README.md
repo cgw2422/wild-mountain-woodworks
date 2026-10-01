@@ -266,6 +266,7 @@ Signed-in staff see a slim dark toolbar above the site: an **Edit** link for wha
   - Products referenced by quotes or orders can only be archived, never deleted.
 - **Slugs** are generated once and never change automatically when a name changes. They're unique across both products and categories, which share `/furniture/[slug]`.
 - **Option library.** Global option groups (for example Wood Species or Standard Finishes) hold values with price modifiers, images or swatches, and a "custom" flag.
+- **Quantity-based values.** A value can be switched to *Customer chooses a quantity* (Admin → Options → value → Quantity) with a minimum, maximum, step and default — e.g. "Add Dining Chairs → Cross Back Chair, $192.50 each, 0–8". The price modifier is then charged per unit (price × quantity; a product price override is per unit too), the configurator shows −/+ and a typed quantity (0 = none), the server enforces the range, and the quote gets its own line ("Add Dining Chairs — Cross Back Chair", 4 × $192.50). No need for separate "2 / 4 / 6 chairs" values. Existing values default to off, and saved quotes keep their snapshots unchanged.
   - Products attach groups and can **disable values, override prices, override the order and choose a default**, per product.
   - Values without an override follow the library automatically.
 - **Add-ons** are reusable or product-specific, with required, minimum and maximum quantities. Products can override the price, required flag and quantities.

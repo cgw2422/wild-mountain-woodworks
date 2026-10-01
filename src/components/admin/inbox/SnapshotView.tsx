@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Badge, formatDate } from "@/components/admin/ui";
 import { formatPercent } from "@/lib/pricing/sale";
 import { formatCents, formatModifier } from "@/lib/money";
-import type { ConfigurationSnapshot } from "@/lib/pricing/snapshot";
+import { snapshotOptionLabel, snapshotOptionTotal, type ConfigurationSnapshot } from "@/lib/pricing/snapshot";
 
 /**
  * Renders an immutable ConfigurationSnapshot (quote requests and order items).
@@ -53,7 +53,8 @@ export function SnapshotView({
                     {o.groupDisplayName}
                   </th>
                   <td className="py-2 pr-4 align-top text-neutral-900">
-                    {o.valueDisplayName}
+                    {snapshotOptionLabel(o)}
+                    {o.quantity != null ? <span className="ml-1.5 text-xs text-neutral-500">({formatCents(o.unitPriceCents ?? o.priceModifierCents)} each)</span> : null}
                     {o.isCustom ? (
                       <span className="ml-1.5">
                         <Badge tone="violet">Custom</Badge>
@@ -61,7 +62,7 @@ export function SnapshotView({
                     ) : null}
                     {o.customDetails ? <p className="mt-1 whitespace-pre-wrap text-xs text-neutral-700">Details: {o.customDetails}</p> : null}
                   </td>
-                  <td className="py-2 text-right align-top tabular-nums text-neutral-700">{formatModifier(o.priceModifierCents) || "Included"}</td>
+                  <td className="py-2 text-right align-top tabular-nums text-neutral-700">{formatModifier(snapshotOptionTotal(o)) || "Included"}</td>
                 </tr>
               ))}
             </tbody>

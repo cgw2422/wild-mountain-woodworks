@@ -23,12 +23,26 @@ export interface ConfigImage {
   blurDataUrl?: string | null;
 }
 
+/**
+ * A quantity-based value: the customer also chooses how many (e.g. 0–8 chairs
+ * in steps of 1), and `priceModifierCents` is charged per unit.
+ */
+export interface OptionQuantitySpec {
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+}
+
 export interface ConfigOptionValue {
   id: string; // OptionValue.id
   name: string;
   displayName: string;
   description: string | null;
+  /** Added to the base price — per unit when `quantity` is set. */
   priceModifierCents: number;
+  /** Set for quantity-based values (style + how many); null for ordinary values. */
+  quantity: OptionQuantitySpec | null;
   isCustom: boolean;
   isDefault: boolean;
   swatchColor: string | null;
@@ -76,6 +90,8 @@ export interface ConfigurableProduct {
 /** What the customer picked. Keys are OptionGroup / AddOn ids. */
 export interface ConfigurationSelection {
   options: Record<string, string>;
+  /** How many of the chosen value, for quantity-based values (keyed by OptionGroup id). Missing → the value's default. */
+  optionQuantities?: Record<string, number>;
   addOns: Record<string, number>;
   /** Free-text details for "custom" option values, keyed by OptionGroup id. */
   customDetails?: Record<string, string>;

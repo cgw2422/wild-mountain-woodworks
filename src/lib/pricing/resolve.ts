@@ -1,5 +1,5 @@
 import { activeSale } from "./sale";
-import type { ConfigImage, ConfigurableProduct, OptionInputType } from "./types";
+import type { ConfigImage, ConfigurableProduct, OptionInputType, OptionQuantitySpec } from "./types";
 
 /**
  * Structural shapes of the database records needed to build a configurable
@@ -48,6 +48,11 @@ export interface ProductConfigRecord {
         description: string | null;
         priceModifierCents: number;
         isCustom: boolean;
+        quantityEnabled?: boolean;
+        quantityMin?: number;
+        quantityMax?: number;
+        quantityStep?: number;
+        quantityDefault?: number;
         displayOrder: number;
         active: boolean;
         swatchColor: string | null;
@@ -97,6 +102,18 @@ function toImage(m: MediaLike | null, fallbackAlt: string): ConfigImage | null {
   };
 }
 
+/** A sane quantity range for a quantity-based value (null for ordinary values). */
+export function quantitySpec(v: { quantityEnabled?: boolean; quantityMin?: number; quantityMax?: number; quantityStep?: number; quantityDefault?: number }): OptionQuantitySpec | null {
+  if (!v.quantityEnabled) return null;
+  const min = Math.max(0, Math.trunc(v.quantityMin ?? 0));
+  const max = Math.max(min, Math.trunc(v.quantityMax ?? min));
+  const step = Math.max(1, Math.trunc(v.quantityStep ?? 1));
+  const raw = Math.min(max, Math.max(min, Math.trunc(v.quantityDefault ?? min)));
+  // Snap the default onto the step grid (counting from the minimum).
+  const def = min + Math.floor((raw - min) / step) * step;
+  return { min, max, step, default: def };
+}
+
 /**
  * Apply per-product overrides to the global option library:
  * - inactive global groups/values are hidden
@@ -124,6 +141,7 @@ export function resolveConfigurableProduct(record: ProductConfigRecord, now: Dat
               displayName: v.displayName,
               description: v.description,
               priceModifierCents: o?.priceModifierOverrideCents ?? v.priceModifierCents,
+              quantity: quantitySpec(v),
               isCustom: v.isCustom,
               isDefault: o?.isDefault ?? false,
               swatchColor: v.swatchColor,

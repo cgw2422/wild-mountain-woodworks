@@ -1,3 +1,4 @@
+import { chosenQuantity } from "./engine";
 import type { ConfigurableProduct, ConfigurationSelection, PricingResult } from "./types";
 
 /**
@@ -25,9 +26,14 @@ export interface ConfigurationSnapshot {
     valueId: string;
     valueName: string;
     valueDisplayName: string;
+    /** Per unit for quantity-based values; otherwise the whole modifier. */
     priceModifierCents: number;
     isCustom: boolean;
     customDetails: string | null;
+    /** Quantity-based values only (absent on ordinary values and older snapshots). */
+    quantity?: number;
+    unitPriceCents?: number;
+    totalCents?: number;
   }>;
   addOns: Array<{
     addOnId: string;
@@ -55,6 +61,9 @@ export function buildConfigurationSnapshot(
     const valueId = selection.options[group.id];
     const value = valueId ? group.values.find((v) => v.id === valueId) : undefined;
     if (!value) continue;
+    const qty = value.quantity ? chosenQuantity(value, selection, group.id) : null;
+    // A quantity-based choice of zero (e.g. no chairs) isn't part of the order.
+    if (qty === 0) continue;
     options.push({
       groupId: group.id,
       groupName: group.name,
@@ -65,6 +74,7 @@ export function buildConfigurationSnapshot(
       priceModifierCents: value.priceModifierCents,
       isCustom: value.isCustom,
       customDetails: value.isCustom ? (selection.customDetails?.[group.id]?.trim() || null) : null,
+      ...(qty != null ? { quantity: qty, unitPriceCents: value.priceModifierCents, totalCents: value.priceModifierCents * qty } : {}),
     });
   }
 
@@ -104,4 +114,16 @@ export function parseSnapshot(value: unknown): ConfigurationSnapshot | null {
   const v = value as Partial<ConfigurationSnapshot>;
   if (v.version !== 1 || !v.product || !Array.isArray(v.options) || !Array.isArray(v.addOns)) return null;
   return v as ConfigurationSnapshot;
+}
+
+type SnapshotOption = ConfigurationSnapshot["options"][number];
+
+/** What an option adds to the price: unit × quantity for quantity-based values, else its modifier (older snapshots too). */
+export function snapshotOptionTotal(o: SnapshotOption): number {
+  return o.quantity != null ? (o.totalCents ?? (o.unitPriceCents ?? o.priceModifierCents) * o.quantity) : o.priceModifierCents;
+}
+
+/** "Cross Back Chair × 4" for quantity-based values, else the value name. */
+export function snapshotOptionLabel(o: SnapshotOption): string {
+  return o.quantity != null ? `${o.valueDisplayName} × ${o.quantity}` : o.valueDisplayName;
 }

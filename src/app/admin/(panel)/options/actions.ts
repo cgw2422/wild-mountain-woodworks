@@ -99,6 +99,26 @@ const valueSchema = z.object({
   active: z.boolean(),
 });
 
+const wholeNumber = (label: string) =>
+  z
+    .string()
+    .trim()
+    .regex(/^\d{1,3}$/, `${label}: enter a whole number from 0 to 999.`)
+    .transform(Number);
+
+/** Quantity-based value settings (e.g. chairs: 0–8, step 1, default 0). Checked together so the range always makes sense. */
+const quantitySchema = z
+  .object({ min: wholeNumber("Minimum"), max: wholeNumber("Maximum"), step: wholeNumber("Step"), default: wholeNumber("Default") })
+  .superRefine((q, ctx) => {
+    if (q.max < q.min) ctx.addIssue({ code: "custom", path: ["max"], message: "The maximum can't be less than the minimum." });
+    if (q.max < 1) ctx.addIssue({ code: "custom", path: ["max"], message: "The maximum must be at least 1." });
+    if (q.step < 1) ctx.addIssue({ code: "custom", path: ["step"], message: "The step must be at least 1." });
+    if (q.default < q.min || q.default > q.max) ctx.addIssue({ code: "custom", path: ["default"], message: "The default must be between the minimum and maximum." });
+    else if (q.step >= 1 && (q.default - q.min) % q.step !== 0) ctx.addIssue({ code: "custom", path: ["default"], message: `The default must be the minimum plus a multiple of the step (${q.step}).` });
+  });
+
+const QUANTITY_FIELDS = { min: "quantityMin", max: "quantityMax", step: "quantityStep", default: "quantityDefault" } as const;
+
 /** Create (valueId null) or update a value in a group. */
 export const saveOptionValue = adminAction(async (admin, groupId: string, valueId: string | null, data: FormData) => {
   const displayName = fd.str(data, "displayName");
@@ -118,8 +138,22 @@ export const saveOptionValue = adminAction(async (admin, groupId: string, valueI
   });
   if (clash) throw new AdminError("Another value in this group already uses that internal name.", { name: "Already used in this group." });
 
+  // Quantity-based: the price is per unit and the customer picks how many.
+  const quantityEnabled = fd.bool(data, "quantityEnabled");
+  let quantity = { quantityEnabled: false } as { quantityEnabled: boolean; quantityMin?: number; quantityMax?: number; quantityStep?: number; quantityDefault?: number };
+  if (quantityEnabled) {
+    const parsed = quantitySchema.safeParse({ min: fd.str(data, "quantityMin") || "0", max: fd.str(data, "quantityMax"), step: fd.str(data, "quantityStep") || "1", default: fd.str(data, "quantityDefault") || "0" });
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) fieldErrors[QUANTITY_FIELDS[issue.path[0] as keyof typeof QUANTITY_FIELDS]] ??= issue.message;
+      throw new AdminError("Check the quantity settings.", fieldErrors);
+    }
+    const q = parsed.data;
+    quantity = { quantityEnabled: true, quantityMin: q.min, quantityMax: q.max, quantityStep: q.step, quantityDefault: q.default };
+  }
+
   const { priceModifier, ...rest } = input;
-  const payload = { ...rest, priceModifierCents: priceModifier ?? 0 };
+  const payload = { ...rest, priceModifierCents: priceModifier ?? 0, ...quantity };
   const group = await prisma.optionGroup.findUnique({ where: { id: groupId }, select: { name: true } });
   if (!group) throw new AdminError("That option group no longer exists.");
 
@@ -205,6 +239,11 @@ export const duplicateOptionGroup = adminAction(async (admin, id: string) => {
           swatchColor: v.swatchColor,
           priceModifierCents: v.priceModifierCents,
           isCustom: v.isCustom,
+          quantityEnabled: v.quantityEnabled,
+          quantityMin: v.quantityMin,
+          quantityMax: v.quantityMax,
+          quantityStep: v.quantityStep,
+          quantityDefault: v.quantityDefault,
           active: v.active,
           displayOrder: i,
         })),
@@ -237,6 +276,11 @@ export const duplicateOptionValue = adminAction(async (admin, groupId: string, v
         swatchColor: src.swatchColor,
         priceModifierCents: src.priceModifierCents,
         isCustom: src.isCustom,
+        quantityEnabled: src.quantityEnabled,
+        quantityMin: src.quantityMin,
+        quantityMax: src.quantityMax,
+        quantityStep: src.quantityStep,
+        quantityDefault: src.quantityDefault,
         active: false,
       },
     });

@@ -43,6 +43,8 @@ const timelineSchema = z
 
 const selectionSchema = z.object({
   options: z.record(z.string().max(40), z.string().max(40)).default({}),
+  /** Quantity-based values (e.g. chairs); the pricing engine enforces each value's min/max/step. */
+  optionQuantities: z.record(z.string().max(40), z.number().int().min(0).max(999)).optional(),
   addOns: z.record(z.string().max(40), z.number().int().min(0).max(99)).default({}),
   customDetails: z.record(z.string().max(40), z.string().trim().max(500)).default({}),
 });

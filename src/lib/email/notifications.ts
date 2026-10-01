@@ -1,6 +1,6 @@
 import "server-only";
 import { formatCents } from "@/lib/money";
-import type { ConfigurationSnapshot } from "@/lib/pricing/snapshot";
+import { snapshotOptionLabel, type ConfigurationSnapshot } from "@/lib/pricing/snapshot";
 import { getSettings } from "@/lib/settings";
 import { siteUrl } from "@/lib/site-url";
 import { sendEmailSafely } from "./provider";
@@ -32,7 +32,7 @@ ${body}</div></body></html>`;
 export function describeSnapshot(s: ConfigurationSnapshot, showPrices: boolean): string[] {
   const lines = [`Piece: ${s.product.name}`];
   for (const o of s.options) {
-    lines.push(`${o.groupDisplayName}: ${o.valueDisplayName}${o.customDetails ? ` — ${o.customDetails}` : ""}`);
+    lines.push(`${o.groupDisplayName}: ${snapshotOptionLabel(o)}${o.customDetails ? ` — ${o.customDetails}` : ""}`);
   }
   for (const a of s.addOns) lines.push(`Add-on: ${a.name}${a.quantity > 1 ? ` × ${a.quantity}` : ""}`);
   if (showPrices && s.totalCents != null) {

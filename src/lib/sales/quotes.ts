@@ -3,7 +3,7 @@ import type { Prisma, QuoteSource, QuoteStatus } from "@/generated/prisma/client
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { formatCents } from "@/lib/money";
-import type { ConfigurationSnapshot } from "@/lib/pricing/snapshot";
+import { snapshotOptionTotal, type ConfigurationSnapshot } from "@/lib/pricing/snapshot";
 import { adminRecipient, sendTemplateEmail, type SendResult } from "@/lib/email/send";
 import { getSettings, salesFlags } from "@/lib/settings";
 import { siteDateLong } from "@/lib/site-time";
@@ -45,14 +45,18 @@ export interface DraftLine {
 
 /**
  * The starting lines for a configured request: the piece at its REGULAR
- * price (base + options), a separate sale discount line when a sale applied,
- * and one line per add-on. Their total equals the snapshot's total.
+ * price (base + ordinary options), a separate sale discount line when a sale
+ * applied, one line per quantity-based option (e.g. "Dining Chairs — Cross
+ * Back Chair", 4 × $192.50) and one per add-on. Their total equals the
+ * snapshot's total.
  */
 export function linesFromSnapshot(s: ConfigurationSnapshot, quantity = 1): DraftLine[] {
   const qty = Math.max(1, Math.trunc(quantity));
-  const optionsCents = s.options.reduce((sum, o) => sum + o.priceModifierCents, 0);
+  const perPiece = s.options.filter((o) => o.quantity == null);
+  const counted = s.options.filter((o) => o.quantity != null && o.quantity > 0);
+  const optionsCents = perPiece.reduce((sum, o) => sum + snapshotOptionTotal(o), 0);
   const regularBase = s.sale?.regularBasePriceCents ?? s.basePriceCents ?? 0;
-  const notes = s.options.map((o) => `${o.groupDisplayName}: ${o.valueDisplayName}${o.customDetails ? ` (${o.customDetails})` : ""}`).join("\n");
+  const notes = perPiece.map((o) => `${o.groupDisplayName}: ${o.valueDisplayName}${o.customDetails ? ` (${o.customDetails})` : ""}`).join("\n");
   const lines: DraftLine[] = [
     {
       kind: "PRODUCT",
@@ -68,6 +72,18 @@ export function linesFromSnapshot(s: ConfigurationSnapshot, quantity = 1): Draft
   if (s.sale && s.sale.savingsCents > 0) {
     const pct = s.sale.percent != null ? ` (${s.sale.percent}% off)` : "";
     lines.push({ kind: "DISCOUNT", description: `${s.sale.label || "Sale"}${pct} — ${s.product.name}`, notes: null, quantity: qty, unitPriceCents: -s.sale.savingsCents, taxable: true, productId: null, configuration: null });
+  }
+  for (const o of counted) {
+    lines.push({
+      kind: "ADDON",
+      description: `${o.groupDisplayName} — ${o.valueDisplayName}`,
+      notes: o.customDetails,
+      quantity: o.quantity! * qty,
+      unitPriceCents: o.unitPriceCents ?? o.priceModifierCents,
+      taxable: true,
+      productId: null,
+      configuration: null,
+    });
   }
   for (const a of s.addOns) {
     lines.push({ kind: "ADDON", description: a.name, notes: null, quantity: a.quantity * qty, unitPriceCents: a.unitPriceCents, taxable: true, productId: null, configuration: null });

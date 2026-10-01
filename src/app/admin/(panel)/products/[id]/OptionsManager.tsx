@@ -16,6 +16,8 @@ export type LibraryOptionValue = {
   displayOrder: number;
   active: boolean;
   isCustom: boolean;
+  /** Quantity-based value: the price (and any override here) is per unit. */
+  quantityEnabled?: boolean;
 };
 export type LibraryOptionGroup = {
   id: string;
@@ -239,6 +241,7 @@ export function OptionsManager({ library, initial }: { library: LibraryOptionGro
                                 <td className="min-w-[10rem] px-3 py-2">
                                   <span className={cn("font-medium", v.active ? "text-neutral-900" : "text-neutral-400")}>{v.displayName}</span>
                                   {v.isCustom ? <Badge tone="violet" className="ml-2">Custom</Badge> : null}
+                                  {v.quantityEnabled ? <Badge tone="blue" className="ml-2">Quantity · price each</Badge> : null}
                                   {!v.active ? <span className="block text-xs">Inactive in library — hidden on all products</span> : null}
                                   {!s.enabled && v.active ? <span className="block text-xs text-neutral-500">Not offered on this product</span> : null}
                                 </td>
@@ -250,7 +253,7 @@ export function OptionsManager({ library, initial }: { library: LibraryOptionGro
                                       onChange={(e) => patchValue(g.id, v.id, { priceOverride: e.target.value })}
                                       inputMode="decimal"
                                       placeholder={centsToDollarInput(v.priceModifierCents)}
-                                      aria-label={`Price modifier for ${v.displayName} (library: ${formatModifier(v.priceModifierCents) || "$0"})`}
+                                      aria-label={`${v.quantityEnabled ? "Price per unit" : "Price modifier"} for ${v.displayName} (library: ${formatModifier(v.priceModifierCents) || "$0"})`}
                                       aria-invalid={priceInvalid || undefined}
                                       disabled={!s.enabled}
                                       className={cn(inputCls, "pl-5")}

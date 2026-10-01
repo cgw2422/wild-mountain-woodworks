@@ -385,6 +385,14 @@ model OptionValue {
   // "Custom" values (e.g. custom size) ask the customer for details and mark
   // the configuration as requiring a custom quote.
   isCustom           Boolean     @default(false)
+  // Quantity-based values (e.g. "Cross Back Chair — $192.50 each"): the
+  // customer also picks how many, and the price modifier is charged per unit
+  // (modifier × quantity). Off by default, so ordinary values are unchanged.
+  quantityEnabled    Boolean     @default(false)
+  quantityMin        Int         @default(0)
+  quantityMax        Int         @default(10)
+  quantityStep       Int         @default(1)
+  quantityDefault    Int         @default(0)
   displayOrder       Int         @default(0)
   active             Boolean     @default(true)
   createdAt          DateTime    @default(now())

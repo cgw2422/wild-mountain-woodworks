@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
-import { parseSnapshot } from "@/lib/pricing/snapshot";
+import { parseSnapshot, snapshotOptionLabel } from "@/lib/pricing/snapshot";
 import { siteDateLong } from "@/lib/site-time";
 import { PRODUCTION_STATUS_LABELS, deliveryMethodLabel } from "@/lib/sales/status";
 import { Logo } from "@/components/brand/Logo";
@@ -74,7 +74,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
                           {o.groupDisplayName}
                         </th>
                         <td className="py-1">
-                          {o.valueDisplayName}
+                          {snapshotOptionLabel(o)}
                           {o.customDetails ? ` — ${o.customDetails}` : ""}
                         </td>
                       </tr>
