@@ -104,7 +104,7 @@ export default async function InvoiceDetailPage({ params }: Props) {
                 action={sendInvoiceAction.bind(null, invoice.id)}
                 label="Send invoice"
                 title="Send this invoice?"
-                body={<p>The customer is emailed a link to their Wild Mountain invoice page, where they can pay (online through Stripe when it&apos;s on). Sent invoices can&apos;t be edited.</p>}
+                body={<p>The customer is emailed a link to their Wild Mountain Woodworks invoice page, where they can pay (online through Stripe when it&apos;s on). Sent invoices can&apos;t be edited.</p>}
                 confirmLabel="Send invoice"
                 variant="primary"
                 confirmVariant="primary"

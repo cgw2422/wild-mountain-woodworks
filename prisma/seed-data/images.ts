@@ -1,7 +1,7 @@
 /**
  * Generates placeholder "studio" imagery for sample content.
  *
- * These are NOT meant to represent real Wild Mountain work. They exist so the
+ * These are NOT meant to represent real Wild Mountain Woodworks work. They exist so the
  * site can be evaluated end-to-end before real photography is uploaded. Every
  * one is stored as an ordinary Media item and can be replaced in
  * Admin → Media (Replace) or reassigned anywhere it is used.

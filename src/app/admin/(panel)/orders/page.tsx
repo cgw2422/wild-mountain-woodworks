@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { cn } from "@/lib/cn";
 import { PRODUCTION_ACTIVE } from "@/lib/sales/status";
+import { orderSearch } from "@/lib/sales/list-filters";
 import { EmptyState, PageHeader, formatDate, table } from "@/components/admin/ui";
 import { FilterTabs, PAGE_SIZE, Pagination, SearchBox, listHref, pageParam, param } from "@/components/admin/inbox/ListControls";
 import { Money } from "@/components/admin/sales/Money";
@@ -31,10 +32,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const tab = TABS.find((t) => t.key === key)!;
   const q = param(sp, "q").slice(0, 100);
   const page = pageParam(sp);
-  const search: Prisma.OrderWhereInput = q
-    ? { OR: [{ number: { contains: q, mode: "insensitive" } }, { customerName: { contains: q, mode: "insensitive" } }, { customerEmail: { contains: q, mode: "insensitive" } }, { quote: { number: { contains: q, mode: "insensitive" } } }] }
-    : {};
-  const where: Prisma.OrderWhereInput = { AND: [search, tab.where ?? {}] };
+  const where: Prisma.OrderWhereInput = { AND: [orderSearch(q), tab.where ?? {}] };
   const [rows, total, counts] = await Promise.all([
     prisma.order.findMany({
       where,
@@ -44,7 +42,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       include: { quote: { select: { number: true } }, items: { select: { description: true, productName: true, kind: true }, orderBy: { position: "asc" }, take: 2 } },
     }),
     prisma.order.count({ where }),
-    Promise.all(TABS.map((t) => prisma.order.count({ where: { AND: [search, t.where ?? {}] } }))),
+    Promise.all(TABS.map((t) => prisma.order.count({ where: { AND: [orderSearch(q), t.where ?? {}] } }))),
   ]);
   return (
     <>

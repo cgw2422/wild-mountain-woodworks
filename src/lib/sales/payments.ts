@@ -15,7 +15,7 @@ import { MANUAL_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, PAYMENT_TYPES, PAYMENT_T
 import type { PaymentIntentInfo, StripeEvent } from "./stripe";
 
 /*
- * Payments are always applied to a Wild Mountain invoice. Every method has
+ * Payments are always applied to a Wild Mountain Woodworks invoice. Every method has
  * its own record: Stripe online (Checkout) and Stripe Terminal payments come
  * only from Stripe's confirmation (verified webhook or a direct check with
  * Stripe); cash, checks and bank transfers are recorded by an admin and never
@@ -37,7 +37,7 @@ function paymentLink(invoice: { publicToken: string | null }, order: { customerT
   return invoice.publicToken ? customerLinks.invoice(invoice.publicToken) : order?.customerToken ? customerLinks.order(order.customerToken) : null;
 }
 
-/** Receipt for any settled payment; links to the Wild Mountain invoice page. */
+/** Receipt for any settled payment; links to the Wild Mountain Woodworks invoice page. */
 async function sendReceipt(paymentId: string) {
   const p = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { invoice: true, order: true } });
   if (!p.invoice) return;

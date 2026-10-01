@@ -340,7 +340,7 @@ export const createOrderInvoiceAction = permittedAction("finance", async (admin,
   return { ok: true, id: invoice.id, message: `Invoice ${invoice.number} created.` };
 });
 
-/** Request the final balance on the same invoice and email the customer the Wild Mountain invoice link. */
+/** Request the final balance on the same invoice and email the customer the Wild Mountain Woodworks invoice link. */
 export const markBalanceDueAction = permittedAction("finance", async (admin, invoiceIdArg: string) => {
   const invoiceId = idSchema.parse(invoiceIdArg);
   const r = await markBalanceDue(admin, invoiceId);

@@ -27,6 +27,7 @@ export default async function DocumentsLayout({ children }: { children: React.Re
             <Logo className="h-7 w-auto max-w-[70vw] text-charcoal sm:h-9 md:h-10" title="" />
           </Link>
           <div className="hidden text-right text-xs leading-relaxed text-muted sm:block print:block">
+            <p className="font-semibold text-charcoal">{settings.businessName}</p>
             {settings.email ? <p>{settings.email}</p> : null}
             {settings.phone ? <p>{settings.phone}</p> : null}
           </div>
@@ -35,12 +36,12 @@ export default async function DocumentsLayout({ children }: { children: React.Re
       <main id="main" className="mx-auto max-w-4xl px-5 py-10 md:px-8 md:py-14 print:py-4">
         {children}
       </main>
-      <footer className="border-t border-stone py-8 text-center text-xs text-muted print:hidden">
+      <footer className="border-t border-stone py-8 text-center text-xs text-muted print:py-4">
         <p>
           {settings.businessName}
           {settings.locationText ? ` · ${settings.locationText}` : ""}
         </p>
-        <p className="mt-1">This page is private to you. Please don&apos;t share its link.</p>
+        <p className="mt-1 print:hidden">This page is private to you. Please don&apos;t share its link.</p>
       </footer>
     </div>
   );

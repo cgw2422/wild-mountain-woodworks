@@ -21,7 +21,7 @@ export const getSettings = cache(async (): Promise<SiteSettings> => {
 });
 
 /**
- * Sales feature flags. Wild Mountain sells through quotes → invoices; there is
+ * Sales feature flags. Wild Mountain Woodworks sells through quotes → invoices; there is
  * no cart or checkout.
  *
  * Stripe invoicing is only effective when the Settings flag is on AND the

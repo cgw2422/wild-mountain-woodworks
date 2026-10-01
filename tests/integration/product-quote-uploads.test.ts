@@ -60,7 +60,7 @@ describe.skipIf(!hasTestDb)("product quote uploads", () => {
 
   it("accepts the structured configuration + notes without files", async () => {
     const res = await submitConfigurationQuote(await productForm());
-    expect(res).toMatchObject({ status: "success", reference: "WMQ-1001" });
+    expect(res).toMatchObject({ status: "success", reference: "WMWQ-2001" });
     expect(await prisma.quoteRequest.findFirstOrThrow()).toMatchObject({ notes: "Walnut please", source: "CONFIGURATOR" });
     expect(await prisma.attachment.count()).toBe(0);
   });

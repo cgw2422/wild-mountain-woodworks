@@ -41,7 +41,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
   {
     key: "admin_new_quote_request",
     name: "New quote request (to you)",
-    description: "Notifies Wild Mountain about a new quote request.",
+    description: "Notifies Wild Mountain Woodworks about a new quote request.",
     audience: "admin",
     variables: [...COMMON, "quoteNumber", "customerEmail", "customerPhone", "zipCode", "summary", "notes"],
     subject: "New quote request {{quoteNumber}} — {{customerName}}",
@@ -85,7 +85,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
   {
     key: "admin_quote_accepted",
     name: "Quote accepted (to you)",
-    description: "Tells Wild Mountain a customer accepted a quote.",
+    description: "Tells Wild Mountain Woodworks a customer accepted a quote.",
     audience: "admin",
     variables: [...COMMON, "quoteNumber", "orderNumber", "total"],
     subject: "Quote {{quoteNumber}} accepted by {{customerName}}",
@@ -96,7 +96,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
   {
     key: "admin_quote_declined",
     name: "Quote declined (to you)",
-    description: "Tells Wild Mountain a customer declined a quote.",
+    description: "Tells Wild Mountain Woodworks a customer declined a quote.",
     audience: "admin",
     variables: [...COMMON, "quoteNumber", "reason"],
     subject: "Quote {{quoteNumber}} declined",
@@ -129,7 +129,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
   {
     key: "invoice_sent",
     name: "Invoice link",
-    description: "Sends (or resends) the link to the customer's Wild Mountain invoice page.",
+    description: "Sends (or resends) the link to the customer's Wild Mountain Woodworks invoice page.",
     audience: "customer",
     variables: [...COMMON, "invoiceNumber", "orderNumber", "total", "amountPaid", "balanceRemaining", "amountDue", "paymentInstructions"],
     subject: "Invoice {{invoiceNumber}} — {{businessName}}",
@@ -151,7 +151,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
   {
     key: "balance_due",
     name: "Final balance due",
-    description: "Sent when you mark the balance due. Links to the same Wild Mountain invoice page, where the customer can pay.",
+    description: "Sent when you mark the balance due. Links to the same Wild Mountain Woodworks invoice page, where the customer can pay.",
     audience: "customer",
     variables: [...COMMON, "invoiceNumber", "orderNumber", "total", "amountPaid", "balanceRemaining", "amountDue"],
     subject: "Your final balance is ready — order {{orderNumber}}",
@@ -173,7 +173,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
   {
     key: "admin_payment_received",
     name: "Payment received (to you)",
-    description: "Tells Wild Mountain an online payment was confirmed by Stripe.",
+    description: "Tells Wild Mountain Woodworks an online payment was confirmed by Stripe.",
     audience: "admin",
     variables: [...COMMON, "invoiceNumber", "orderNumber", "amountPaid"],
     subject: "Payment {{amountPaid}} received — {{invoiceNumber}}",
@@ -189,7 +189,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
     variables: [...COMMON, "orderNumber", "status", "estimatedCompletion"],
     subject: "Your order {{orderNumber}} is confirmed",
     heading: "Your order is confirmed",
-    body: "Hi {{firstName}},\n\nWe've received everything needed to move your Wild Mountain piece forward. Order {{orderNumber}} is confirmed and in our queue.\n\n{{businessName}}",
+    body: "Hi {{firstName}},\n\nWe've received everything needed to move your Wild Mountain Woodworks piece forward. Order {{orderNumber}} is confirmed and in our queue.\n\n{{businessName}}",
     buttonLabel: "View Your Order",
   },
   {
@@ -200,7 +200,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
     variables: [...COMMON, "orderNumber", "status", "estimatedCompletion"],
     subject: "Your furniture is in production — order {{orderNumber}}",
     heading: "Your furniture is now in production",
-    body: "Hi {{firstName}},\n\nWe're actively working on your Wild Mountain piece (order {{orderNumber}}).\n\n{{businessName}}",
+    body: "Hi {{firstName}},\n\nWe're actively working on your Wild Mountain Woodworks piece (order {{orderNumber}}).\n\n{{businessName}}",
     buttonLabel: "View Your Order",
   },
   {
@@ -211,7 +211,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
     variables: [...COMMON, "orderNumber", "status"],
     subject: "Your furniture is ready — order {{orderNumber}}",
     heading: "Your furniture is ready",
-    body: "Hi {{firstName}},\n\nYour Wild Mountain piece is complete and ready for pickup or delivery scheduling. We'll be in touch to arrange a time.\n\n{{businessName}}",
+    body: "Hi {{firstName}},\n\nYour Wild Mountain Woodworks piece is complete and ready for pickup or delivery scheduling. We'll be in touch to arrange a time.\n\n{{businessName}}",
     buttonLabel: "View Your Order",
   },
   {
@@ -232,7 +232,7 @@ export const EMAIL_TEMPLATES: EmailTemplateDefinition[] = [
     audience: "customer",
     variables: [...COMMON, "orderNumber", "status"],
     subject: "Thank you — order {{orderNumber}} is complete",
-    heading: "Your Wild Mountain order is complete",
+    heading: "Your Wild Mountain Woodworks order is complete",
     body: "Hi {{firstName}},\n\nThank you for trusting us with order {{orderNumber}}. We hope it brings you many years of use. Care instructions are always on our website.\n\n{{businessName}}",
     buttonLabel: "View Your Order",
   },

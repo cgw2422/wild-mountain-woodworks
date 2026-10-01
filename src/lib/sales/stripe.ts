@@ -4,10 +4,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 /**
  * Stripe is used only to collect money: Checkout (payment mode) for the
  * deposit at quote acceptance, and Invoices (hosted invoice page + PDF)
- * for final balances and later requests, plus webhooks. Wild Mountain owns
+ * for final balances and later requests, plus webhooks. Wild Mountain Woodworks owns
  * quotes, orders and the amounts due; Stripe Quotes and carts are never used.
  *
- * Every write sends an Idempotency-Key derived from the Wild Mountain record,
+ * Every write sends an Idempotency-Key derived from the Wild Mountain Woodworks record,
  * so a retried request can never create a duplicate customer, invoice or
  * invoice item. No card data ever touches this server.
  */

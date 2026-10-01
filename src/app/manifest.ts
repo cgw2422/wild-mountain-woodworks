@@ -3,7 +3,7 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Wild Mountain Woodworks",
-    short_name: "Wild Mountain",
+    short_name: "Wild Mountain Woodworks",
     description: "Handcrafted furniture built one piece at a time in Ohio.",
     start_url: "/",
     display: "browser",

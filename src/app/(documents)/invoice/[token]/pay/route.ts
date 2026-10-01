@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /invoice/<token>/pay — "Pay remaining balance" (or the deposit) from
- * the Wild Mountain invoice page. Opens a Stripe Checkout Session for exactly
+ * the Wild Mountain Woodworks invoice page. Opens a Stripe Checkout Session for exactly
  * what's due on the invoice, computed on the server, and redirects to
  * Stripe's hosted page. Nothing here marks anything paid.
  */

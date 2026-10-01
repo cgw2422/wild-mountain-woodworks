@@ -12,7 +12,7 @@ import { getInvoicingProvider } from "./stripe";
 
 /**
  * Online payments through Stripe Checkout (payment mode), always against a
- * Wild Mountain invoice. The amount is whatever the invoice says is due right
+ * Wild Mountain Woodworks invoice. The amount is whatever the invoice says is due right
  * now — the deposit, or the remaining balance once the admin marked it due —
  * computed on the server, never taken from the browser. One session is kept
  * per invoice: an open one for the right amount is reused, a stale or
@@ -33,7 +33,7 @@ export function depositPayPath(orderToken: string) {
   return `/order/${orderToken}/pay`;
 }
 
-/** The stable "pay" link on the Wild Mountain invoice page. */
+/** The stable "pay" link on the Wild Mountain Woodworks invoice page. */
 export function invoicePayPath(invoiceToken: string) {
   return `/invoice/${invoiceToken}/pay`;
 }
@@ -56,7 +56,7 @@ export async function startOrderCheckout(orderToken: string): Promise<CheckoutSt
 /** Older name kept for callers that pay the deposit right after acceptance. */
 export const startDepositCheckout = startOrderCheckout;
 
-/** Pay whatever is due on one invoice, from its Wild Mountain invoice page. */
+/** Pay whatever is due on one invoice, from its Wild Mountain Woodworks invoice page. */
 export async function startInvoicePageCheckout(invoiceToken: string): Promise<CheckoutStart> {
   const invoice = await prisma.invoice.findUnique({ where: { publicToken: invoiceToken } });
   if (!invoice) return { kind: "nothing_due" };

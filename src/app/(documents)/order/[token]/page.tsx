@@ -119,7 +119,7 @@ export default async function CustomerOrderPage({ params, searchParams }: Props)
             <a href={due.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
               Pay {formatCents(due.amountCents, { showZeroCents: true })} {dueLabel}
             </a>
-            <p className="mt-3 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page, which shows the payment options available to you. Wild Mountain never stores your payment details.</p>
+            <p className="mt-3 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page, which shows the payment options available to you. Wild Mountain Woodworks never stores your payment details.</p>
           </div>
         ) : o.paymentInstructions && due ? (
           <div className="mt-5 whitespace-pre-line leading-relaxed text-charcoal-muted">{o.paymentInstructions}</div>

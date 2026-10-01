@@ -99,13 +99,13 @@ describe("Checkout Session parameters", () => {
     const params = checkoutSessionParams({
       idempotencyKey: "k",
       amountCents: 57500,
-      productName: "Deposit — order WMO-1001",
+      productName: "Deposit — order WMWO-2001",
       description: "Deposit",
       customerEmail: "jamie@example.com",
       clientReferenceId: "inv_1",
       successUrl: "https://x/s",
       cancelUrl: "https://x/c",
-      metadata: { payment_type: "deposit", order_number: "WMO-1001" },
+      metadata: { payment_type: "deposit", order_number: "WMWO-2001" },
     });
     expect(params).toMatchObject({
       mode: "payment",
@@ -113,7 +113,7 @@ describe("Checkout Session parameters", () => {
       customer_email: "jamie@example.com",
       client_reference_id: "inv_1",
       "metadata[payment_type]": "deposit",
-      "payment_intent_data[metadata][order_number]": "WMO-1001",
+      "payment_intent_data[metadata][order_number]": "WMWO-2001",
     });
     const keys = Object.keys(params).join(" ");
     expect(keys).not.toMatch(/setup_future_usage|saved_payment_method|payment_method_save|off_session|^customer$|\bcustomer\b(?!_email)|customer_creation|consent_collection/);
@@ -161,7 +161,7 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     // A browser-sent price/amount is ignored entirely.
     const res = await acceptQuoteAction(quote.customerToken!, form({ revision: "1", name: "Jamie Rivers", agreeTerms: "on", agreeDeposit: "on", amount: "1", depositCents: "1", totalCents: "1" }));
     const order = await prisma.order.findFirstOrThrow();
-    expect(res).toEqual({ status: "success", reference: "WMO-1001", redirect: `/order/${order.customerToken}/pay` });
+    expect(res).toEqual({ status: "success", reference: "WMWO-2001", redirect: `/order/${order.customerToken}/pay` });
     expect(order).toMatchObject({ totalCents: 115000, depositCents: 57500, productionStatus: "AWAITING_DEPOSIT", paymentStatus: "DEPOSIT_DUE" });
     expect((await prisma.quoteRequest.findUniqueOrThrow({ where: { id: quote.id } })).status).toBe("ACCEPTED");
     const deposit = await depositOf(order.id);
@@ -187,9 +187,9 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
         invoice_id: deposit.id,
         invoice_number: deposit.number,
         order_id: order.id,
-        order_number: "WMO-1001",
+        order_number: "WMWO-2001",
         quote_id: quote.id,
-        quote_number: "WMQ-1001",
+        quote_number: "WMWQ-2001",
         quote_revision: "1",
         customer_id: order.customerId,
       },
@@ -255,7 +255,7 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     // Confirmation email, sent after payment, with the requested wording.
     const mail = await prisma.emailLog.findFirstOrThrow({ where: { template: "deposit_received" } });
     expect(mail.html).toContain(`received your acceptance of quote ${quote.number} and your $575 deposit`);
-    expect(mail.html).toContain("Your order number is WMO-1001");
+    expect(mail.html).toContain("Your order number is WMWO-2001");
     expect(mail.html).toMatch(/next stage of production/);
     expect(mail.html).toMatch(/View Your Order/);
     expect(mail.html).not.toMatch(/send (you )?an invoice/i);
@@ -398,7 +398,7 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
 
     // A replacement invoice can be created (new number); it's ready to pay online (no send step).
     expect(await sales.createOrderInvoiceAction(order.id)).toMatchObject({ ok: true });
-    expect(await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id, status: "DEPOSIT_DUE" } })).toMatchObject({ number: "WMI-1002", totalCents: 115000, depositCents: 57500 });
+    expect(await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id, status: "DEPOSIT_DUE" } })).toMatchObject({ number: "WMWI-2002", totalCents: 115000, depositCents: 57500 });
   });
 
   it("the finance permission is required for payment-link actions", async () => {

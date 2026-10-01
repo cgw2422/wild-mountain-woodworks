@@ -72,7 +72,7 @@ export function AdminBar({
     >
       <div className="flex h-10 items-center gap-1 whitespace-nowrap px-2 sm:px-3">
         <Link href="/admin" className="mr-1 flex h-8 shrink-0 items-center rounded px-2 font-semibold text-white hover:bg-white/10">
-          <span className="hidden sm:inline">Wild Mountain Admin</span>
+          <span className="hidden sm:inline">Wild Mountain Woodworks Admin</span>
           <span className="sm:hidden">WM Admin</span>
         </Link>
 

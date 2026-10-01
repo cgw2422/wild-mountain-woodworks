@@ -97,7 +97,7 @@ export const SEED_PAGES: SeedPage[] = [
       },
       {
         key: "about",
-        eyebrow: "About Wild Mountain",
+        eyebrow: "About Wild Mountain Woodworks",
         heading: "Built in Ohio.",
         body: "Wild Mountain Woodworks is a furniture workshop in Ohio making handcrafted pieces one at a time. Every table, bench and console is built to order, with the time and attention it takes to make something that belongs in a home for years.",
         image: "about-feature",
@@ -319,7 +319,7 @@ export const SEED_PAGES: SeedPage[] = [
         visible: false,
         eyebrow: "The Maker",
         heading: "The hands behind the work.",
-        body: "Introduce yourself here — who builds each piece, how Wild Mountain started, and what you care about in your work. This section is hidden until you turn it on in Admin → Pages → About.",
+        body: "Introduce yourself here — who builds each piece, how Wild Mountain Woodworks started, and what you care about in your work. This section is hidden until you turn it on in Admin → Pages → About.",
       },
       {
         key: "cta",
@@ -381,7 +381,7 @@ export const SEED_PAGES: SeedPage[] = [
     reviewRequired: true,
     reviewNotes: `${REVIEW_NOTE} Confirm your delivery area, methods, fees and who is responsible for inspecting freight deliveries.`,
     sections: [{ key: "hero", eyebrow: "Customer Care", heading: "Shipping & Delivery", body: "How we get your finished piece home." }],
-    body: `Every Wild Mountain piece is built to order, so delivery is arranged individually once your piece is finished. The details below describe how we approach delivery; your quote will confirm the specifics for your order.
+    body: `Every Wild Mountain Woodworks piece is built to order, so delivery is arranged individually once your piece is finished. The details below describe how we approach delivery; your quote will confirm the specifics for your order.
 
 ## Lead times
 
@@ -393,7 +393,7 @@ Estimated lead times are shown on each product page and confirmed with your quot
 
 Depending on your location, delivery may be made:
 
-- By Wild Mountain directly (local delivery), or
+- By Wild Mountain Woodworks directly (local delivery), or
 - By a third-party freight or furniture delivery service.
 
 ## Delivery fees

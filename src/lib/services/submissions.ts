@@ -84,7 +84,7 @@ export async function withUniqueReference<T>(prefix: "Q" | "C", create: (referen
   throw new Error("Could not generate a unique reference");
 }
 
-/** Emails for a new quote request: confirmation to the customer, notification to Wild Mountain. */
+/** Emails for a new quote request: confirmation to the customer, notification to Wild Mountain Woodworks. */
 async function notifyQuoteRequested(quote: { id: string; number: string | null; customerId: string | null; name: string; email: string; phone: string | null; zipCode: string; notes: string | null }, summary: string) {
   const settings = await getSettings();
   const vars = {

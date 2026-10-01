@@ -304,7 +304,7 @@ describe.skipIf(!hasTestDb)("one invoice per order, many payments", () => {
     await payments.recordManualPayment(owner, { invoiceId: invoice.id, amountCents: 40000, method: "CHECK", receivedAt: new Date(), reference: "SECRET-REF-1042", payerName: "First Bank", notes: "Internal: customer was rude", sendReceipt: false, checkStatus: "SUCCEEDED" });
     await prisma.invoice.update({ where: { id: invoice.id }, data: { internalNotes: { create: { body: "Internal margin 40%" } } } });
     const view = (await customerInvoiceView(invoice.publicToken!))!;
-    expect(view).toMatchObject({ number: invoice.number, orderNumber: "WMO-1001", quoteNumber: "WMQ-1001", totalCents: 200000, paidCents: 40000, remainingCents: 160000, dueNowCents: 60000, dueNowType: "DEPOSIT", terms: "Balance due before delivery." });
+    expect(view).toMatchObject({ number: invoice.number, orderNumber: "WMWO-2001", quoteNumber: "WMWQ-2001", totalCents: 200000, paidCents: 40000, remainingCents: 160000, dueNowCents: 60000, dueNowType: "DEPOSIT", terms: "Balance due before delivery." });
     expect(view.payments).toHaveLength(1);
     const json = JSON.stringify(view);
     for (const secret of ["SECRET-REF-1042", "customer was rude", "Internal margin", "First Bank", "pi_", "cs_test", "tmr_"]) expect(json).not.toContain(secret);
@@ -365,7 +365,7 @@ describe.skipIf(!hasTestDb)("production status emails", () => {
       expect(log.to).toBe("jamie@example.com");
       expect(log.html).toContain(`/order/${order.customerToken}`);
       expect(log.html).toContain("View Your Order");
-      expect(log.html).toContain("WMO-1001");
+      expect(log.html).toContain("WMWO-2001");
       expect(log.html).not.toContain("walnut slab"); // internal notes never reach the customer
     }
     const before = await prisma.emailLog.count();

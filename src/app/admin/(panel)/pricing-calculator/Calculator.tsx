@@ -1100,7 +1100,7 @@ function ConvertDialog({ open, onClose, estimate, priceCents }: { open: boolean;
         <p className="mb-3 text-sm font-medium text-neutral-900">Or attach it to an existing quote</p>
         <p className="mb-3 text-sm text-neutral-600">Links this estimate to the quote as internal pricing backup. The quote&apos;s lines don&apos;t change.</p>
         <div className="flex flex-wrap items-end gap-3">
-          <TextInput label="Quote number" name="quoteNumber" placeholder="WMQ-1004" wrapperClassName="w-48" />
+          <TextInput label="Quote number" name="quoteNumber" placeholder="WMWQ-2004" wrapperClassName="w-48" />
           <SubmitButton variant="secondary" pendingLabel="Attaching…">
             Attach estimate
           </SubmitButton>

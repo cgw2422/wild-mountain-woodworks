@@ -106,7 +106,7 @@ The production seed only inserts records. Migrations normally only add to the sc
 `20261005000000_sales_quotes_invoices_orders` runs automatically in pre-deploy and keeps all existing data:
 
 - **Quote statuses.** Every existing quote request is kept. Statuses are mapped: CONTACTED → REVIEWING and QUOTED → SENT.
-- **Quote numbers.** Existing quotes are numbered WMQ-1001… by date. Their old `WM-Q-…` references still work.
+- **Quote numbers.** Quotes that existed before the sales system are numbered WMQ-1001… by date (their old `WM-Q-…` references still work). Records created after migration `20261015000000_wmw_numbering_brand` use WMWQ-2001…, WMWO-2001… and WMWI-2001…; earlier numbers are never rewritten.
 - **Customers.** One customer is created per exact email address, and quotes are linked to it.
 - **Revisions.** Each old quote gets its first draft revision (and secure link) the first time it's opened in admin.
 - **Settings.** `ecommerceEnabled` is renamed to `stripeInvoicingEnabled` (it was never on).
@@ -138,6 +138,6 @@ Then:
 - `GET /api/health` returns `{"status":"ok","database":"ok","adminAuth":"ok",…}`.
 - The home page, `/furniture`, `/furniture/sale` and a product page load.
 - Admin sign-in with two-factor works, and Admin → Promotions and Pages → Sale collection open.
-- Admin → Quotes, Orders, Invoices, Payments, Customers and Emails open; existing quote requests are listed with WMQ numbers.
+- Admin → Quotes, Orders, Invoices, Payments, Customers and Emails open; existing quote requests are listed with their original WMQ numbers; new ones get WMWQ numbers.
 
 If the `[predeploy]` lines are **missing**, the pre-deploy command isn't running. The start script's safety net keeps the site working, but fix the configuration: in Railway → the web service → **Settings → Deploy → Pre-deploy Command**, it should read `npm run deploy:prepare`. When pre-deploy runs, the `[start]` step reports "No pending migrations" and "nothing changed".

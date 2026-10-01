@@ -30,7 +30,8 @@ const SECTIONS = {
   business: {
     label: "business details",
     schema: z.object({
-      businessName: reqText(120, "Enter the business name."),
+      // The written name is always the full one (the shortened form is only ever part of the logo artwork).
+      businessName: reqText(120, "Enter the business name.").refine((v) => !/^wild mountain$/i.test(v.trim()), "Use the full business name: Wild Mountain Woodworks."),
       tagline: z.string().trim().max(160),
       brandStatement: optText(600),
       email: optEmail,

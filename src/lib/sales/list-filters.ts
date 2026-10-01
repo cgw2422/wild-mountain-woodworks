@@ -29,6 +29,12 @@ export const QUOTE_TABS: ListTab<Prisma.QuoteRequestWhereInput>[] = [
   { key: "all", label: "All", where: {} },
 ];
 
+/** Orders by order number (WMWO-2001 or historical WMO-1001), customer, email or quote number. */
+export function orderSearch(q: string): Prisma.OrderWhereInput {
+  if (!q) return {};
+  return { OR: [{ number: contains(q) }, { customerName: contains(q) }, { customerEmail: contains(q) }, { quote: { is: { number: contains(q) } } }] };
+}
+
 export function quoteSearch(q: string): Prisma.QuoteRequestWhereInput {
   if (!q) return {};
   return {

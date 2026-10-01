@@ -18,12 +18,12 @@ import { computeTotals, lineTotal, normalizeUnitPrice, type LineKind } from "./t
 import { newCustomerToken } from "./tokens";
 
 /*
- * One Wild Mountain invoice per order. It is created when the quote is
+ * One Wild Mountain Woodworks invoice per order. It is created when the quote is
  * accepted, carries the whole accepted total plus the deposit required, and
  * every payment — deposit, final balance, cash, check, Terminal — is applied
  * to it. The final balance is requested on the same invoice ("Mark balance
  * due"), never by creating a second invoice, and the customer always pays
- * from the Wild Mountain invoice page (Stripe Checkout processes the card).
+ * from the Wild Mountain Woodworks invoice page (Stripe Checkout processes the card).
  * Stripe Invoicing is not used for new invoices; older Stripe-backed
  * invoices keep working.
  */
@@ -194,7 +194,7 @@ export async function saveInvoiceDraft(actor: Actor, invoiceId: string, input: {
 
 type InvoiceEmail = "invoice_sent" | "invoice_reminder" | "balance_due";
 
-/** Email the customer a link to the Wild Mountain invoice page (never straight to Stripe). */
+/** Email the customer a link to the Wild Mountain Woodworks invoice page (never straight to Stripe). */
 export async function emailInvoiceLink(invoiceId: string, template: InvoiceEmail = "invoice_sent"): Promise<SendResult> {
   const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { order: { select: { number: true } } } });
   if (!invoice.publicToken) throw new SalesError("This invoice has no customer link.");
@@ -223,7 +223,7 @@ export async function emailInvoiceLink(invoiceId: string, template: InvoiceEmail
 
 /**
  * Issue a draft (custom) invoice: it becomes payable in full and the customer
- * is emailed the Wild Mountain invoice link. Nothing is created in Stripe.
+ * is emailed the Wild Mountain Woodworks invoice link. Nothing is created in Stripe.
  */
 export async function sendInvoice(actor: Actor, invoiceId: string): Promise<{ email: SendResult | null }> {
   const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
@@ -254,7 +254,7 @@ export async function resendInvoice(actor: Actor, invoiceId: string, reminder = 
 
 /**
  * Request the final balance on the SAME invoice: it becomes BALANCE_DUE and
- * the customer is emailed a link to the Wild Mountain invoice page, where
+ * the customer is emailed a link to the Wild Mountain Woodworks invoice page, where
  * they can pay the remaining balance. No second invoice, nothing in Stripe
  * until the customer chooses to pay.
  */

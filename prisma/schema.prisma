@@ -591,13 +591,13 @@ enum QuoteSource {
 }
 
 /// A customer's quote: the original request (snapshot of what they
-/// configured) plus Wild Mountain's priced revisions. Also used for general
+/// configured) plus Wild Mountain Woodworks' priced revisions. Also used for general
 /// and manually created quotes.
 model QuoteRequest {
   id                  String      @id @default(cuid())
   /// Legacy random reference (WM-Q-…); kept for old links and emails.
   reference           String      @unique
-  /// Customer-facing number, e.g. WMQ-1001.
+  /// Customer-facing number, e.g. WMWQ-2001 (older: WMQ-1001).
   number              String?     @unique
   status              QuoteStatus @default(NEW)
   customerId          String?
@@ -1116,7 +1116,7 @@ enum DeliveryStatus {
 /// A piece (or set) being built, created from an accepted quote.
 model Order {
   id                      String             @id @default(cuid())
-  /// Customer-facing number, e.g. WMO-1001.
+  /// Customer-facing number, e.g. WMWO-2001 (older: WMO-1001).
   number                  String             @unique
   productionStatus        ProductionStatus   @default(AWAITING_DEPOSIT)
   paymentStatus           OrderPaymentStatus @default(UNPAID)
@@ -1355,7 +1355,7 @@ model MenuItem {
 
 /* ------------------------------------------------------------ sales */
 
-/// Sequential customer-facing numbers (WMQ-1001, WMI-1001, WMO-1001).
+/// Sequential customer-facing numbers (WMWQ-2001, WMWI-2001, WMWO-2001; older records keep WMQ-/WMI-/WMO-).
 model Counter {
   key   String @id
   value Int
@@ -1431,12 +1431,12 @@ enum InvoiceKind {
   CUSTOM
 }
 
-/// Wild Mountain invoice. Works entirely offline (manual payments); when
+/// Wild Mountain Woodworks invoice. Works entirely offline (manual payments); when
 /// Stripe invoicing is enabled it is mirrored to a Stripe Invoice for
 /// hosted payment, and Stripe webhooks update it.
 model Invoice {
   id                     String         @id @default(cuid())
-  /// Customer-facing number, e.g. WMI-1001.
+  /// Customer-facing number, e.g. WMWI-2001 (older: WMI-1001).
   number                 String         @unique
   kind                   InvoiceKind    @default(FULL)
   status                 InvoiceStatus  @default(DRAFT)

@@ -112,10 +112,10 @@ describe("email templates", () => {
       body: "Hello <b>{{customerName}}</b>\n\n- Total: {{total}}\n- Deposit: {{deposit}}",
       buttonLabel: "View Quote",
       actionUrl: "https://example.com/quote/abc",
-      vars: { customerName: '<script>alert("x")</script>', quoteNumber: "WMQ-1001", total: "$1,200", deposit: null },
+      vars: { customerName: '<script>alert("x")</script>', quoteNumber: "WMWQ-2001", total: "$1,200", deposit: null },
       brand,
     });
-    expect(r.subject).toBe("Quote WMQ-1001");
+    expect(r.subject).toBe("Quote WMWQ-2001");
     expect(r.html).not.toContain("<script>");
     expect(r.html).not.toContain("<b>");
     expect(r.html).toContain("&lt;script&gt;");

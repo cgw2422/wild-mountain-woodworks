@@ -6,7 +6,7 @@ import { AdminNav } from "@/components/admin/AdminNav";
 import { logoutAction } from "../login/actions";
 
 export const metadata: Metadata = {
-  title: { default: "Admin", template: "%s · Admin · Wild Mountain" },
+  title: { default: "Admin", template: "%s · Admin · Wild Mountain Woodworks" },
   robots: { index: false, follow: false },
 };
 export const dynamic = "force-dynamic";

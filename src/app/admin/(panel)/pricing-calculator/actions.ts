@@ -14,6 +14,7 @@ import { pricingThresholds } from "@/lib/pricing/defaults";
 import { getSettings } from "@/lib/settings";
 import { revalidateSite } from "@/lib/revalidate";
 import { createManualQuote } from "@/lib/sales/quotes";
+import { QUOTE_NUMBER_PATTERN } from "@/lib/sales/numbers";
 
 /**
  * Internal pricing calculator actions. Estimates are decision support only:
@@ -239,7 +240,7 @@ export const convertEstimateToQuote = adminAction(async (admin, estimateId: stri
 
 /**
  * "Attach estimate": link a saved estimate to an existing quote (by its
- * number, e.g. WMQ-1004) as internal pricing backup. The quote's lines are
+ * number, e.g. WMWQ-2004) as internal pricing backup. The quote's lines are
  * not changed, and the breakdown is only ever visible in admin.
  */
 export const attachEstimateToQuote = adminAction(async (admin, estimateId: string, data: FormData) => {
@@ -247,7 +248,7 @@ export const attachEstimateToQuote = adminAction(async (admin, estimateId: strin
   if (!e) throw new AdminError("That estimate no longer exists.");
   if (e.quoteRequestId) throw new AdminError("This estimate is already linked to a quote.");
   const number = fd.str(data, "quoteNumber").toUpperCase();
-  if (!/^WMQ-\d{4,}$/.test(number)) throw new AdminError("Enter a quote number like WMQ-1004.", { quoteNumber: "Enter a quote number like WMQ-1004." });
+  if (!QUOTE_NUMBER_PATTERN.test(number)) throw new AdminError("Enter a quote number like WMWQ-2004.", { quoteNumber: "Enter a quote number like WMWQ-2004." });
   const quote = await prisma.quoteRequest.findUnique({ where: { number }, select: { id: true, number: true } });
   if (!quote) throw new AdminError("No quote has that number.", { quoteNumber: "No quote has that number." });
   await prisma.$transaction([

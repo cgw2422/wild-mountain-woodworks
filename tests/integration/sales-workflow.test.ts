@@ -80,7 +80,7 @@ describe.skipIf(!hasTestDb)("sales workflow: quote → order → invoice → pay
 
   it("stores a request as a numbered quote with a customer, token and prefilled draft revision", async () => {
     const { quote } = await requestQuote(2);
-    expect(quote).toMatchObject({ number: "WMQ-1001", status: "NEW", quantity: 2, address: "12 Oak St, Columbus OH" });
+    expect(quote).toMatchObject({ number: "WMWQ-2001", status: "NEW", quantity: 2, address: "12 Oak St, Columbus OH" });
     expect(quote.customerToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const c = await prisma.customer.findFirstOrThrow();
     expect(c).toMatchObject({ email: "jamie@example.com", name: "Jamie Rivers", deliveryAddress: "12 Oak St, Columbus OH" });
@@ -100,7 +100,7 @@ describe.skipIf(!hasTestDb)("sales workflow: quote → order → invoice → pay
     await createGeneralQuote({ ...customer, email: "jamie@example.com", interest: "Bench", requestedDimensions: null });
     await createGeneralQuote({ ...customer, email: "jamie.rivers@example.com", interest: "Desk", requestedDimensions: null });
     expect(await prisma.customer.count()).toBe(2);
-    expect((await prisma.quoteRequest.findMany({ orderBy: { createdAt: "asc" } })).map((q) => q.number)).toEqual(["WMQ-1001", "WMQ-1002", "WMQ-1003"]);
+    expect((await prisma.quoteRequest.findMany({ orderBy: { createdAt: "asc" } })).map((q) => q.number)).toEqual(["WMWQ-2001", "WMWQ-2002", "WMWQ-2003"]);
   });
 
   it("edits the draft with server-computed totals and audited price changes; never trusts browser product ids", async () => {
@@ -161,17 +161,17 @@ describe.skipIf(!hasTestDb)("sales workflow: quote → order → invoice → pay
     const r2 = await prisma.quoteRevision.findFirstOrThrow({ where: { quoteId: quote.id, number: 2 } });
     expect(r2).toMatchObject({ status: "ACCEPTED", acceptedName: "Jamie Rivers", acceptedIp: meta.ip, acceptedUserAgent: meta.userAgent });
     const snap = r2.acceptedSnapshot as unknown as AcceptedSnapshot;
-    expect(snap).toMatchObject({ revisionNumber: 2, quoteNumber: "WMQ-1001", totals: { totalCents: r2.totalCents, depositCents: 50000 }, terms: "Deposit due to begin." });
+    expect(snap).toMatchObject({ revisionNumber: 2, quoteNumber: "WMWQ-2001", totals: { totalCents: r2.totalCents, depositCents: 50000 }, terms: "Deposit due to begin." });
     expect(snap.agreements).toHaveLength(2);
     expect(await prisma.quoteRequest.findUniqueOrThrow({ where: { id: quote.id } })).toMatchObject({ status: "ACCEPTED", acceptedRevisionId: r2.id });
     // Accepted twice? No.
     await expect(quotes.acceptQuote(quote.customerToken!, { ...accept, revisionNumber: 2 }, meta)).rejects.toThrow(/already been accepted/);
 
     // The order copies the accepted revision; ONE invoice for the whole total is issued at once, with the deposit required.
-    expect(order).toMatchObject({ number: "WMO-1001", productionStatus: "AWAITING_DEPOSIT", paymentStatus: "DEPOSIT_DUE", depositCents: 50000, totalCents: r2.totalCents });
+    expect(order).toMatchObject({ number: "WMWO-2001", productionStatus: "AWAITING_DEPOSIT", paymentStatus: "DEPOSIT_DUE", depositCents: 50000, totalCents: r2.totalCents });
     expect(await prisma.invoice.count()).toBe(1);
     const invoice = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
-    expect(invoice).toMatchObject({ number: "WMI-1001", kind: "FULL", status: "DEPOSIT_DUE", totalCents: r2.totalCents, depositCents: 50000, amountPaidCents: 0, sentAt: expect.any(Date) });
+    expect(invoice).toMatchObject({ number: "WMWI-2001", kind: "FULL", status: "DEPOSIT_DUE", totalCents: r2.totalCents, depositCents: 50000, amountPaidCents: 0, sentAt: expect.any(Date) });
     // Offline: the acceptance email carries the payment instructions — no "we'll send an invoice".
     const accepted = await prisma.emailLog.findFirstOrThrow({ where: { template: "quote_accepted" } });
     expect(accepted.html).not.toMatch(/send (you )?an invoice/i);
@@ -281,7 +281,7 @@ describe.skipIf(!hasTestDb)("sales workflow: quote → order → invoice → pay
     expect(JSON.stringify(iv)).not.toContain(invoice.id);
     expect(JSON.stringify(iv)).not.toMatch(/1042|Entered twice|Scratch on delivery/); // references and internal notes never reach the customer
     const ov = (await customerOrderView(order.customerToken!))!;
-    expect(ov).toMatchObject({ number: "WMO-1001", productionStatus: "ORDER_CONFIRMED", balanceCents: 5000 });
+    expect(ov).toMatchObject({ number: "WMWO-2001", productionStatus: "ORDER_CONFIRMED", balanceCents: 5000 });
     expect(JSON.stringify(ov)).not.toMatch(/productionNotes|"id"/);
     expect(await customerInvoiceView((await prisma.invoice.create({ data: { number: "WMI-9", customerName: "x", customerEmail: "x@x.com", publicToken: "D".repeat(43) } })).publicToken!)).toBeNull(); // drafts hidden
   });
@@ -349,7 +349,7 @@ describe.skipIf(!hasTestDb)("sales workflow: quote → order → invoice → pay
     await priceDraft(quote.id);
     await quotes.sendQuote(actor, quote.id);
     const copy = await quotes.duplicateQuote(actor, quote.id);
-    expect(copy).toMatchObject({ number: "WMQ-1002", status: "DRAFT" });
+    expect(copy).toMatchObject({ number: "WMWQ-2002", status: "DRAFT" });
     expect(copy.customerToken).not.toBe(quote.customerToken);
     const copyRev = await prisma.quoteRevision.findUniqueOrThrow({ where: { id: copy.currentRevisionId }, include: { lineItems: true } });
     const origRev = await prisma.quoteRevision.findFirstOrThrow({ where: { quoteId: quote.id } });

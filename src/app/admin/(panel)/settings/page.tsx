@@ -183,7 +183,7 @@ export default async function SettingsPage() {
               <TextInput name="defaultDepositPercent" label="Deposit %" inputMode="decimal" defaultValue={formatBps(settings.defaultDepositPercentBps).replace("%", "")} help="Used when the default is a percentage." />
               <TextInput name="defaultDepositAmount" label="Deposit amount ($)" inputMode="decimal" defaultValue={centsToDollarInput(settings.defaultDepositAmountCents)} help="Used when the default is a fixed amount." />
             </div>
-            {/* Invoices are emailed by Wild Mountain with a link to the invoice page (Stripe Invoicing isn't used for new invoices). */}
+            {/* Invoices are emailed by Wild Mountain Woodworks with a link to the invoice page (Stripe Invoicing isn't used for new invoices). */}
             <input type="hidden" name="invoiceEmailMode" value={settings.invoiceEmailMode} />
             <TextArea name="defaultQuoteTerms" label="Default quote terms" rows={7} defaultValue={s(settings.defaultQuoteTerms)} maxLength={20000} help="Copied onto every new quote; editable per quote. Customers see these." />
             <TextArea name="paymentInstructions" label="Offline payment instructions" rows={4} defaultValue={s(settings.paymentInstructions)} maxLength={2000} help="Shown on invoices and invoice emails when online payments are off, e.g. who to make checks payable to, or bank transfer details." />
@@ -309,7 +309,7 @@ export default async function SettingsPage() {
                 name="stripeInvoicingEnabled"
                 label="Online payments (Stripe)"
                 defaultChecked={settings.stripeInvoicingEnabled}
-                description="Customers pay the deposit through Stripe Checkout as soon as they accept a quote, and the final balance the same way from their Wild Mountain invoice once you mark it due. Wild Mountain's invoice is the record — no separate Stripe invoices. Cards are never saved. Cash, checks, transfers and in-person card (Stripe Terminal) are recorded on the invoice."
+                description="Customers pay the deposit through Stripe Checkout as soon as they accept a quote, and the final balance the same way from their Wild Mountain Woodworks invoice once you mark it due. Wild Mountain Woodworks' invoice is the record — no separate Stripe invoices. Cards are never saved. Cash, checks, transfers and in-person card (Stripe Terminal) are recorded on the invoice."
               />
               <div className="mt-4 rounded bg-neutral-50 p-3 text-sm" role="note">
                 <p className="font-medium text-neutral-900">

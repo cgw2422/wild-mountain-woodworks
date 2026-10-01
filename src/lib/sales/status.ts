@@ -21,7 +21,7 @@ export const QUOTE_STATUS_LABELS: Record<QuoteStatusValue, string> = {
   VOIDED: "Voided",
 };
 
-/** Quotes that still need Wild Mountain to do something before sending. */
+/** Quotes that still need Wild Mountain Woodworks to do something before sending. */
 export const QUOTE_OPEN_STATUSES: QuoteStatusValue[] = ["NEW", "REVIEWING", "DRAFT"];
 /** Quotes waiting on the customer. */
 export const QUOTE_AWAITING_STATUSES: QuoteStatusValue[] = ["SENT", "VIEWED"];

@@ -17,10 +17,10 @@ export const metadata: Metadata = { title: "Edit email" };
 const SAMPLE: Record<string, string> = {
   customerName: "Jamie Rivers",
   firstName: "Jamie",
-  quoteNumber: "WMQ-1042",
+  quoteNumber: "WMWQ-2042",
   revisionNumber: "2",
-  orderNumber: "WMO-1018",
-  invoiceNumber: "WMI-1031",
+  orderNumber: "WMWO-2018",
+  invoiceNumber: "WMWI-2031",
   total: "$3,450",
   deposit: "$1,725",
   amountDue: "$1,725.00",

@@ -156,7 +156,7 @@ describe.skipIf(!hasTestDb)("sales admin actions", () => {
     expect(await declineQuoteAction(quote.customerToken!, form({ revision: "1", reason: "x".repeat(1001) }))).toMatchObject({ status: "error" });
     // A price in the form is ignored entirely.
     const ok = await acceptQuoteAction(quote.customerToken!, form({ revision: "1", name: "Jamie Rivers", agreeTerms: "on", agreeDeposit: "on", totalCents: "1" }));
-    expect(ok).toMatchObject({ status: "success", reference: "WMO-1001" });
+    expect(ok).toMatchObject({ status: "success", reference: "WMWO-2001" });
     expect(await prisma.order.findFirstOrThrow()).toMatchObject({ totalCents: 120000 });
     const rev = await prisma.quoteRevision.findFirstOrThrow({ where: { quoteId: quote.id } });
     expect(rev).toMatchObject({ acceptedIp: "203.0.113.9", acceptedUserAgent: "vitest" });
@@ -166,16 +166,17 @@ describe.skipIf(!hasTestDb)("sales admin actions", () => {
     const legacy = await prisma.quoteRequest.create({
       data: { reference: "WM-Q-260901-ABCD", status: "REVIEWING", name: "Old Customer", email: "Old@Example.com", zipCode: "43215", productName: "Bench", estimatedTotalCents: 50000 },
     });
+    // The retired WMQ counter is ignored: anything numbered now gets the next WMWQ number.
     await prisma.counter.create({ data: { key: "quote", value: 1004 } });
     const ready = await ensureQuoteReady(legacy.id);
-    expect(ready).toMatchObject({ number: "WMQ-1005", customerToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
+    expect(ready).toMatchObject({ number: "WMWQ-2001", customerToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
     const q = await prisma.quoteRequest.findUniqueOrThrow({ where: { id: legacy.id }, include: { customer: true, revisions: true } });
     expect(q.reference).toBe("WM-Q-260901-ABCD"); // kept for old emails
     expect(q.customer).toMatchObject({ email: "old@example.com" });
     expect(q.revisions).toHaveLength(1);
     expect(q.revisions[0]).toMatchObject({ number: 1, status: "DRAFT" });
     // Idempotent.
-    expect(await ensureQuoteReady(legacy.id)).toMatchObject({ number: "WMQ-1005" });
+    expect(await ensureQuoteReady(legacy.id)).toMatchObject({ number: "WMWQ-2001" });
     expect(await prisma.quoteRevision.count()).toBe(1);
   });
 

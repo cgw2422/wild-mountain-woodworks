@@ -124,7 +124,7 @@ describe.skipIf(!hasTestDb)("pricing calculator actions", () => {
     expect(converted.ok).toBe(true);
     const quote = await prisma.quoteRequest.findUniqueOrThrow({ where: { id: converted.id! }, include: { internalNotes: true } });
     // A draft quote (reviewed, then sent from Quotes) priced at the estimate, with its deposit.
-    expect(quote).toMatchObject({ status: "DRAFT", source: "ESTIMATE", estimatedTotalCents: 150000, productId: product.id, requestedDimensions: '84" × 40"', number: "WMQ-1001" });
+    expect(quote).toMatchObject({ status: "DRAFT", source: "ESTIMATE", estimatedTotalCents: 150000, productId: product.id, requestedDimensions: '84" × 40"', number: "WMWQ-2001" });
     const rev = await prisma.quoteRevision.findUniqueOrThrow({ where: { id: quote.currentRevisionId! }, include: { lineItems: true } });
     expect(rev).toMatchObject({ status: "DRAFT", totalCents: 150000, depositType: "PERCENTAGE", depositPercentBps: 5000, depositCents: 75000 });
     expect(rev.lineItems).toHaveLength(1);
@@ -139,7 +139,7 @@ describe.skipIf(!hasTestDb)("pricing calculator actions", () => {
     // "Attach estimate" links another estimate to an existing quote as internal backup.
     const other = await actions.duplicateEstimate(id!);
     expect((await actions.attachEstimateToQuote(other.id!, form({ quoteNumber: "WMQ-9999" }))).ok).toBe(false);
-    const attached = await actions.attachEstimateToQuote(other.id!, form({ quoteNumber: "wmq-1001" }));
+    const attached = await actions.attachEstimateToQuote(other.id!, form({ quoteNumber: "wmwq-2001" }));
     expect(attached).toMatchObject({ ok: true, id: quote.id });
     expect(await prisma.priceEstimate.count({ where: { quoteRequestId: quote.id } })).toBe(2);
     expect(await prisma.quoteLineItem.count({ where: { revisionId: rev.id } })).toBe(1); // lines untouched

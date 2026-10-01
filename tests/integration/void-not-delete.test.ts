@@ -128,10 +128,10 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     const staff = await prisma.adminUser.findUniqueOrThrow({ where: { email: "staff@example.com" } });
 
     expect(await sales.voidQuoteAction(q.id, form({ reason: "Other" }))).toMatchObject({ ok: false, fieldErrors: { details: expect.any(String) } });
-    expect(await sales.voidQuoteAction(q.id, form({ reason: "Replaced by new quote", details: "See WMQ-1002" }))).toMatchObject({ ok: true });
+    expect(await sales.voidQuoteAction(q.id, form({ reason: "Replaced by new quote", details: "See WMWQ-2002" }))).toMatchObject({ ok: true });
 
     const v = await prisma.quoteRequest.findUniqueOrThrow({ where: { id: q.id }, include: { revisions: { include: { lineItems: true } }, statusEvents: true, customer: true } });
-    expect(v).toMatchObject({ status: "VOIDED", voidedById: staff.id, voidReason: "Replaced by new quote — See WMQ-1002", voidedFromStatus: "VIEWED", voidedAt: expect.any(Date) });
+    expect(v).toMatchObject({ status: "VOIDED", voidedById: staff.id, voidReason: "Replaced by new quote — See WMWQ-2002", voidedFromStatus: "VIEWED", voidedAt: expect.any(Date) });
     expect(v.revisions).toHaveLength(1);
     expect(v.revisions[0]).toMatchObject({ status: "SENT", viewedAt: expect.any(Date), sentAt: expect.any(Date) });
     expect(v.revisions[0]!.lineItems).toHaveLength(1);
@@ -156,15 +156,15 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     expect(await prisma.order.count()).toBe(0);
     // Duplicating is the way forward: new number, new link.
     const copy = await quotes.duplicateQuote(actor, q.id);
-    expect(copy.number).toBe("WMQ-1002");
+    expect(copy.number).toBe("WMWQ-2002");
   });
 
   it("a quote with a live order or active invoice can't be voided until those are dealt with; then nothing can be invoiced from it", async () => {
     const q = await sentQuote();
     const { order } = await quotes.acceptQuote(q.customerToken!, { ...accept, revisionNumber: 1 }, meta);
-    await expect(quotes.voidQuote(actor, q.id, "Customer canceled")).rejects.toThrow(/Order WMO-1001/);
+    await expect(quotes.voidQuote(actor, q.id, "Customer canceled")).rejects.toThrow(/Order WMWO-2001/);
     await orders.updateOrder(actor, order.id, cancelOrder);
-    await expect(quotes.voidQuote(actor, q.id, "Customer canceled")).rejects.toThrow(/Invoice WMI-1001 is still active/);
+    await expect(quotes.voidQuote(actor, q.id, "Customer canceled")).rejects.toThrow(/Invoice WMWI-2001 is still active/);
     const deposit = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
     await invoices.voidInvoice(actor, deposit.id, "Customer canceled");
     await quotes.voidQuote(actor, q.id, "Customer canceled");
@@ -238,7 +238,7 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     const boss = await prisma.adminUser.findUniqueOrThrow({ where: { email: "boss@example.com" } });
     expect(await sales.voidInvoiceAction(deposit.id, form({ reason: "Customer canceled" }))).toMatchObject({ ok: true });
     const v = await prisma.invoice.findUniqueOrThrow({ where: { id: deposit.id }, include: { payments: true, lineItems: true } });
-    expect(v).toMatchObject({ status: "VOIDED", number: "WMI-1001", voidedById: boss.id, voidReason: "Customer canceled", voidedAt: expect.any(Date), orderId: order.id, quoteId: q.id });
+    expect(v).toMatchObject({ status: "VOIDED", number: "WMWI-2001", voidedById: boss.id, voidReason: "Customer canceled", voidedAt: expect.any(Date), orderId: order.id, quoteId: q.id });
     expect(v.lineItems.length).toBeGreaterThan(0);
     expect(v.payments).toEqual([expect.objectContaining({ id: p.id, amountCents: 20000, refundedCents: 20000, status: "REFUNDED", reference: "1042" })]);
     expect(await prisma.activityLog.findFirstOrThrow({ where: { type: "invoice.voided" } })).toMatchObject({ actorId: boss.id, message: expect.stringContaining("Reason: Customer canceled") });
@@ -250,7 +250,7 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     expect((await customerInvoiceView(deposit.publicToken!))!).toMatchObject({ voided: true, payHref: null, paymentInstructions: null });
     expect(stripe.calls.filter((c) => c.startsWith("checkout:"))).toEqual([]);
     // It stays in the customer's history on the quote page, marked void with nothing to pay.
-    expect((await loadCustomerQuote(q.customerToken!))!.view.invoices).toEqual([expect.objectContaining({ number: "WMI-1001", status: "VOIDED", payUrl: null })]);
+    expect((await loadCustomerQuote(q.customerToken!))!.view.invoices).toEqual([expect.objectContaining({ number: "WMWI-2001", status: "VOIDED", payUrl: null })]);
   });
 
   it("voiding an older Stripe-backed invoice voids it in Stripe too; a replacement gets a new number", async () => {
@@ -269,7 +269,7 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "VOIDED", stripeInvoiceId: "in_old", stripeHostedInvoiceUrl: expect.any(String) });
     expect((await customerInvoiceView(invoice.publicToken!))!.payHref).toBeNull();
     const replacement = await prisma.$transaction((tx) => invoices.createOrderInvoice(tx, order.id, actor.id));
-    expect(replacement.number).toBe("WMI-1002");
+    expect(replacement.number).toBe("WMWI-2002");
     expect(replacement.totalCents).toBe(invoice.totalCents);
   });
 
@@ -277,19 +277,19 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     const a = await sentQuote();
     await quotes.voidQuote(actor, a.id, "Duplicate record");
     const b = await sentQuote("b@example.com", "Bo Bailey");
-    expect([a.number, b.number]).toEqual(["WMQ-1001", "WMQ-1002"]);
+    expect([a.number, b.number]).toEqual(["WMWQ-2001", "WMWQ-2002"]);
 
     const { order } = await quotes.acceptQuote(b.customerToken!, { ...accept, revisionNumber: 1 }, meta);
     const deposit = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
     await invoices.voidInvoice(actor, deposit.id, "Created in error");
     const again = await prisma.$transaction((tx) => invoices.createOrderInvoice(tx, order.id, actor.id));
-    expect([deposit.number, again.number]).toEqual(["WMI-1001", "WMI-1002"]);
+    expect([deposit.number, again.number]).toEqual(["WMWI-2001", "WMWI-2002"]);
 
     await orders.updateOrder(actor, order.id, cancelOrder);
     const c = await sentQuote("c@example.com", "Cy Cole");
     const { order: order2 } = await quotes.acceptQuote(c.customerToken!, { ...accept, revisionNumber: 1 }, meta);
-    expect([order.number, order2.number]).toEqual(["WMO-1001", "WMO-1002"]);
-    expect(c.number).toBe("WMQ-1003");
+    expect([order.number, order2.number]).toEqual(["WMWO-2001", "WMWO-2002"]);
+    expect(c.number).toBe("WMWQ-2003");
   });
 
   it("voided records stay out of the active view but are always searchable", async () => {

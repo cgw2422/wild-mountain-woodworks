@@ -12,7 +12,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   if (state) redirect(state.mfaEnrolled ? "/admin" : "/admin/setup-mfa");
   const { next } = await searchParams;
   return (
-    <AuthShell title="Admin sign in" intro="Manage the Wild Mountain website.">
+    <AuthShell title="Admin sign in" intro="Manage the Wild Mountain Woodworks website.">
       <LoginForm next={next} />
     </AuthShell>
   );

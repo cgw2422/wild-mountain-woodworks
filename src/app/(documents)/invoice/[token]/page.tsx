@@ -22,7 +22,7 @@ const NOTICES: Record<string, string> = {
 };
 
 /**
- * The customer's main financial page: the one Wild Mountain invoice for their
+ * The customer's main financial page: the one Wild Mountain Woodworks invoice for their
  * order, what's been paid, what remains, and — when a payment is due — a
  * button that opens Stripe's secure checkout for exactly that amount
  * (computed on the server). Printable as the branded invoice.
@@ -97,7 +97,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: Prop
               <a href={inv.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
                 Pay {formatCents(inv.dueNowCents, { showZeroCents: true })} {dueLabel}
               </a>
-              <p className="mt-3 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page, which shows the payment options available to you. Wild Mountain never stores your payment details.</p>
+              <p className="mt-3 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page, which shows the payment options available to you. Wild Mountain Woodworks never stores your payment details.</p>
             </div>
           ) : inv.remainingCents > 0 && !inv.paymentInstructions ? (
             <p className="mt-5 text-sm text-muted">{inv.depositCents > 0 && inv.paidCents >= inv.depositCents ? "Your deposit is received. We'll let you know when the remaining balance is due." : "We'll let you know when a payment is due."}</p>

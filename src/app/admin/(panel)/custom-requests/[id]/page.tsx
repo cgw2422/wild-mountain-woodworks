@@ -36,7 +36,7 @@ export default async function CustomRequestDetailPage({ params }: Props) {
   });
   if (!req) notFound();
 
-  const mailto = `mailto:${req.email}?subject=${encodeURIComponent(`Your Wild Mountain custom furniture request ${req.reference}`)}`;
+  const mailto = `mailto:${req.email}?subject=${encodeURIComponent(`Your Wild Mountain Woodworks custom furniture request ${req.reference}`)}`;
 
   return (
     <>
