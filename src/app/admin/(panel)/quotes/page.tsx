@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import type { Prisma, QuoteStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { cn } from "@/lib/cn";
 import { expireDueQuotes } from "@/lib/sales/quotes";
+import { QUOTE_TABS, quoteListWhere } from "@/lib/sales/list-filters";
 import { EmptyState, PageHeader, adminButton, formatDate, table } from "@/components/admin/ui";
 import { FilterTabs, PAGE_SIZE, Pagination, SearchBox, listHref, pageParam, param } from "@/components/admin/inbox/ListControls";
 import { Money } from "@/components/admin/sales/Money";
@@ -13,42 +13,17 @@ import { SalesBadge } from "@/components/admin/sales/SalesBadge";
 export const metadata: Metadata = { title: "Quotes" };
 
 const BASE = "/admin/quotes";
-const TABS: Array<{ key: string; label: string; statuses?: QuoteStatus[]; archived?: boolean }> = [
-  { key: "", label: "All" },
-  { key: "action", label: "Needs action", statuses: ["NEW", "REVIEWING", "DRAFT"] },
-  { key: "waiting", label: "Waiting on customer", statuses: ["SENT", "VIEWED"] },
-  { key: "accepted", label: "Accepted", statuses: ["ACCEPTED", "CONVERTED_TO_INVOICE"] },
-  { key: "declined", label: "Declined", statuses: ["DECLINED"] },
-  { key: "expired", label: "Expired", statuses: ["EXPIRED"] },
-  { key: "closed", label: "Completed / canceled", statuses: ["COMPLETED", "CANCELED"] },
-  { key: "archived", label: "Archived", archived: true },
-];
 
 export default async function QuotesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requirePermission("sales");
   await expireDueQuotes();
   const sp = await searchParams;
-  const statusKey = TABS.find((t) => t.key === param(sp, "status"))?.key ?? "";
-  const tab = TABS.find((t) => t.key === statusKey)!;
+  const statusKey = QUOTE_TABS.find((t) => t.key === param(sp, "status"))?.key ?? "";
   const q = param(sp, "q").slice(0, 100);
   const page = pageParam(sp);
+  const where = quoteListWhere(statusKey, q);
 
-  const search: Prisma.QuoteRequestWhereInput = q
-    ? {
-        OR: [
-          { number: { contains: q, mode: "insensitive" } },
-          { reference: { contains: q, mode: "insensitive" } },
-          { name: { contains: q, mode: "insensitive" } },
-          { email: { contains: q, mode: "insensitive" } },
-          { phone: { contains: q } },
-          { productName: { contains: q, mode: "insensitive" } },
-        ],
-      }
-    : {};
-  const archivedWhere: Prisma.QuoteRequestWhereInput = tab.archived ? { archivedAt: { not: null } } : { archivedAt: null };
-  const where: Prisma.QuoteRequestWhereInput = { ...search, ...archivedWhere, ...(tab.statuses ? { status: { in: tab.statuses } } : {}) };
-
-  const [rows, total, grouped, archivedCount] = await Promise.all([
+  const [rows, total, counts] = await Promise.all([
     prisma.quoteRequest.findMany({
       where,
       orderBy: { updatedAt: "desc" },
@@ -72,18 +47,15 @@ export default async function QuotesPage({ searchParams }: { searchParams: Promi
       },
     }),
     prisma.quoteRequest.count({ where }),
-    prisma.quoteRequest.groupBy({ by: ["status"], where: { ...search, archivedAt: null }, _count: true }),
-    prisma.quoteRequest.count({ where: { ...search, archivedAt: { not: null } } }),
+    Promise.all(QUOTE_TABS.map((t) => prisma.quoteRequest.count({ where: quoteListWhere(t.key, q) }))),
   ]);
-  const countFor = (t: (typeof TABS)[number]) =>
-    t.archived ? archivedCount : grouped.filter((g) => !t.statuses || t.statuses.includes(g.status)).reduce((sum, g) => sum + g._count, 0);
   const hrefFor = (params: { status?: string; page?: number }) => listHref(BASE, { status: statusKey, q, ...params });
 
   return (
     <>
       <PageHeader
         title="Quotes"
-        description="Every request becomes a quote you price, send and track here. Customers accept online; accepted quotes become orders."
+        description="Every request becomes a quote you price, send and track here. Customers accept online; accepted quotes become orders. Quotes are never deleted — void them instead (they stay under Voided and in search)."
         actions={
           <Link href={`${BASE}/new`} className={adminButton.primary}>
             New quote
@@ -91,8 +63,8 @@ export default async function QuotesPage({ searchParams }: { searchParams: Promi
         }
       />
       <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <FilterTabs active={statusKey} tabs={TABS.map((t) => ({ key: t.key, label: t.label, count: countFor(t), href: listHref(BASE, { status: t.key, q }) }))} />
-        <SearchBox action={BASE} q={q} placeholder="Number, name, email, phone or product" hidden={{ status: statusKey }} />
+        <FilterTabs active={statusKey} tabs={QUOTE_TABS.map((t, i) => ({ key: t.key, label: t.label, count: counts[i], href: listHref(BASE, { status: t.key, q }) }))} />
+        <SearchBox action={BASE} q={q} placeholder="Quote, invoice or order number, customer or email" hidden={{ status: statusKey }} />
       </div>
 
       {rows.length === 0 ? (

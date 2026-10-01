@@ -307,7 +307,7 @@ export function statusPill(status: string): {
     "AWAITING_DEPOSIT",
     "DEPOSIT_DUE",
   ];
-  const bad = ["DECLINED", "EXPIRED", "CANCELED", "VOID", "PAST_DUE"];
+  const bad = ["DECLINED", "EXPIRED", "CANCELED", "VOID", "VOIDED", "PAST_DUE"];
   const label =
     status === "CONVERTED_TO_INVOICE"
       ? "Accepted"

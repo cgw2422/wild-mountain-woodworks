@@ -45,6 +45,8 @@ export type CustomerActivityType =
   | "quote.declined"
   | "quote.expired"
   | "quote.extended"
+  | "quote.voided"
+  | "quote.reopened"
   | "invoice.sent"
   | "invoice.voided"
   | "payment.received"

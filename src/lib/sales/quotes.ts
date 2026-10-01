@@ -10,6 +10,7 @@ import { siteDateLong } from "@/lib/site-time";
 import { ACCEPT_DEPOSIT_LABEL, ACCEPT_NO_DEPOSIT_LABEL, ACCEPT_TERMS_LABEL } from "./acceptance";
 import { findOrCreateCustomer, recordCustomerActivity } from "./customers";
 import { SalesError } from "./errors";
+import { VOIDED_QUOTE_MESSAGE } from "./voiding";
 import { createInvoiceForOrder } from "./invoices";
 import { adminLinks, customerLinks } from "./links";
 import { nextNumber } from "./numbers";
@@ -297,6 +298,7 @@ export interface RevisionInput {
 export async function saveRevision(actor: Actor, quoteId: string, input: RevisionInput) {
   const quote = await prisma.quoteRequest.findUnique({ where: { id: quoteId }, include: { currentRevision: { include: { lineItems: true } }, revisions: { select: { id: true } } } });
   if (!quote || !quote.currentRevision) throw new SalesError("That quote no longer exists.");
+  assertNotVoided(quote);
   const rev = quote.currentRevision;
   if (rev.status !== "DRAFT") throw new SalesError("This revision has been sent and can't be changed. Create a new revision to make changes.");
   if (["ACCEPTED", "CONVERTED_TO_INVOICE", "COMPLETED", "CANCELED"].includes(quote.status)) throw new SalesError(`This quote is ${QUOTE_STATUS_LABELS[quote.status].toLowerCase()} and can't be edited.`);
@@ -381,6 +383,7 @@ export async function saveRevision(actor: Actor, quoteId: string, input: Revisio
 export async function createRevision(actor: Actor, quoteId: string) {
   const quote = await prisma.quoteRequest.findUnique({ where: { id: quoteId }, include: { currentRevision: { include: { lineItems: { orderBy: { position: "asc" } } } } } });
   if (!quote?.currentRevision) throw new SalesError("That quote no longer exists.");
+  assertNotVoided(quote);
   if (quote.currentRevision.status === "DRAFT") return quote.currentRevision;
   if (["ACCEPTED", "CONVERTED_TO_INVOICE", "COMPLETED"].includes(quote.status)) throw new SalesError("This quote has been accepted. Duplicate it to quote something new.");
   const prev = quote.currentRevision;
@@ -450,6 +453,7 @@ export async function sendQuote(actor: Actor, quoteId: string): Promise<SendResu
   const quote = await prisma.quoteRequest.findUnique({ where: { id: quoteId }, include: { currentRevision: { include: { lineItems: true } }, revisions: true } });
   if (!quote?.currentRevision) throw new SalesError("That quote no longer exists.");
   const rev = quote.currentRevision;
+  assertNotVoided(quote);
   if (rev.status !== "DRAFT") throw new SalesError("This revision was already sent. Create a new revision to send changes, or resend the email.");
   if (["ACCEPTED", "CONVERTED_TO_INVOICE", "COMPLETED", "CANCELED"].includes(quote.status)) throw new SalesError(`This quote is ${QUOTE_STATUS_LABELS[quote.status].toLowerCase()}.`);
   if (rev.lineItems.length === 0) throw new SalesError("Add at least one line item before sending.");
@@ -460,6 +464,7 @@ export async function sendQuote(actor: Actor, quoteId: string): Promise<SendResu
   if (rev.expiresAt && rev.expiresAt <= now) throw new SalesError("The expiration date is in the past.");
   const expiresAt = rev.expiresAt ?? new Date(now.getTime() + settings.quoteValidDays * DAY);
   const wasSentBefore = quote.revisions.some((r) => r.id !== rev.id && r.sentAt);
+  const superseded = quote.revisions.filter((r) => r.id !== rev.id && (r.status === "SENT" || r.status === "DECLINED"));
 
   await prisma.$transaction(async (tx) => {
     await tx.quoteRevision.updateMany({ where: { quoteId, id: { not: rev.id }, status: { in: ["SENT", "DECLINED"] } }, data: { status: "SUPERSEDED" } });
@@ -468,6 +473,9 @@ export async function sendQuote(actor: Actor, quoteId: string): Promise<SendResu
     await recordCustomerActivity(tx, { customerId: quote.customerId, type: "quote.sent", message: `Quote ${quote.number} revision ${rev.number} sent (${formatCents(rev.totalCents)})`, quoteId, actorId: actor.id });
   });
   await logActivity("quote.sent", `${actor.name} sent ${quote.number} rev ${rev.number} (${formatCents(rev.totalCents)}) to ${rev.customerEmail}`, { actorId: actor.id, entityType: "quote", entityId: quoteId });
+  for (const old of superseded) {
+    await logActivity("quote.superseded", `${quote.number} rev ${old.number} superseded by rev ${rev.number} (sent by ${actor.name}); kept for history, no longer acceptable`, { actorId: actor.id, entityType: "quote", entityId: quoteId });
+  }
   return emailQuote(quoteId, wasSentBefore ? "quote_revised" : "quote_sent");
 }
 
@@ -495,6 +503,7 @@ async function emailQuote(quoteId: string, template: "quote_sent" | "quote_revis
 export async function resendQuote(actor: Actor, quoteId: string) {
   const quote = await prisma.quoteRequest.findUnique({ where: { id: quoteId }, include: { revisions: true } });
   if (!quote) throw new SalesError("That quote no longer exists.");
+  assertNotVoided(quote);
   const rev = customerRevisionOf(quote.revisions);
   if (!rev) throw new SalesError("This quote hasn't been sent yet.");
   const result = await emailQuote(quoteId, rev.number > 1 ? "quote_revised" : "quote_sent");
@@ -548,6 +557,7 @@ export function acceptBlocker(
   rev: { status: string; expiresAt: Date | null } | null,
   now = new Date(),
 ): string | null {
+  if (quote.status === "VOIDED") return VOIDED_QUOTE_MESSAGE;
   if (!rev) return "This quote isn't ready yet.";
   if (quote.archivedAt || quote.status === "CANCELED") return "This quote has been canceled.";
   if (["ACCEPTED", "CONVERTED_TO_INVOICE", "COMPLETED"].includes(quote.status) || rev.status === "ACCEPTED") return "This quote has already been accepted.";
@@ -642,10 +652,10 @@ async function finalizeAcceptance(
       },
     });
     if (!won.count) throw new SalesError("This quote has already been accepted.");
-    await tx.quoteRequest.update({
-      where: { id: quoteId },
-      data: { status: "ACCEPTED", acceptedRevisionId: rev.id, statusEvents: { create: { fromStatus: quote.status, toStatus: "ACCEPTED", authorId: opts.actorId } } },
-    });
+    // Never accept a quote that was voided a moment ago.
+    const accepted = await tx.quoteRequest.updateMany({ where: { id: quoteId, status: quote.status }, data: { status: "ACCEPTED", acceptedRevisionId: rev.id } });
+    if (!accepted.count) throw new SalesError("This quote just changed. Please reload the page.");
+    await tx.statusEvent.create({ data: { quoteRequestId: quoteId, fromStatus: quote.status, toStatus: "ACCEPTED", authorId: opts.actorId } });
     const order = await createOrderFromRevision(tx, quote, rev);
     // The deposit is requested straight away (no draft for staff to send):
     // online it's paid through Stripe Checkout right after acceptance.
@@ -722,6 +732,7 @@ export async function acceptQuote(token: string, input: { revisionNumber: number
 export async function acceptQuoteManually(actor: Actor, quoteId: string, note: string) {
   const quote = await prisma.quoteRequest.findUnique({ where: { id: quoteId }, include: { revisions: true } });
   if (!quote) throw new SalesError("That quote no longer exists.");
+  assertNotVoided(quote);
   const rev = customerRevisionOf(quote.revisions);
   if (!rev) throw new SalesError("Send the quote before recording an acceptance.");
   const online = salesFlags(await getSettings()).onlinePayments;
@@ -763,6 +774,7 @@ export async function extendQuote(actor: Actor, quoteId: string, expiresAt: Date
   if (expiresAt <= new Date()) throw new SalesError("Choose a date in the future.", { expiresOn: "Must be in the future." });
   const quote = await prisma.quoteRequest.findUnique({ where: { id: quoteId }, include: { revisions: true } });
   if (!quote) throw new SalesError("That quote no longer exists.");
+  assertNotVoided(quote);
   const rev = customerRevisionOf(quote.revisions);
   if (!rev || rev.status !== "SENT") throw new SalesError("Only a sent, unanswered quote can be extended.");
   const reopen = quote.status === "EXPIRED";
@@ -776,12 +788,14 @@ export async function extendQuote(actor: Actor, quoteId: string, expiresAt: Date
 }
 
 /** Statuses an admin may set directly; the others result from sending, accepting and invoicing. */
-export const MANUAL_QUOTE_STATUSES: QuoteStatus[] = ["NEW", "REVIEWING", "DRAFT", "DECLINED", "EXPIRED", "CANCELED", "COMPLETED"];
+/** (Canceling is now "Void quote", which records who, when and why.) */
+export const MANUAL_QUOTE_STATUSES: QuoteStatus[] = ["NEW", "REVIEWING", "DRAFT", "DECLINED", "EXPIRED", "COMPLETED"];
 
 export async function setQuoteStatus(actor: Actor, quoteId: string, status: QuoteStatus, note: string | null) {
   if (!MANUAL_QUOTE_STATUSES.includes(status)) throw new SalesError("That status is set automatically.");
   const quote = await prisma.quoteRequest.findUnique({ where: { id: quoteId } });
   if (!quote) throw new SalesError("That quote no longer exists.");
+  if (quote.status === "VOIDED") throw new SalesError("This quote is voided. Reopen it (if allowed) or duplicate it instead.");
   if (quote.status === status) return;
   if (["ACCEPTED", "CONVERTED_TO_INVOICE"].includes(quote.status) && status !== "COMPLETED" && status !== "CANCELED") {
     throw new SalesError("This quote was accepted — manage it from its order.");
@@ -850,4 +864,68 @@ export async function setQuoteArchived(actor: Actor, quoteId: string, archived: 
   if (!quote) throw new SalesError("That quote no longer exists.");
   await prisma.quoteRequest.update({ where: { id: quoteId }, data: { archivedAt: archived ? new Date() : null } });
   await logActivity("quote.status_changed", `${actor.name} ${archived ? "archived" : "restored"} ${quote.number ?? quote.reference}`, { actorId: actor.id, entityType: "quote", entityId: quoteId });
+}
+
+/* ------------------------------------------------------------ voiding */
+
+function assertNotVoided(quote: { status: QuoteStatus }) {
+  if (quote.status === "VOIDED") throw new SalesError("This quote is voided and can't be changed, sent or accepted. Duplicate it to quote again.");
+}
+
+/**
+ * Void a quote: it stays in history with every revision, customer detail and
+ * acceptance record, but can no longer be accepted, invoiced or paid. A quote
+ * with a live order or an active invoice must have those dealt with first
+ * (cancel the order; void the invoices, refunding any payments), so money
+ * records always stay consistent.
+ */
+export async function voidQuote(actor: Actor, quoteId: string, reason: string) {
+  const quote = await prisma.quoteRequest.findUnique({ where: { id: quoteId }, include: { orders: true, invoices: true } });
+  if (!quote) throw new SalesError("That quote no longer exists.");
+  if (quote.status === "VOIDED") throw new SalesError("This quote is already voided.");
+  const label = quote.number ?? quote.reference;
+  const liveOrder = quote.orders.find((o) => o.productionStatus !== "CANCELED");
+  if (liveOrder) throw new SalesError(`Order ${liveOrder.number} was created from this quote. Cancel the order (and void or refund its invoices) before voiding the quote.`);
+  const liveInvoice = quote.invoices.find((i) => i.status !== "VOID" && i.status !== "CANCELED");
+  if (liveInvoice) throw new SalesError(`Invoice ${liveInvoice.number} is still active. Void it first${liveInvoice.amountPaidCents > 0 ? " — it has payments, so record a refund before voiding" : ""}.`);
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    // Conditional: loses cleanly to an acceptance arriving at the same moment.
+    const res = await tx.quoteRequest.updateMany({
+      where: { id: quoteId, status: quote.status },
+      data: { status: "VOIDED", voidedAt: now, voidedById: actor.id, voidReason: reason, voidedFromStatus: quote.status },
+    });
+    if (!res.count) throw new SalesError("This quote just changed. Reload the page and try again.");
+    await tx.statusEvent.create({ data: { quoteRequestId: quoteId, fromStatus: quote.status, toStatus: "VOIDED", authorId: actor.id } });
+    await recordCustomerActivity(tx, { customerId: quote.customerId, type: "quote.voided", message: `Quote ${label} voided: ${reason}`, quoteId, actorId: actor.id });
+  });
+  await logActivity("quote.voided", `${actor.name} voided quote ${label} (was ${QUOTE_STATUS_LABELS[quote.status]}). Reason: ${reason}`.slice(0, 480), { actorId: actor.id, entityType: "quote", entityId: quoteId });
+}
+
+/** Statuses a voided quote can safely return to. Anything that got as far as acceptance stays voided. */
+const REOPENABLE: QuoteStatus[] = ["NEW", "REVIEWING", "DRAFT", "SENT", "VIEWED", "DECLINED", "EXPIRED"];
+
+/**
+ * Owner/Admin: undo a void when nothing has happened since that would make
+ * the quote ambiguous. If it ever reached acceptance (order or invoices),
+ * duplicate it into a new quote instead.
+ */
+export async function reopenQuote(actor: Actor, quoteId: string) {
+  const quote = await prisma.quoteRequest.findUnique({ where: { id: quoteId }, include: { orders: { select: { id: true } }, invoices: { select: { id: true } } } });
+  if (!quote) throw new SalesError("That quote no longer exists.");
+  if (quote.status !== "VOIDED") throw new SalesError("Only a voided quote can be reopened.");
+  const label = quote.number ?? quote.reference;
+  const to = quote.voidedFromStatus;
+  if (!to || !REOPENABLE.includes(to) || quote.acceptedRevisionId || quote.orders.length || quote.invoices.length) {
+    throw new SalesError("This quote was accepted or invoiced before it was voided, so reopening it would be ambiguous. Duplicate it to create a new quote instead.");
+  }
+  await prisma.$transaction(async (tx) => {
+    const res = await tx.quoteRequest.updateMany({ where: { id: quoteId, status: "VOIDED" }, data: { status: to, voidedAt: null, voidedById: null, voidReason: null, voidedFromStatus: null } });
+    if (!res.count) throw new SalesError("This quote just changed. Reload the page and try again.");
+    await tx.statusEvent.create({ data: { quoteRequestId: quoteId, fromStatus: "VOIDED", toStatus: to, authorId: actor.id } });
+    await recordCustomerActivity(tx, { customerId: quote.customerId, type: "quote.reopened", message: `Quote ${label} reopened`, quoteId, actorId: actor.id });
+  });
+  await logActivity("quote.reopened", `${actor.name} reopened voided quote ${label} → ${QUOTE_STATUS_LABELS[to]} (it had been voided: ${quote.voidReason ?? "no reason"})`.slice(0, 480), { actorId: actor.id, entityType: "quote", entityId: quoteId });
+  // A sent quote may have passed its expiration while voided.
+  if (to === "SENT" || to === "VIEWED") await expireDueQuotes();
 }

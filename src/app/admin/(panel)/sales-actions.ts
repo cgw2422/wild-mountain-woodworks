@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
-import { AdminError, fd, permittedAction } from "@/lib/admin/action";
+import { AdminError, adminAction, fd, permittedAction } from "@/lib/admin/action";
 import type { ActionResult } from "@/lib/admin/types";
 import { parseDollarsToCents } from "@/lib/money";
 import { siteDateTime, siteDayStart } from "@/lib/site-time";
@@ -22,12 +22,15 @@ import {
   createRevision,
   duplicateQuote,
   extendQuote,
+  reopenQuote,
   resendQuote,
   saveRevision,
   sendQuote,
   setQuoteArchived,
   setQuoteStatus,
+  voidQuote,
 } from "@/lib/sales/quotes";
+import { voidReasonText } from "@/lib/sales/voiding";
 import { DELIVERY_STATUSES, PRODUCTION_STATUSES } from "@/lib/sales/status";
 import { DEPOSIT_TYPES, LINE_KINDS, MAX_LINES, MAX_LINE_QUANTITY, MAX_UNIT_PRICE_CENTS, parsePercentToBps } from "@/lib/sales/totals";
 import { emailSchema, nameSchema, phoneSchema } from "@/lib/validation/forms";
@@ -188,6 +191,23 @@ export const setQuoteStatusAction = permittedAction("sales", async (admin, quote
   await setQuoteStatus(admin, quoteId, status as (typeof MANUAL_QUOTE_STATUSES)[number], fd.opt(data, "note"));
   refreshSales("/admin/quotes", `/admin/quotes/${quoteId}`);
   return { ok: true, message: "Status updated." };
+});
+
+/** Never deleted: the quote stays in history but can't be accepted, invoiced or paid. */
+export const voidQuoteAction = permittedAction("sales", async (admin, quoteIdArg: string, data: FormData) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  const reason = voidReasonText(fd.str(data, "reason"), fd.opt(data, "details"));
+  await voidQuote(admin, quoteId, reason);
+  refreshSales("/admin/quotes", `/admin/quotes/${quoteId}`);
+  return { ok: true, message: "Quote voided — it stays in history but can no longer be accepted, invoiced or paid." };
+});
+
+/** Owner/Admin only, and only when nothing has happened that would make the quote ambiguous. */
+export const reopenQuoteAction = adminAction(async (admin, quoteIdArg: string) => {
+  const quoteId = idSchema.parse(quoteIdArg);
+  await reopenQuote(admin, quoteId);
+  refreshSales("/admin/quotes", `/admin/quotes/${quoteId}`);
+  return { ok: true, message: "Quote reopened." };
 });
 
 export const archiveQuoteAction = permittedAction("sales", async (admin, quoteIdArg: string, archived: boolean) => {
@@ -359,12 +379,14 @@ export const resendInvoiceAction = permittedAction("finance", async (admin, invo
   return emailOutcome(r, reminder ? "Reminder sent." : "Invoice sent again.");
 });
 
+/** Never deleted: voided with who/when/why. Paid invoices must be refunded first. */
 export const voidInvoiceAction = permittedAction("finance", async (admin, invoiceIdArg: string, data: FormData) => {
   const invoiceId = idSchema.parse(invoiceIdArg);
-  const reason = z.string().trim().min(3, "Give a short reason.").max(300).parse(fd.str(data, "reason"));
+  const reason = voidReasonText(fd.str(data, "reason"), fd.opt(data, "details"));
   await voidInvoice(admin, invoiceId, reason);
-  refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`);
-  return { ok: true, message: "Invoice voided." };
+  const inv = await prisma.invoice.findUnique({ where: { id: invoiceId }, select: { orderId: true } });
+  refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`, ...(inv?.orderId ? [`/admin/orders/${inv.orderId}`] : []));
+  return { ok: true, message: "Invoice voided — it stays in history but can no longer be paid." };
 });
 
 /* ================================================================ payments */

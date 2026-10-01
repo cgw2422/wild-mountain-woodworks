@@ -3,7 +3,7 @@
  * admin and customer UI can share them.
  */
 
-export const QUOTE_STATUSES = ["NEW", "REVIEWING", "DRAFT", "SENT", "VIEWED", "ACCEPTED", "DECLINED", "EXPIRED", "CONVERTED_TO_INVOICE", "CANCELED", "COMPLETED"] as const;
+export const QUOTE_STATUSES = ["NEW", "REVIEWING", "DRAFT", "SENT", "VIEWED", "ACCEPTED", "DECLINED", "EXPIRED", "CONVERTED_TO_INVOICE", "CANCELED", "COMPLETED", "VOIDED"] as const;
 export type QuoteStatusValue = (typeof QUOTE_STATUSES)[number];
 
 export const QUOTE_STATUS_LABELS: Record<QuoteStatusValue, string> = {
@@ -18,6 +18,7 @@ export const QUOTE_STATUS_LABELS: Record<QuoteStatusValue, string> = {
   CONVERTED_TO_INVOICE: "Invoiced",
   CANCELED: "Canceled",
   COMPLETED: "Completed",
+  VOIDED: "Voided",
 };
 
 /** Quotes that still need Wild Mountain to do something before sending. */
@@ -25,7 +26,7 @@ export const QUOTE_OPEN_STATUSES: QuoteStatusValue[] = ["NEW", "REVIEWING", "DRA
 /** Quotes waiting on the customer. */
 export const QUOTE_AWAITING_STATUSES: QuoteStatusValue[] = ["SENT", "VIEWED"];
 /** No further customer action is possible. */
-export const QUOTE_CLOSED_STATUSES: QuoteStatusValue[] = ["DECLINED", "EXPIRED", "CANCELED", "COMPLETED"];
+export const QUOTE_CLOSED_STATUSES: QuoteStatusValue[] = ["DECLINED", "EXPIRED", "CANCELED", "COMPLETED", "VOIDED"];
 
 export const REVISION_STATUS_LABELS = { DRAFT: "Draft", SENT: "Sent", SUPERSEDED: "Superseded", ACCEPTED: "Accepted", DECLINED: "Declined" } as const;
 
@@ -38,11 +39,17 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatusValue, string> = {
   PARTIALLY_PAID: "Partially paid",
   PAID: "Paid",
   PAST_DUE: "Past due",
-  VOID: "Void",
+  VOID: "Voided",
   CANCELED: "Canceled",
 };
 /** Invoices that still expect money. */
 export const INVOICE_UNPAID_STATUSES: InvoiceStatusValue[] = ["SENT", "OPEN", "PARTIALLY_PAID", "PAST_DUE"];
+
+/**
+ * Why a quote or invoice was voided (stored with the voiding admin and time).
+ * "Other" requires a short explanation.
+ */
+export const VOID_REASONS = ["Customer canceled", "Created in error", "Replaced by new quote", "Pricing mistake", "Duplicate record", "Other"] as const;
 
 export const INVOICE_KIND_LABELS = { DEPOSIT: "Deposit", BALANCE: "Final balance", FULL: "Full payment", CUSTOM: "Invoice" } as const;
 
@@ -144,7 +151,7 @@ const TONES: Record<string, Tone> = {
   PARTIALLY_PAID: "violet",
   PAID: "green",
   PAST_DUE: "red",
-  VOID: "neutral",
+  VOID: "red",
   UNPAID: "neutral",
   DEPOSIT_DUE: "amber",
   REFUNDED: "red",
@@ -156,7 +163,7 @@ const TONES: Record<string, Tone> = {
   SUCCEEDED: "green",
   PENDING: "amber",
   FAILED: "red",
-  VOIDED: "neutral",
+  VOIDED: "red",
   PARTIALLY_REFUNDED: "amber",
 };
 

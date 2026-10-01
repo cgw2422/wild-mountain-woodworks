@@ -84,9 +84,10 @@ export async function createInvoiceForOrder(
    */
   opts: { issue?: boolean; online?: boolean } = {},
 ) {
-  const order = await db.order.findUnique({ where: { id: orderId }, include: { quote: { select: { number: true } }, acceptedRevision: { include: { lineItems: { orderBy: { position: "asc" } } } } } });
+  const order = await db.order.findUnique({ where: { id: orderId }, include: { quote: { select: { number: true, status: true } }, acceptedRevision: { include: { lineItems: { orderBy: { position: "asc" } } } } } });
   if (!order) throw new SalesError("That order no longer exists.");
   if (order.productionStatus === "CANCELED") throw new SalesError("This order is canceled.");
+  if (order.quote?.status === "VOIDED") throw new SalesError(`Quote ${order.quote.number} is voided, so nothing can be invoiced from it.`);
   const already = await invoicedSoFar(db, orderId);
   const settings = await db.siteSetting.findUnique({ where: { id: "default" }, select: { invoiceDueDays: true } });
   const quoteRef = order.quote?.number ? ` (quote ${order.quote.number})` : "";
@@ -148,8 +149,10 @@ export async function createInvoiceForOrder(
 export async function createCustomInvoice(actor: Actor, input: { customerId: string; orderId?: string | null; lines: InvoiceLineInput[]; dueDate: Date | null; customerNotes: string | null }) {
   const customer = await prisma.customer.findUnique({ where: { id: input.customerId } });
   if (!customer) throw new SalesError("Customer not found.");
-  const order = input.orderId ? await prisma.order.findFirst({ where: { id: input.orderId, customerId: customer.id } }) : null;
+  const order = input.orderId ? await prisma.order.findFirst({ where: { id: input.orderId, customerId: customer.id }, include: { quote: { select: { number: true, status: true } } } }) : null;
   if (input.orderId && !order) throw new SalesError("That order doesn't belong to this customer.");
+  if (order?.productionStatus === "CANCELED") throw new SalesError("This order is canceled.");
+  if (order?.quote?.status === "VOIDED") throw new SalesError(`Quote ${order.quote.number} is voided, so nothing can be invoiced from it.`);
   const totals = totalsData(input.lines);
   if (totals.totalCents <= 0) throw new SalesError("The invoice total must be more than $0.");
   const settings = await getSettings();
@@ -334,8 +337,11 @@ export async function voidInvoice(actor: Actor, invoiceId: string, reason: strin
   }
   const now = new Date();
   await prisma.$transaction(async (tx) => {
-    await tx.invoice.update({ where: { id: invoiceId }, data: { status: "VOID", voidedAt: now, voidReason: reason, statusEvents: { create: { fromStatus: invoice.status, toStatus: "VOID", authorId: actor.id } } } });
+    // Conditional: a payment landing at the same moment wins and the void is refused.
+    const res = await tx.invoice.updateMany({ where: { id: invoiceId, status: invoice.status, amountPaidCents: 0 }, data: { status: "VOID", voidedAt: now, voidedById: actor.id, voidReason: reason } });
+    if (!res.count) throw new SalesError("This invoice just changed (a payment may have arrived). Reload and check before voiding.");
+    await tx.statusEvent.create({ data: { invoiceId, fromStatus: invoice.status, toStatus: "VOID", authorId: actor.id } });
     await recordCustomerActivity(tx, { customerId: invoice.customerId, type: "invoice.voided", message: `Invoice ${invoice.number} voided: ${reason}`, invoiceId, orderId: invoice.orderId, actorId: actor.id });
   });
-  await logActivity("invoice.voided", `${actor.name} voided invoice ${invoice.number}: ${reason}`, { actorId: actor.id, entityType: "invoice", entityId: invoiceId });
+  await logActivity("invoice.voided", `${actor.name} voided invoice ${invoice.number} (${formatCents(invoice.totalCents)}, was ${invoice.status.toLowerCase().replace(/_/g, " ")}). Reason: ${reason}`.slice(0, 480), { actorId: actor.id, entityType: "invoice", entityId: invoiceId });
 }

@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import type { InvoiceStatus, Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { cn } from "@/lib/cn";
 import { markPastDueInvoices } from "@/lib/sales/ledger";
 import { INVOICE_KIND_LABELS } from "@/lib/sales/status";
+import { INVOICE_TABS, invoiceListWhere } from "@/lib/sales/list-filters";
 import { EmptyState, PageHeader, formatDate, table } from "@/components/admin/ui";
 import { FilterTabs, PAGE_SIZE, Pagination, SearchBox, listHref, pageParam, param } from "@/components/admin/inbox/ListControls";
 import { Money } from "@/components/admin/sales/Money";
@@ -14,42 +14,29 @@ import { SalesBadge } from "@/components/admin/sales/SalesBadge";
 export const metadata: Metadata = { title: "Invoices" };
 
 const BASE = "/admin/invoices";
-const TABS: Array<{ key: string; label: string; statuses?: InvoiceStatus[] }> = [
-  { key: "", label: "All" },
-  { key: "draft", label: "Drafts", statuses: ["DRAFT"] },
-  { key: "unpaid", label: "Unpaid", statuses: ["SENT", "OPEN", "PARTIALLY_PAID", "PAST_DUE"] },
-  { key: "pastdue", label: "Past due", statuses: ["PAST_DUE"] },
-  { key: "paid", label: "Paid", statuses: ["PAID"] },
-  { key: "void", label: "Void", statuses: ["VOID", "CANCELED"] },
-];
 
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requirePermission("finance");
   await markPastDueInvoices();
   const sp = await searchParams;
-  const key = TABS.find((t) => t.key === param(sp, "status"))?.key ?? "";
-  const tab = TABS.find((t) => t.key === key)!;
+  const key = INVOICE_TABS.find((t) => t.key === param(sp, "status"))?.key ?? "";
   const q = param(sp, "q").slice(0, 100);
   const page = pageParam(sp);
-  const search: Prisma.InvoiceWhereInput = q
-    ? { OR: [{ number: { contains: q, mode: "insensitive" } }, { customerName: { contains: q, mode: "insensitive" } }, { customerEmail: { contains: q, mode: "insensitive" } }, { order: { number: { contains: q, mode: "insensitive" } } }] }
-    : {};
-  const where: Prisma.InvoiceWhereInput = { ...search, ...(tab.statuses ? { status: { in: tab.statuses } } : {}) };
-  const [rows, total, grouped] = await Promise.all([
+  const where = invoiceListWhere(key, q);
+  const [rows, total, counts] = await Promise.all([
     prisma.invoice.findMany({ where, orderBy: { createdAt: "desc" }, skip: (page - 1) * PAGE_SIZE, take: PAGE_SIZE, include: { order: { select: { number: true } } } }),
     prisma.invoice.count({ where }),
-    prisma.invoice.groupBy({ by: ["status"], where: search, _count: true }),
+    Promise.all(INVOICE_TABS.map((t) => prisma.invoice.count({ where: invoiceListWhere(t.key, q) }))),
   ]);
-  const countFor = (statuses?: InvoiceStatus[]) => grouped.filter((g) => !statuses || statuses.includes(g.status)).reduce((s, g) => s + g._count, 0);
   return (
     <>
-      <PageHeader title="Invoices" description="Deposit, balance and custom invoices. Paid online through Stripe (when enabled) or recorded manually." />
+      <PageHeader title="Invoices" description="Deposit, balance and custom invoices. Paid online through Stripe (when enabled) or recorded manually. Invoices are never deleted — void them instead (they stay under Voided and in search)." />
       <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <FilterTabs active={key} tabs={TABS.map((t) => ({ key: t.key, label: t.label, count: countFor(t.statuses), href: listHref(BASE, { status: t.key, q }) }))} />
-        <SearchBox action={BASE} q={q} placeholder="Invoice, order, name or email" hidden={{ status: key }} />
+        <FilterTabs active={key} tabs={INVOICE_TABS.map((t, i) => ({ key: t.key, label: t.label, count: counts[i], href: listHref(BASE, { status: t.key, q }) }))} />
+        <SearchBox action={BASE} q={q} placeholder="Invoice, quote or order number, customer or email" hidden={{ status: key }} />
       </div>
       {rows.length === 0 ? (
-        <EmptyState title={q || key ? "No matching invoices" : "No invoices yet"} description={q || key ? "Try a different search or filter." : "A draft deposit invoice is created automatically when a customer accepts a quote."} />
+        <EmptyState title={q || key ? "No matching invoices" : "No invoices yet"} description={q || key ? "Try a different search or filter." : "A deposit request is created automatically when a customer accepts a quote."} />
       ) : (
         <>
           <div className={table.wrap}>

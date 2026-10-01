@@ -34,7 +34,29 @@ export default async function CustomerQuotePage({ params }: Props) {
   const rev = q.revision;
   const contactHref = `/contact?reason=EXISTING_QUOTE&quote=${encodeURIComponent(q.number)}`;
 
+  // A voided quote stays readable for the customer's records, but nothing on it can be accepted or paid.
+  const voidedNotice = q.voided ? (
+    <div role="alert" className="mt-8 border border-error/40 bg-paper px-5 py-5 md:px-6">
+      <p className="text-[0.78rem] font-semibold uppercase tracking-[0.16em] text-error">Quote voided</p>
+      <p className="mt-2 text-[0.98rem]">
+        This quote is no longer valid. Please{" "}
+        <Link href={contactHref} className="underline underline-offset-2">
+          contact {q.business.name}
+        </Link>{" "}
+        if you need an updated quote.
+      </p>
+    </div>
+  ) : null;
+
   if (!rev) {
+    if (q.voided) {
+      return (
+        <>
+          <DocHeading eyebrow={`Quote ${q.number}`} title="This quote is no longer valid" status={statusPill(q.status)} />
+          {voidedNotice}
+        </>
+      );
+    }
     return (
       <>
         <DocHeading eyebrow={`Quote ${q.number}`} title="We're preparing your quote" />
@@ -46,7 +68,7 @@ export default async function CustomerQuotePage({ params }: Props) {
     );
   }
 
-  const accepted = rev.status === "ACCEPTED";
+  const accepted = rev.status === "ACCEPTED" && !q.voided;
   const depositInvoice = q.invoices.find((i) => i.kind === "DEPOSIT");
   return (
     <article>
@@ -57,7 +79,8 @@ export default async function CustomerQuotePage({ params }: Props) {
         </p>
       </DocHeading>
 
-      {q.blocker && !accepted ? (
+      {voidedNotice}
+      {q.blocker && !accepted && !q.voided ? (
         <p role="note" className="mt-8 border-l-2 border-bronze bg-paper px-5 py-4 text-[0.98rem]">
           {q.blocker}{" "}
           <Link href={contactHref} className="underline underline-offset-2">

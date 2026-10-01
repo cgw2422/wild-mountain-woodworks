@@ -549,6 +549,8 @@ enum QuoteStatus {
   CONVERTED_TO_INVOICE
   CANCELED
   COMPLETED
+  /// No longer valid: kept forever, but can't be accepted, invoiced or paid.
+  VOIDED
 }
 
 /// Status of one revision of a quote. Only the current revision can be
@@ -609,6 +611,11 @@ model QuoteRequest {
   quantity            Int         @default(1)
   address             String?
   archivedAt          DateTime?
+  /// Voiding (never deleting): who, when, why, and the status to restore on reopen.
+  voidedAt            DateTime?
+  voidedById          String?
+  voidReason          String?
+  voidedFromStatus    QuoteStatus?
   createdById         String?
   source              QuoteSource @default(CONFIGURATOR)
   name                String
@@ -1462,6 +1469,7 @@ model Invoice {
   sentAt                 DateTime?
   paidAt                 DateTime?
   voidedAt               DateTime?
+  voidedById             String?
   voidReason             String?
   createdById            String?
   createdAt              DateTime       @default(now())

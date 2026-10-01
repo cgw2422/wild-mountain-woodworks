@@ -19,6 +19,7 @@ import { ImageField } from "@/components/admin/media/ImageField";
 import { CopyButton } from "@/components/admin/sales/CopyButton";
 import { EmailLogCard } from "@/components/admin/sales/EmailLogCard";
 import { FormDialog } from "@/components/admin/sales/FormDialog";
+import { VoidReasonFields } from "@/components/admin/sales/VoidReasonFields";
 import { Money } from "@/components/admin/sales/Money";
 import { RevisionLines } from "@/components/admin/sales/RevisionLines";
 import { SalesBadge } from "@/components/admin/sales/SalesBadge";
@@ -189,7 +190,7 @@ export default async function OrderDetailPage({ params }: Props) {
                         variant="small"
                         submitVariant="danger"
                       >
-                        <TextInput label="Reason" name="reason" required maxLength={300} />
+                        <VoidReasonFields />
                       </FormDialog>
                     ) : null}
                   </div>

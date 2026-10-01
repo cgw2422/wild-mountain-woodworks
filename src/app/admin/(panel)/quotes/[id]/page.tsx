@@ -23,6 +23,7 @@ import { ImageField } from "@/components/admin/media/ImageField";
 import { CopyButton } from "@/components/admin/sales/CopyButton";
 import { EmailLogCard } from "@/components/admin/sales/EmailLogCard";
 import { FormDialog } from "@/components/admin/sales/FormDialog";
+import { VoidReasonFields } from "@/components/admin/sales/VoidReasonFields";
 import { Money } from "@/components/admin/sales/Money";
 import { QuoteEditor } from "@/components/admin/sales/QuoteEditor";
 import { RevisionLines } from "@/components/admin/sales/RevisionLines";
@@ -33,6 +34,8 @@ import {
   acceptQuoteManuallyAction,
   addSalesAttachmentAction,
   archiveQuoteAction,
+  reopenQuoteAction,
+  voidQuoteAction,
   createRevisionAction,
   duplicateQuoteAction,
   extendQuoteAction,
@@ -88,7 +91,10 @@ export default async function QuoteDetailPage({ params }: Props) {
   const customerRev = customerRevisionOf(quote.revisions);
   const snapshot = parseSnapshot(quote.configuration);
   const link = quote.customerToken ? customerLinks.quote(quote.customerToken) : null;
-  const closed = ["ACCEPTED", "CONVERTED_TO_INVOICE", "COMPLETED", "CANCELED"].includes(quote.status);
+  const voided = quote.status === "VOIDED";
+  const closed = ["ACCEPTED", "CONVERTED_TO_INVOICE", "COMPLETED", "CANCELED", "VOIDED"].includes(quote.status);
+  const voidedBy = quote.voidedById ? await prisma.adminUser.findUnique({ where: { id: quote.voidedById }, select: { name: true } }) : null;
+  const canReopen = voided && (admin.role === "OWNER" || admin.role === "ADMIN");
   const editable = current.status === "DRAFT" && !closed && canPrice;
   const accepted = quote.revisions.find((r) => r.status === "ACCEPTED");
   const acceptedSnap = accepted?.acceptedSnapshot as AcceptedSnapshot | null | undefined;
@@ -143,6 +149,31 @@ export default async function QuoteDetailPage({ params }: Props) {
           </>
         }
       />
+      {voided ? (
+        <div role="alert" className="mb-6 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="font-semibold">VOIDED — this quote is no longer valid.</p>
+              <p className="mt-1">
+                Voided {quote.voidedAt ? formatDate(quote.voidedAt, true) : ""}
+                {voidedBy ? ` by ${voidedBy.name}` : ""}
+                {quote.voidReason ? ` · Reason: ${quote.voidReason}` : ""}. It stays in history with every revision, but can&apos;t be accepted, invoiced or paid, and the customer sees it as no longer valid.
+              </p>
+            </div>
+            {canReopen ? (
+              <ConfirmAction
+                action={reopenQuoteAction.bind(null, quote.id)}
+                label="Reopen quote"
+                title={`Reopen quote ${title}?`}
+                body="It returns to the status it had before it was voided. Only possible if it was never accepted or invoiced — otherwise duplicate it into a new quote."
+                confirmLabel="Reopen"
+                variant="secondary"
+                confirmVariant="primary"
+              />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-6 lg:col-span-2">
@@ -356,16 +387,31 @@ export default async function QuoteDetailPage({ params }: Props) {
                   <TextInput label="Valid through" name="expiresOn" type="date" required />
                 </FormDialog>
               ) : null}
+              {!voided ? (
               <FormDialog label="Change status" title="Change quote status" description="Sent, viewed, accepted and invoiced are set automatically by the workflow." action={setQuoteStatusAction.bind(null, quote.id)} submitLabel="Update status">
                 <Select label="Status" name="status" defaultValue={MANUAL_QUOTE_STATUSES.includes(quote.status) ? quote.status : "REVIEWING"} options={MANUAL_QUOTE_STATUSES.map((s) => ({ value: s, label: QUOTE_STATUS_LABELS[s] }))} />
                 <TextArea label="Internal note (optional)" name="note" rows={2} maxLength={1000} />
               </FormDialog>
+              ) : null}
               {canPrice ? (
                 <ConfirmAction action={duplicateQuoteAction.bind(null, quote.id)} label="Duplicate quote" title="Duplicate this quote?" body="Creates a new draft quote with a new number and link, copying the lines, terms and customer. Acceptance, invoices and payments are never copied." confirmLabel="Duplicate" confirmVariant="primary" redirectToId="/admin/quotes/" />
               ) : null}
               <Link href={`/admin/pricing-calculator?quote=${quote.id}`} className={adminButton.secondary}>
                 Price in calculator
               </Link>
+              {!voided ? (
+                <FormDialog
+                  label="Void quote"
+                  title={`Void quote ${title}?`}
+                  description="This quote will remain in history but can no longer be accepted, invoiced, or used for payment. Nothing is deleted."
+                  action={voidQuoteAction.bind(null, quote.id)}
+                  submitLabel="Void quote"
+                  variant="ghost"
+                  submitVariant="danger"
+                >
+                  <VoidReasonFields />
+                </FormDialog>
+              ) : null}
               <ConfirmAction
                 action={archiveQuoteAction.bind(null, quote.id, !quote.archivedAt)}
                 label={quote.archivedAt ? "Restore from archive" : "Archive"}

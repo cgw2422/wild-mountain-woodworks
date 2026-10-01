@@ -60,7 +60,7 @@ export async function loadCustomerQuote(token: string) {
     include: {
       revisions: { include: { lineItems: true } },
       orders: { select: { customerToken: true, number: true }, take: 1, orderBy: { createdAt: "asc" } },
-      invoices: { where: { status: { notIn: ["DRAFT", "VOID", "CANCELED"] } }, select: { number: true, kind: true, status: true, totalCents: true, amountPaidCents: true, publicToken: true, stripeHostedInvoiceUrl: true }, orderBy: { createdAt: "asc" } },
+      invoices: { where: { status: { not: "DRAFT" } }, select: { number: true, kind: true, status: true, totalCents: true, amountPaidCents: true, publicToken: true, stripeHostedInvoiceUrl: true }, orderBy: { createdAt: "asc" } },
       files: { where: { customerVisible: true }, include: { media: { select: { url: true, originalName: true, mimeType: true } } } },
     },
   });
@@ -96,6 +96,8 @@ export async function loadCustomerQuote(token: string) {
         }
       : null,
     blocker: acceptBlocker(quote, rev),
+    /** Voided quotes stay viewable for the customer's records but can't be accepted or paid. */
+    voided: quote.status === "VOIDED",
     /** Whether accepting continues straight to the secure online deposit payment. */
     onlinePayments: stripe,
     /** Settings → Payments wording (financing / methods); empty when online payments are off. */

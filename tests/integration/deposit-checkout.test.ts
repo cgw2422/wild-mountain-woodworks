@@ -378,7 +378,7 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     expect((await prisma.emailLog.findFirstOrThrow({ where: { template: "deposit_payment_request" } })).html).toContain(`/order/${order.customerToken}/pay`);
     expect(await prisma.activityLog.count({ where: { type: "payment.link_sent" } })).toBe(1);
 
-    expect(await sales.voidInvoiceAction(deposit.id, form({ reason: "Customer will pay in person" }))).toMatchObject({ ok: true });
+    expect(await sales.voidInvoiceAction(deposit.id, form({ reason: "Other", details: "Customer will pay in person" }))).toMatchObject({ ok: true });
     expect(stripe.calls).toContain(`expire:${s.id}`);
     expect(await prisma.invoice.findUniqueOrThrow({ where: { id: deposit.id } })).toMatchObject({ status: "VOID", stripeCheckoutStatus: "expired" });
     expect(await checkout.startDepositCheckout(order.customerToken!)).toEqual({ kind: "nothing_due" });

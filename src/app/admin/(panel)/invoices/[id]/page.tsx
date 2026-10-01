@@ -16,6 +16,7 @@ import { StatusHistory } from "@/components/admin/inbox/StatusHistory";
 import { CopyButton } from "@/components/admin/sales/CopyButton";
 import { EmailLogCard } from "@/components/admin/sales/EmailLogCard";
 import { FormDialog } from "@/components/admin/sales/FormDialog";
+import { VoidReasonFields } from "@/components/admin/sales/VoidReasonFields";
 import { InvoiceEditor } from "@/components/admin/sales/InvoiceEditor";
 import { Money } from "@/components/admin/sales/Money";
 import { RevisionLines } from "@/components/admin/sales/RevisionLines";
@@ -55,6 +56,7 @@ export default async function InvoiceDetailPage({ params }: Props) {
   const flags = salesFlags(settings);
   const draft = invoice.status === "DRAFT";
   const closed = ["VOID", "CANCELED"].includes(invoice.status);
+  const voidedBy = invoice.voidedById ? await prisma.adminUser.findUnique({ where: { id: invoice.voidedById }, select: { name: true } }) : null;
   const owed = invoice.totalCents - invoice.amountPaidCents;
   const link = invoice.publicToken ? customerLinks.invoice(invoice.publicToken) : null;
   const payLink = invoice.stripeHostedInvoiceUrl ?? link;
@@ -110,6 +112,16 @@ export default async function InvoiceDetailPage({ params }: Props) {
           </>
         }
       />
+      {closed ? (
+        <div role="alert" className="mb-6 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <p className="font-semibold">VOIDED — this invoice can no longer be paid.</p>
+          <p className="mt-1">
+            {invoice.voidedAt ? `Voided ${formatDate(invoice.voidedAt, true)}` : "Voided"}
+            {voidedBy ? ` by ${voidedBy.name}` : ""}
+            {invoice.voidReason ? ` · Reason: ${invoice.voidReason}` : ""}. Its number, lines, payments and Stripe records are kept. Create a new invoice if something is still owed.
+          </p>
+        </div>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-6 lg:col-span-2">
@@ -257,11 +269,25 @@ export default async function InvoiceDetailPage({ params }: Props) {
               <p className="text-sm text-neutral-500">Not in Stripe.</p>
             )}
           </Card>
-          {!closed && invoice.amountPaidCents === 0 ? (
-            <Card title="Void">
-              <FormDialog label="Void invoice" title="Void this invoice?" description={`It stays on record, marked void, and the customer's link shows it as void.${invoice.stripeInvoiceId ? " The Stripe invoice is voided too." : ""}`} action={voidInvoiceAction.bind(null, invoice.id)} submitLabel="Void invoice" variant="danger" submitVariant="danger">
-                <TextInput label="Reason" name="reason" required maxLength={300} />
-              </FormDialog>
+          {!closed ? (
+            <Card title="Void invoice" description="Invoices are never deleted. Voiding keeps it (with its number, lines and history) but it can no longer be paid.">
+              {invoice.amountPaidCents === 0 ? (
+                <FormDialog
+                  label="Void invoice"
+                  title={`Void invoice ${invoice.number}?`}
+                  description={`This invoice will remain in history but can no longer be paid.${invoice.stripeInvoiceId ? " The Stripe invoice is voided too." : ""}${invoice.stripeCheckoutSessionId ? " Any open online checkout is closed." : ""} Its number is never reused.`}
+                  action={voidInvoiceAction.bind(null, invoice.id)}
+                  submitLabel="Void invoice"
+                  variant="danger"
+                  submitVariant="danger"
+                >
+                  <VoidReasonFields />
+                </FormDialog>
+              ) : (
+                <p className="text-sm text-neutral-600">
+                  Money has been received on this invoice, so it can&apos;t be voided — that would make the payment history inconsistent. Record a refund for each payment (or void a mistaken manual entry) first.
+                </p>
+              )}
             </Card>
           ) : null}
           <Card title="History">
