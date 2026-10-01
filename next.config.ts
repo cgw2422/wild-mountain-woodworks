@@ -21,23 +21,28 @@ function r2RemotePattern() {
   }
 }
 
-const csp = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
-  // Product videos: R2 public URL (https) or local /media-files; blob: for
-  // the admin's in-browser poster capture.
-  "media-src 'self' blob: https:",
-  "font-src 'self' data:",
-  "connect-src 'self'" + (isDev ? " ws: wss:" : ""),
-  // Payments happen on Stripe-hosted invoice pages (plain links), never embedded.
-  "frame-src 'self'",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-].join("; ");
+function buildCsp(stripeMessaging = false) {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}${stripeMessaging ? " https://js.stripe.com" : ""}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    // Product videos: R2 public URL (https) or local /media-files; blob: for
+    // the admin's in-browser poster capture.
+    "media-src 'self' blob: https:",
+    "font-src 'self' data:",
+    "connect-src 'self'" + (isDev ? " ws: wss:" : "") + (stripeMessaging ? " https://api.stripe.com" : ""),
+    // Payments happen on Stripe-hosted pages (Checkout / invoices), never
+    // embedded. The only Stripe frame is the read-only Payment Method
+    // Messaging Element (Affirm/Klarna eligibility) on quote and order pages.
+    "frame-src 'self'" + (stripeMessaging ? " https://js.stripe.com https://*.js.stripe.com" : ""),
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+  ].join("; ");
+}
+const csp = buildCsp();
 
 const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
@@ -87,6 +92,9 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "no-referrer" },
         ],
       })),
+      // Quote and order pages may show Stripe's financing messaging (Stripe.js
+      // + its iframe). Every other page keeps the strict default policy.
+      ...["/quote/:path*", "/order/:path*"].map((source) => ({ source, headers: [{ key: "Content-Security-Policy", value: buildCsp(true) }] })),
     ];
   },
 };

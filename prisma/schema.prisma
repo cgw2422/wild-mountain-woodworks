@@ -1031,6 +1031,17 @@ model SiteSetting {
   /// How to pay offline (check payable to…, bank transfer details). Shown on
   /// invoices and invoice emails when Stripe invoicing is off.
   paymentInstructions          String?
+  /// Customer-facing payment messaging only. These never enable or disable a
+  /// payment method in Stripe — Stripe Checkout decides what's eligible.
+  /// Shown only while online payments (Stripe) are on.
+  paymentFinancingMessaging    Boolean  @default(true)
+  paymentAffirmMessaging       Boolean  @default(true)
+  paymentKlarnaMessaging       Boolean  @default(true)
+  paymentMethodsMessaging      Boolean  @default(true)
+  paymentMessagingHeading      String   @default("Flexible payment options available")
+  /// Null = automatic wording from the Affirm/Klarna switches.
+  paymentMessagingText         String?
+  paymentMethodsText           String   @default("Card · Bank · Apple Pay · Link · Cash App Pay · Amazon Pay · Affirm · Klarna")
   /// Dashboard alert: NEW quotes older than this many days.
   quoteAlertDays               Int      @default(3)
   // Internal pricing calculator defaults (never shown publicly)

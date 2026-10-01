@@ -8,6 +8,7 @@ import { customerOrderView } from "@/lib/sales/views";
 import { siteDateLong } from "@/lib/site-time";
 import { buttonClasses } from "@/components/ui/Button";
 import { DocHeading, Facts, Files, Prose, Section, statusPill } from "@/components/documents/parts";
+import { FinancingNotice } from "@/components/payments/PaymentOptions";
 
 type Props = { params: Promise<{ token: string }>; searchParams: Promise<{ payment?: string }> };
 
@@ -58,11 +59,16 @@ export default async function CustomerOrderPage({ params, searchParams }: Props)
             <p className="mt-4 text-muted">Stripe has your payment and is confirming it with us. This page will update shortly.</p>
           ) : o.deposit.payHref ? (
             <>
+              <FinancingNotice
+                className="mt-5"
+                messaging={o.paymentMessaging}
+                stripe={o.stripePublishableKey ? { publishableKey: o.stripePublishableKey, amountCents: o.deposit.dueCents } : null}
+              />
               {/* A plain link: the server opens a fresh, correctly priced Stripe Checkout each time. */}
               <a href={o.deposit.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
                 Pay {formatCents(o.deposit.dueCents, { showZeroCents: true })} Deposit
               </a>
-              <p className="mt-3 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page. Your card details are never stored by Wild Mountain.</p>
+              <p className="mt-3 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page, which shows the payment options available to you. Wild Mountain never stores your payment details.</p>
             </>
           ) : o.deposit.instructions ? (
             <div className="mt-4 whitespace-pre-line leading-relaxed text-charcoal-muted">{o.deposit.instructions}</div>

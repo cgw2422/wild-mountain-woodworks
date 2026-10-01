@@ -16,6 +16,8 @@ import {
 } from "@/components/admin/content/validation";
 import { AdminLinkButton, Badge, Card, PageHeader, formatDate } from "@/components/admin/ui";
 import { editorMediaSelect } from "../pages/data";
+import { defaultFinancingText } from "@/lib/payments/messaging";
+import { stripePublishableKey } from "@/lib/sales/stripe";
 import { saveSettings } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -65,6 +67,7 @@ export default async function SettingsPage() {
           ["seo", "SEO"],
           ["quotes", "Pricing & quotes"],
           ["sales", "Quotes & invoices"],
+          ["payments", "Payments"],
           ["features", "Features"],
           ["security", "Security"],
           ["system", "System status"],
@@ -191,6 +194,46 @@ export default async function SettingsPage() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-100 pt-4">
               <AdminLinkButton href="/admin/settings/emails">Edit email templates</AdminLinkButton>
               <SubmitButton>Save quote &amp; invoice defaults</SubmitButton>
+            </div>
+          </ActionForm>
+        </Card>
+
+        <Card
+          id="payments"
+          title="Payments"
+          description="What customers are told about payment options on product, quote and order pages. These switches only change wording — they never turn a payment method on or off. Which methods a customer actually sees (card, bank, wallets, Affirm, Klarna…) is decided by your Stripe settings and each customer's eligibility at checkout."
+        >
+          <ActionForm action={saveSettings.bind(null, "payments")} className="space-y-5">
+            <p role="note" className="rounded bg-neutral-50 p-3 text-sm text-neutral-700">
+              {flags.onlinePayments ? (
+                <>Online payments are <Badge tone="green">ON</Badge> — this messaging is shown to customers.</>
+              ) : (
+                <>Online payments are <Badge tone="neutral">OFF</Badge> — nothing here is shown until they&apos;re on (see Features below), since there&apos;s no online checkout yet.</>
+              )}
+              <span className="mt-2 block text-xs text-neutral-600">
+                Stripe&apos;s own Affirm/Klarna messaging (eligible plans for the exact deposit, with their official marks) on quote and order pages:{" "}
+                {stripePublishableKey() ? <Badge tone="green">Configured</Badge> : <>off — your developer can set <code>STRIPE_PUBLISHABLE_KEY</code> to turn it on.</>} Product pages always use the wording below, without amounts.
+              </span>
+            </p>
+            <Toggle name="paymentFinancingMessaging" label="Show financing messaging" defaultChecked={settings.paymentFinancingMessaging} description="A small “Flexible payment options available” note under the request button on product pages, and before the deposit payment on quotes and orders." />
+            <div className="grid gap-5 border-l-2 border-neutral-200 pl-4 md:grid-cols-2">
+              <Toggle name="paymentAffirmMessaging" label="Mention Affirm" defaultChecked={settings.paymentAffirmMessaging} description="Only if Affirm is enabled in your Stripe account." />
+              <Toggle name="paymentKlarnaMessaging" label="Mention Klarna" defaultChecked={settings.paymentKlarnaMessaging} description="Only if Klarna is enabled in your Stripe account." />
+            </div>
+            <TextInput name="paymentMessagingHeading" label="Financing heading" defaultValue={settings.paymentMessagingHeading} maxLength={80} required />
+            <TextArea
+              name="paymentMessagingText"
+              label="Payment messaging text"
+              rows={2}
+              defaultValue={s(settings.paymentMessagingText)}
+              maxLength={300}
+              placeholder={defaultFinancingText(["affirm", "klarna"])}
+              help="Leave blank for automatic wording that follows the Affirm/Klarna switches. Always say “when eligible”; specific terms (monthly amounts, number of payments, rates, approval) are refused — Stripe shows eligible plans at checkout. “Final payment options are shown securely at checkout.” is always added."
+            />
+            <Toggle name="paymentMethodsMessaging" label="Show general payment methods" defaultChecked={settings.paymentMethodsMessaging} description="A secondary “Secure payment options may include: …” line, always followed by “Payment options vary by eligibility, device and transaction.”" />
+            <TextInput name="paymentMethodsText" label="Payment methods list" defaultValue={settings.paymentMethodsText} maxLength={200} required help="Separate with · or commas. Affirm and Klarna are left out automatically when their switch is off." />
+            <div className="flex justify-end border-t border-neutral-100 pt-4">
+              <SubmitButton>Save payment messaging</SubmitButton>
             </div>
           </ActionForm>
         </Card>

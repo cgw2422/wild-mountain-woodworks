@@ -8,6 +8,7 @@ import { revalidateSite } from "@/lib/revalidate";
 import type { Prisma } from "@/generated/prisma/client";
 import { parseDollarsToCents } from "@/lib/money";
 import { parsePercentToBps } from "@/lib/sales/totals";
+import { financingClaimIssue } from "@/lib/payments/messaging";
 import {
   SEO_DESCRIPTION_MAX,
   SEO_TITLE_MAX,
@@ -57,6 +58,18 @@ const SECTIONS = {
     label: "feature flags",
     schema: z.object({ showPrices: z.boolean(), quotesEnabled: z.boolean(), customOrdersEnabled: z.boolean(), stripeInvoicingEnabled: z.boolean(), taxEnabled: z.boolean() }),
   },
+  payments: {
+    label: "payment messaging",
+    schema: z.object({
+      paymentFinancingMessaging: z.boolean(),
+      paymentAffirmMessaging: z.boolean(),
+      paymentKlarnaMessaging: z.boolean(),
+      paymentMethodsMessaging: z.boolean(),
+      paymentMessagingHeading: reqText(80, "Enter a short heading."),
+      paymentMessagingText: optText(300),
+      paymentMethodsText: reqText(200, "List at least one payment method."),
+    }),
+  },
   sales: {
     label: "quote & invoice defaults",
     schema: z.object({
@@ -74,7 +87,28 @@ const SECTIONS = {
 } as const;
 type SettingsSection = keyof typeof SECTIONS;
 
-const BOOLEAN_FIELDS = new Set(["showPrices", "quotesEnabled", "customOrdersEnabled", "stripeInvoicingEnabled", "taxEnabled"]);
+const BOOLEAN_FIELDS = new Set([
+  "showPrices",
+  "quotesEnabled",
+  "customOrdersEnabled",
+  "stripeInvoicingEnabled",
+  "taxEnabled",
+  "paymentFinancingMessaging",
+  "paymentAffirmMessaging",
+  "paymentKlarnaMessaging",
+  "paymentMethodsMessaging",
+]);
+
+/** Customer wording may say "when eligible", never promise plans, rates or approval. */
+function checkPaymentClaims(parsed: Record<string, unknown>) {
+  const fieldErrors: Record<string, string> = {};
+  for (const key of ["paymentMessagingHeading", "paymentMessagingText", "paymentMethodsText"]) {
+    const issue = financingClaimIssue(parsed[key] as string | null);
+    if (issue) fieldErrors[key] = issue;
+  }
+  const first = Object.values(fieldErrors)[0];
+  if (first) throw new AdminError(first, fieldErrors);
+}
 
 /** Deposit defaults arrive as text ("50", "250.00"); store basis points / cents. */
 function salesData(parsed: Record<string, unknown>): Record<string, unknown> {
@@ -101,6 +135,7 @@ export const saveSettings = adminAction(async (admin, section: SettingsSection, 
   for (const key of Object.keys(def.schema.shape)) raw[key] = BOOLEAN_FIELDS.has(key) ? fd.bool(data, key) : fd.str(data, key);
   let parsed = def.schema.parse(raw) as Record<string, unknown>;
   if (section === "sales") parsed = salesData(parsed);
+  if (section === "payments") checkPaymentClaims(parsed);
   if (section === "seo" && parsed.defaultOgImageId) {
     const exists = await prisma.media.findUnique({ where: { id: parsed.defaultOgImageId as string }, select: { id: true } });
     if (!exists) throw new AdminError("The selected image was deleted. Please choose another.");

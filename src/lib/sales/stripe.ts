@@ -87,7 +87,10 @@ function toSessionInfo(o: StripeObject): CheckoutSessionInfo {
 /**
  * Form parameters for a deposit Checkout Session. Deliberately never sets
  * setup_future_usage, saved_payment_method_options or a Stripe Customer,
- * so no payment method is saved for later or off-session use.
+ * so no payment method is saved for later or off-session use. It also never
+ * sets payment_method_types: Stripe's dynamic payment methods show whatever
+ * is enabled in the Dashboard and eligible for this customer and amount
+ * (card, bank, wallets, Affirm, Klarna…).
  */
 export function checkoutSessionParams(c: CreateCheckoutInput): Record<string, string> {
   const params: Record<string, string> = {
@@ -242,4 +245,15 @@ export function verifyStripeWebhook<T = StripeEvent>(payload: string, signatureH
   });
   if (!ok) throw new Error("Invalid Stripe webhook signature");
   return JSON.parse(payload) as T;
+}
+
+/**
+ * Publishable key for Stripe's read-only Payment Method Messaging Element
+ * (Affirm/Klarna eligibility shown on quote and order pages). Publishable
+ * keys are public by design; optional — without it customers see our
+ * term-free wording only.
+ */
+export function stripePublishableKey(): string | null {
+  const key = process.env.STRIPE_PUBLISHABLE_KEY?.trim();
+  return key && /^pk_(live|test)_[A-Za-z0-9]+$/.test(key) ? key : null;
 }

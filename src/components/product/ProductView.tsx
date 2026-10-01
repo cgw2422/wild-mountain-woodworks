@@ -19,6 +19,8 @@ import { ProductGallery } from "./ProductGallery";
 import { PriceTag } from "./PriceTag";
 import { SaleBadge } from "./SaleBadge";
 import { Configurator, type PurchaseMode } from "./Configurator";
+import { PaymentOptions } from "@/components/payments/PaymentOptions";
+import { paymentMessaging } from "@/lib/payments/messaging";
 import { IfPublic } from "@/components/site/IfPublic";
 
 type Data = NonNullable<Awaited<ReturnType<typeof getProductPage>>>;
@@ -157,6 +159,7 @@ export async function ProductView({ data }: { data: Data }) {
                 requestCopy={{ heading: request.heading, body: request.body ? <RichText text={request.body} className="mt-3 leading-relaxed text-muted" /> : null }}
                 confirmationCopy={{ heading: confirmation.heading, body: confirmation.body ? <RichText text={confirmation.body} className="mt-3 leading-relaxed text-muted" /> : null }}
                 publicLinks={{ contact: !hidden.has("/contact"), privacy: !hidden.has("/privacy") }}
+                paymentNote={<PaymentOptions messaging={paymentMessaging(settings, flags.onlinePayments)} />}
               />
             </div>
           </div>

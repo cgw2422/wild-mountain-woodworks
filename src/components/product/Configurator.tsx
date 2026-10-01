@@ -37,9 +37,11 @@ export interface ConfiguratorProps {
   confirmationCopy: { heading: string | null; body: React.ReactNode };
   /** Which linked CMS pages are published (unpublished ones aren't linked). */
   publicLinks: { contact: boolean; privacy: boolean };
+  /** Quiet payment-options block shown under the request button (Settings → Payments). */
+  paymentNote?: React.ReactNode;
 }
 
-export function Configurator({ product, pricesVisible, priceDisclaimer, mode, requestCopy, confirmationCopy, publicLinks }: ConfiguratorProps) {
+export function Configurator({ product, pricesVisible, priceDisclaimer, mode, requestCopy, confirmationCopy, publicLinks, paymentNote }: ConfiguratorProps) {
   const [selection, setSelection] = useState<ConfigurationSelection>(() => defaultSelection(product));
   const [showErrors, setShowErrors] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -213,6 +215,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
             {pricing.errors._form ?? "Please complete the highlighted choices above."}
           </p>
         ) : null}
+        {paymentNote ? <div className="mt-5">{paymentNote}</div> : null}
       </div>
 
       {panelOpen && mode === "quote" ? (

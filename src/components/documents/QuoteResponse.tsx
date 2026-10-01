@@ -26,6 +26,7 @@ export function QuoteResponse({
   balanceCents,
   depositLabel,
   onlinePayments,
+  paymentNotice,
   customerName,
   contactHref,
   accept,
@@ -37,6 +38,8 @@ export function QuoteResponse({
   balanceCents: number;
   depositLabel: string;
   onlinePayments: boolean;
+  /** Financing / payment-method notice for the deposit checkout (Settings → Payments). */
+  paymentNotice?: React.ReactNode;
   customerName: string;
   contactHref: string;
   accept: (fd: FormData) => Promise<FormState>;
@@ -83,6 +86,7 @@ export function QuoteResponse({
             {payNow ? "You'll pay the deposit securely by card right after accepting." : hasDeposit ? `A ${depositLabel.toLowerCase()} is due to begin.` : ""}
           </p>
           {hasDeposit ? <PaymentSummary totalCents={totalCents} depositCents={depositCents} balanceCents={balanceCents} /> : null}
+          {payNow && paymentNotice ? <div className="mt-5 max-w-xl">{paymentNotice}</div> : null}
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <button type="button" className={buttonClasses("primary", "lg")} onClick={() => setMode("accept")}>
               {acceptLabel}
@@ -102,7 +106,14 @@ export function QuoteResponse({
           revision={revision}
           hasDeposit={hasDeposit}
           submitLabel={payNow ? "Accept & Continue to Payment" : "Accept Quote"}
-          summary={hasDeposit ? <PaymentSummary totalCents={totalCents} depositCents={depositCents} balanceCents={balanceCents} /> : null}
+          summary={
+            hasDeposit ? (
+              <>
+                <PaymentSummary totalCents={totalCents} depositCents={depositCents} balanceCents={balanceCents} />
+                {payNow && paymentNotice ? <div className="mt-4 max-w-xl">{paymentNotice}</div> : null}
+              </>
+            ) : null
+          }
           customerName={customerName}
           onBack={() => setMode("choose")}
           onDone={(order, redirect) => {

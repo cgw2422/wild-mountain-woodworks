@@ -1,6 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { getSettings, salesFlags } from "@/lib/settings";
+import { paymentMessaging } from "@/lib/payments/messaging";
+import { stripePublishableKey } from "./stripe";
 import { acceptBlocker, customerRevisionOf, depositLabel, expireDueQuotes } from "./quotes";
 import { netPaid } from "./ledger";
 import { isTokenShape } from "./tokens";
@@ -96,6 +98,10 @@ export async function loadCustomerQuote(token: string) {
     blocker: acceptBlocker(quote, rev),
     /** Whether accepting continues straight to the secure online deposit payment. */
     onlinePayments: stripe,
+    /** Settings → Payments wording (financing / methods); empty when online payments are off. */
+    paymentMessaging: paymentMessaging(settings, stripe),
+    /** Public Stripe key for Stripe's own Affirm/Klarna eligibility messaging (optional). */
+    stripePublishableKey: stripe ? stripePublishableKey() : null,
     order: quote.orders[0]?.customerToken ? { number: quote.orders[0].number, token: quote.orders[0].customerToken } : null,
     invoices: quote.invoices.map((i) => ({
       number: i.number,
@@ -184,6 +190,8 @@ export async function customerOrderView(token: string) {
   return {
     business: biz,
     deposit,
+    paymentMessaging: paymentMessaging(settings, stripe),
+    stripePublishableKey: stripe ? stripePublishableKey() : null,
     number: order.number,
     placedAt: order.createdAt,
     productionStatus: order.productionStatus,
