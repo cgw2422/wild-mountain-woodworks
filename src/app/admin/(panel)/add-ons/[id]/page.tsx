@@ -20,6 +20,10 @@ import {
   updateAddOnOptionGroup,
 } from "../actions";
 import { AddOnOptionGroups } from "./AddOnOptionGroups";
+import { configuredAddOnUnitPrice } from "@/lib/pricing/engine";
+import { loadAddOnPreview } from "@/lib/pricing/load";
+import { formatCents } from "@/lib/money";
+import type { ConfigAddOn } from "@/lib/pricing/types";
 import { AddOnForm } from "../AddOnForm";
 import { AssignedProducts } from "./AssignedProducts";
 
@@ -41,6 +45,7 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
   const assignedIds = new Set(addOn.products.map((p) => p.productId));
   const allProducts = await prisma.product.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, status: true } });
   const archived = Boolean(addOn.archivedAt);
+  const preview = await loadAddOnPreview(addOn.id);
   const attachedGroupIds = new Set(addOn.optionGroups.map((g) => g.optionGroupId));
   const libraryGroups = await prisma.optionGroup.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, displayName: true, active: true } });
   const count = addOn.products.length;
@@ -98,6 +103,7 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
                 valueCount: g.optionGroup._count.values,
                 displayNameOverride: g.displayNameOverride ?? "",
                 requiredOverride: g.requiredOverride == null ? "inherit" : g.requiredOverride ? "required" : "optional",
+                setsUnitPrice: g.setsUnitPrice,
               }))}
               available={libraryGroups.filter((g) => !attachedGroupIds.has(g.id))}
               attach={attachAddOnOptionGroup.bind(null, addOn.id)}
@@ -106,6 +112,7 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
               reorder={reorderAddOnOptionGroups.bind(null, addOn.id)}
             />
           </Card>
+          {preview && preview.optionGroups.length ? <PricePreview addOn={preview} /> : null}
           <Card id="assigned-products" title={`Assigned products (${count})`} description="Assign this add-on to products and optionally set a different price per product.">
             <AssignedProducts
               addOnName={addOn.name}
@@ -161,5 +168,74 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
         </aside>
       </div>
     </>
+  );
+}
+
+/**
+ * What one configured unit costs, from the same calculation customers,
+ * quotes, orders and invoices use — so a price entered twice (base price AND
+ * a full price on a value) is obvious before a customer sees it.
+ */
+function PricePreview({ addOn }: { addOn: ConfigAddOn }) {
+  const priceGroup = addOn.optionGroups.find((g) => g.setsUnitPrice);
+  const lead = priceGroup ?? addOn.optionGroups[0]!;
+  // Cheapest choice in every other group, so each row shows the lowest price for that value.
+  const cheapest: Record<string, string> = {};
+  for (const g of addOn.optionGroups) {
+    const v = [...g.values].sort((a, b) => a.priceModifierCents - b.priceModifierCents)[0];
+    if (v) cheapest[g.id] = v.id;
+  }
+  const rows = lead.values.map((v) => {
+    const r = configuredAddOnUnitPrice(addOn, { ...cheapest, [lead.id]: v.id });
+    return { value: v.displayName, unit: r.unitCents, others: r.choices.filter((c) => c.groupId !== lead.id).map((c) => c.value) };
+  });
+  // A few example quantities (always including 2 and the default), each simply unit × quantity.
+  const qtys = [...new Set([1, 2, Math.max(addOn.defaultQuantity, 1)])].filter((q) => q <= addOn.maxQuantity).sort((a, b) => a - b);
+  // Likely double entry: values that look like full unit prices added on top of a base price.
+  const suspicious = !priceGroup && addOn.priceCents > 0 ? lead.values.filter((v) => v.priceModifierCents >= addOn.priceCents * 0.5) : [];
+  return (
+    <Card
+      id="price-preview"
+      title="Price per unit — preview"
+      description={
+        priceGroup
+          ? `Price per unit = the chosen “${priceGroup.displayName}” price + the other choices' adjustments. The base price (${formatCents(addOn.priceCents)}) is not added. Total = price per unit × quantity.`
+          : `Price per unit = base price ${formatCents(addOn.priceCents)} + each choice's adjustment. Total = price per unit × quantity.`
+      }
+    >
+      {suspicious.length ? (
+        <p role="alert" className="mb-4 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          “{suspicious[0]!.displayName}” in {lead.displayName} costs {formatCents(suspicious[0]!.priceModifierCents)} and is <strong>added on top of</strong> the {formatCents(addOn.priceCents)} base price, so one unit is{" "}
+          {formatCents(addOn.priceCents + suspicious[0]!.priceModifierCents)}. If {formatCents(suspicious[0]!.priceModifierCents)} is the full price of one unit, turn on “Sets the price per unit” for {lead.displayName} above (or set the base price to $0).
+        </p>
+      ) : null}
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500">
+            <th scope="col" className="py-2 pr-4 font-semibold">{lead.displayName}</th>
+            {qtys.map((q) => (
+              <th key={q} scope="col" className="py-2 pl-4 text-right font-semibold">
+                {q === 1 ? "Price per unit" : `${q} units${q === addOn.defaultQuantity ? " (default)" : ""}`}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-neutral-100">
+          {rows.map((r) => (
+            <tr key={r.value}>
+              <th scope="row" className="py-2 pr-4 text-left font-normal">
+                {r.value}
+                {r.others.length ? <span className="block text-xs text-neutral-500">with {r.others.join(" · ")}</span> : null}
+              </th>
+              {qtys.map((q) => (
+                <td key={q} className="py-2 pl-4 text-right tabular-nums">
+                  {r.unit == null ? "—" : q === 1 ? formatCents(r.unit) : `${formatCents(r.unit * q)}`}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   );
 }

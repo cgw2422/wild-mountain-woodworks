@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { formatCents, formatModifier } from "@/lib/money";
-import { addOnFieldKey, chosenQuantity, defaultAddOnChoices, defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
+import { addOnFieldKey, cheapestAddOnUnitPrice, chosenQuantity, defaultAddOnChoices, defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
 import type { ConfigAddOn, ConfigOptionGroup, ConfigOptionValue, ConfigurableProduct, ConfigurationSelection, OptionQuantitySpec, PriceLine } from "@/lib/pricing/types";
 import { TIMELINE_OPTIONS, clientRules } from "@/lib/validation/shared";
 import { submitConfigurationQuote } from "@/app/(site)/actions";
@@ -373,7 +373,17 @@ function OptionGroupField({
   const selected = group.values.find((v) => v.id === selectedId);
   const modOnly = (cents: number) => (pricesVisible && cents !== 0 ? formatModifier(cents) : "");
   // Quantity-based values are priced per unit ("$192.50 each"); others as a modifier ("+$350").
-  const priceOf = (v: ConfigOptionValue) => (v.quantity ? (pricesVisible && v.priceModifierCents ? `${formatCents(v.priceModifierCents)} each` : "") : modOnly(v.priceModifierCents));
+  // Per-unit prices read "$192.50 each": quantity-based values, and the add-on group that sets the unit price (e.g. chair style).
+  const priceOf = (v: ConfigOptionValue) =>
+    group.setsUnitPrice
+      ? pricesVisible
+        ? `${formatCents(v.priceModifierCents)} each`
+        : ""
+      : v.quantity
+        ? pricesVisible && v.priceModifierCents
+          ? `${formatCents(v.priceModifierCents)} each`
+          : ""
+        : modOnly(v.priceModifierCents);
   const qty = selected?.quantity ? (quantity ?? selected.quantity.default) : null;
   const errorId = `${name}-err`;
 
@@ -530,7 +540,7 @@ function OptionGroupField({
           selected
             ? selected.quantity
               ? `${selected.displayName} × ${qty}`
-              : `${selected.displayName}${modOnly(selected.priceModifierCents) ? ` · ${modOnly(selected.priceModifierCents)}` : ""}`
+              : `${selected.displayName}${priceOf(selected) ? ` · ${priceOf(selected)}` : ""}`
             : undefined
         }
       />
@@ -644,9 +654,9 @@ function ConfigurableAddOnField({
             {!addOn.required ? <span className="ml-2 font-normal normal-case tracking-normal text-muted">(optional)</span> : null}
           </h3>
           {addOn.description ? <p className="mt-2 text-sm leading-relaxed text-muted">{addOn.description}</p> : null}
-          {pricesVisible && addOn.priceCents ? (
+          {pricesVisible && cheapestAddOnUnitPrice(addOn) ? (
             <p className="mt-1 text-sm text-muted">
-              From <span className="nums">{formatCents(addOn.priceCents)}</span> each
+              From <span className="nums">{formatCents(cheapestAddOnUnitPrice(addOn))}</span> each
             </p>
           ) : null}
         </div>

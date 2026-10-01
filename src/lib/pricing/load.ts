@@ -51,3 +51,23 @@ export async function priceSelectionForProduct(productId: string, selection: Con
   if (!product) return null;
   return { product, pricing: priceConfiguration(product, selection) };
 }
+
+/**
+ * One add-on resolved exactly as product pages see it (active groups and
+ * values, labels, required, "sets the price per unit"), for admin price
+ * previews. Not tied to a product, so product price overrides don't apply.
+ */
+export async function loadAddOnPreview(addOnId: string) {
+  const addOn = await prisma.addOn.findUnique({ where: { id: addOnId }, include: configurableProductInclude.addOns.include.addOn.include });
+  if (!addOn) return null;
+  const product = resolveConfigurableProduct({
+    id: "preview",
+    name: "preview",
+    slug: "preview",
+    sku: null,
+    basePriceCents: 0,
+    optionGroups: [],
+    addOns: [{ enabled: true, priceOverrideCents: null, requiredOverride: null, minQuantityOverride: null, maxQuantityOverride: null, displayOrder: 0, addOn: { ...addOn, active: true, archivedAt: null } }],
+  });
+  return product.addOns[0] ?? null;
+}

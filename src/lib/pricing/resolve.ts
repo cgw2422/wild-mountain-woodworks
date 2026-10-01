@@ -94,6 +94,7 @@ export interface ProductConfigRecord {
         displayOrder: number;
         requiredOverride: boolean | null;
         displayNameOverride: string | null;
+        setsUnitPrice?: boolean;
         optionGroup: ProductConfigRecord["optionGroups"][number]["optionGroup"];
       }>;
     };
@@ -153,7 +154,16 @@ function resolveAddOnGroups(groups: NonNullable<ProductConfigRecord["addOns"][nu
           swatchColor: v.swatchColor,
           image: toImage(v.image, v.displayName),
         }));
-      return { id: g.id, name: g.name, displayName: ag.displayNameOverride?.trim() || g.displayName, description: g.description, inputType: g.inputType, required: ag.requiredOverride ?? g.required, values };
+      return {
+        id: g.id,
+        name: g.name,
+        displayName: ag.displayNameOverride?.trim() || g.displayName,
+        description: g.description,
+        inputType: g.inputType,
+        required: ag.requiredOverride ?? g.required,
+        values,
+        setsUnitPrice: Boolean(ag.setsUnitPrice),
+      };
     })
     .filter((g) => g.values.length > 0);
 }

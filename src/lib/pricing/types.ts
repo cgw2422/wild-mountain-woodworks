@@ -57,6 +57,11 @@ export interface ConfigOptionGroup {
   inputType: OptionInputType;
   required: boolean;
   values: ConfigOptionValue[];
+  /**
+   * Add-on groups only: the chosen value's price IS the price per unit (e.g.
+   * Chair Style: X Back $192.50 each) instead of an adjustment to the base.
+   */
+  setsUnitPrice?: boolean;
 }
 
 export interface ConfigAddOn {
@@ -123,7 +128,7 @@ export interface PriceLine {
   unitCents: number;
   amountCents: number;
   /** Configurable add-ons: the choices that make up `unitCents` (base + adjustments). */
-  addOn?: { addOnId: string; basePriceCents: number; choices: Array<{ groupId: string; label: string; value: string; priceModifierCents: number }> };
+  addOn?: { addOnId: string; basePriceCents: number; choices: Array<{ groupId: string; label: string; value: string; priceModifierCents: number; setsUnitPrice?: boolean }> };
 }
 
 export interface PricingResult {

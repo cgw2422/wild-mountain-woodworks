@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ActionResult } from "@/lib/admin/types";
-import { ActionForm, ConfirmAction, Select, SubmitButton, TextInput } from "@/components/admin/forms";
+import { ActionForm, ConfirmAction, Select, SubmitButton, TextInput, Toggle } from "@/components/admin/forms";
 import { Badge } from "@/components/admin/ui";
 import { SortableRows } from "@/components/admin/catalog/SortableRows";
 
@@ -16,6 +16,7 @@ export type AttachedGroup = {
   valueCount: number;
   displayNameOverride: string;
   requiredOverride: "inherit" | "required" | "optional";
+  setsUnitPrice: boolean;
 };
 
 const INPUT_LABELS: Record<string, string> = { IMAGE: "Image cards", SWATCH: "Swatches", BUTTONS: "Buttons", DROPDOWN: "Dropdown", RADIO: "Radio buttons" };
@@ -64,6 +65,7 @@ export function AddOnOptionGroups({
                   <span className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
                     {INPUT_LABELS[g.inputType] ?? g.inputType} · {g.valueCount} value{g.valueCount === 1 ? "" : "s"}
                     {!g.active ? <Badge tone="amber">Inactive — hidden</Badge> : null}
+                    {g.setsUnitPrice ? <Badge tone="blue">Sets price per unit</Badge> : null}
                   </span>
                 </div>
                 <TextInput label="Label on this add-on" name="displayNameOverride" defaultValue={g.displayNameOverride} placeholder={g.displayName} maxLength={120} wrapperClassName="w-52" />
@@ -77,6 +79,13 @@ export function AddOnOptionGroups({
                     { value: "optional", label: "Optional" },
                   ]}
                   wrapperClassName="w-52"
+                />
+                <Toggle
+                  label="Sets the price per unit"
+                  name="setsUnitPrice"
+                  defaultChecked={g.setsUnitPrice}
+                  description="Each value's price is the full price of one unit (e.g. X Back = $192.50 per chair). The add-on base price is then not added."
+                  className="w-full pb-1"
                 />
                 <div className="flex gap-2 pb-0.5">
                   <SubmitButton variant="small">Save</SubmitButton>

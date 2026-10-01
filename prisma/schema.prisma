@@ -493,6 +493,10 @@ model AddOnOptionGroup {
   /// null = inherit from the group
   requiredOverride    Boolean?
   displayNameOverride String?
+  /// The chosen value's price IS the price per unit (e.g. Chair Style: X Back
+  /// $192.50 each), replacing the add-on's base price. Off = values are
+  /// adjustments added to the base. At most one group per add-on.
+  setsUnitPrice       Boolean     @default(false)
   createdAt           DateTime    @default(now())
 
   @@unique([addOnId, optionGroupId])

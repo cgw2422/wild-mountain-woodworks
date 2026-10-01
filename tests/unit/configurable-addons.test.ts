@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addOnFieldKey, defaultAddOnChoices, defaultSelection, priceConfiguration, startingPrice } from "@/lib/pricing/engine";
+import { addOnFieldKey, cheapestAddOnUnitPrice, configuredAddOnUnitPrice, defaultAddOnChoices, defaultSelection, priceConfiguration, startingPrice } from "@/lib/pricing/engine";
 import { resolveConfigurableProduct, type ProductConfigRecord } from "@/lib/pricing/resolve";
 import { addOnLineDetails, buildConfigurationSnapshot, parseAddOnLine } from "@/lib/pricing/snapshot";
 import { ridgeRecord } from "../support/fixtures";
@@ -170,5 +170,92 @@ describe("configurable add-ons (Dining Chairs)", () => {
     expect(parseAddOnLine(JSON.parse(JSON.stringify(details)))).toEqual(details);
     expect(parseAddOnLine(null)).toBeNull();
     expect(parseAddOnLine({ junk: true })).toBeNull();
+  });
+});
+
+describe("add-on unit price is computed once, quantity applied once (regression: $770 for 2 × $192.50)", () => {
+  /** "X Back Farm Chair" $192.50 per chair on the style; wood/finishes have no extra cost. */
+  function farmChairs(opts: { styleSetsPrice: boolean; base: number }) {
+    const base = ridgeRecord();
+    const free = (g: string, n: string) => value(g, n, 0);
+    return resolveConfigurableProduct({
+      ...base,
+      addOns: [
+        {
+          enabled: true,
+          priceOverrideCents: null,
+          requiredOverride: null,
+          minQuantityOverride: null,
+          maxQuantityOverride: null,
+          displayOrder: 0,
+          addOn: {
+            id: "chairs",
+            name: "Dining Chairs",
+            displayName: "Add Dining Chairs",
+            description: null,
+            priceCents: opts.base,
+            required: false,
+            minQuantity: 0,
+            maxQuantity: 12,
+            quantityEnabled: true,
+            quantityStep: 1,
+            defaultQuantity: 2,
+            active: true,
+            archivedAt: null,
+            image: null,
+            optionGroups: [
+              { displayOrder: 0, requiredOverride: null, displayNameOverride: null, setsUnitPrice: opts.styleSetsPrice, optionGroup: group("style", "Chair Style", [value("style", "X Back Farm Chair", 19250), value("style", "Double X Back", 21750)]) },
+              { displayOrder: 1, requiredOverride: null, displayNameOverride: null, optionGroup: group("wood", "Wood Species", [free("wood", "Pine")]) },
+              { displayOrder: 2, requiredOverride: null, displayNameOverride: null, optionGroup: group("finish", "Chair Finish", [free("finish", "Natural")]) },
+              { displayOrder: 3, requiredOverride: null, displayNameOverride: null, optionGroup: group("seat", "Seat Finish", [free("seat", "Natural")]) },
+            ],
+          },
+        },
+      ],
+    });
+  }
+  const pick = { style: "style-x-back-farm-chair", wood: "wood-pine", finish: "finish-natural", seat: "seat-natural" };
+  const chairsLine = (p: ReturnType<typeof farmChairs>, qty: number) =>
+    priceConfiguration(p, { options: table, addOns: { chairs: qty }, addOnOptions: { chairs: pick } }).lines.find((l) => l.kind === "addon")!;
+
+  it("style sets the per-chair price: 2 × $192.50 = $385 (the add-on base is not added)", () => {
+    // Even with the same $192.50 also typed into the add-on's base price, nothing is counted twice.
+    for (const baseCents of [0, 19250]) {
+      const p = farmChairs({ styleSetsPrice: true, base: baseCents });
+      const line = chairsLine(p, 2);
+      expect(line, `base ${baseCents}`).toMatchObject({ quantity: 2, unitCents: 19250, amountCents: 38500 });
+      expect(line.addOn).toMatchObject({ basePriceCents: 19250 });
+      expect(configuredAddOnUnitPrice(p.addOns[0]!, pick).unitCents).toBe(19250);
+      expect(priceConfiguration(p, { options: table, addOns: { chairs: 2 }, addOnOptions: { chairs: pick } }).totalCents).toBe(120000 + 38500);
+    }
+    // Every quantity is exactly unit × quantity.
+    const p = farmChairs({ styleSetsPrice: true, base: 19250 });
+    for (const q of [1, 2, 3, 6, 12]) expect(chairsLine(p, q).amountCents).toBe(19250 * q);
+    // Adjustments are added once per chair, never multiplied separately.
+    const oak = { ...p, addOns: p.addOns.map((a) => ({ ...a, optionGroups: a.optionGroups.map((g) => (g.id === "wood" ? { ...g, values: [{ ...g.values[0]!, priceModifierCents: 2000 }] } : g)) })) };
+    expect(chairsLine(oak, 2)).toMatchObject({ unitCents: 21250, amountCents: 42500 });
+    // "From" price and the Double X Back price.
+    expect(cheapestAddOnUnitPrice(p.addOns[0]!)).toBe(19250);
+    expect(configuredAddOnUnitPrice(p.addOns[0]!, { ...pick, style: "style-double-x-back" }).unitCents).toBe(21750);
+  });
+
+  it("adjustment model: base $192.50 + style $0 → 2 × $192.50 = $385", () => {
+    const p = farmChairs({ styleSetsPrice: false, base: 19250 });
+    const zeroStyle = { ...p, addOns: p.addOns.map((a) => ({ ...a, optionGroups: a.optionGroups.map((g) => (g.id === "style" ? { ...g, values: g.values.map((v) => ({ ...v, priceModifierCents: 0 })) } : g)) })) };
+    expect(chairsLine(zeroStyle, 2)).toMatchObject({ unitCents: 19250, amountCents: 38500 });
+  });
+
+  it("the $770 case is a price entered twice (base + a full style price as an adjustment), not a quantity applied twice", () => {
+    const p = farmChairs({ styleSetsPrice: false, base: 19250 });
+    // $192.50 base + $192.50 "adjustment" = $385 per chair; × 2 = $770. Quantity is still applied once.
+    expect(chairsLine(p, 2)).toMatchObject({ unitCents: 38500, amountCents: 77000 });
+    expect(chairsLine(p, 1)).toMatchObject({ unitCents: 38500, amountCents: 38500 });
+  });
+
+  it("the price is per individual chair, whatever the quantity step or default", () => {
+    const base = farmChairs({ styleSetsPrice: true, base: 0 });
+    const pairs = { ...base, addOns: base.addOns.map((a) => ({ ...a, quantityStep: 2, defaultQuantity: 4 })) };
+    expect(chairsLine(pairs, 2)).toMatchObject({ unitCents: 19250, amountCents: 38500 });
+    expect(chairsLine(pairs, 4)).toMatchObject({ unitCents: 19250, amountCents: 77000 });
   });
 });

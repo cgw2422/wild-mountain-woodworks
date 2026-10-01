@@ -9,7 +9,8 @@ const { createSignedInAdmin, resetRequest } = await import("../support/next-requ
 const addOnActions = await import("@/app/admin/(panel)/add-ons/actions");
 const optionActions = await import("@/app/admin/(panel)/options/actions");
 const { createConfigurationQuote } = await import("@/lib/services/submissions");
-const { loadConfigurableProduct } = await import("@/lib/pricing/load");
+const { loadAddOnPreview, loadConfigurableProduct } = await import("@/lib/pricing/load");
+const { configuredAddOnUnitPrice, priceConfiguration } = await import("@/lib/pricing/engine");
 const { parseSnapshot, parseAddOnLine } = await import("@/lib/pricing/snapshot");
 const { describeSnapshot } = await import("@/lib/email/notifications");
 const { configurationQuoteSchema } = await import("@/lib/validation/forms");
@@ -178,6 +179,66 @@ describe.skipIf(!hasTestDb)("configurable add-ons end to end", () => {
     tampered.addOnOptions[chairsId]![ids["Chair Style"]!] = ids["Seat Finish:Natural"]!;
     await expect(createConfigurationQuote({ name: "J R", email: "j@example.com", phone: null, zipCode: "43215", timeline: null, notes: null, productId: seeded.product.id, selection: tampered })).rejects.toBeTruthy();
     expect(await prisma.quoteRequest.count()).toBe(1);
+  });
+
+  it("2 × $192.50 = $385 on every surface when the chair style sets the per-chair price; saved quotes never change", async () => {
+    // The owner's setup: X Back Farm Chair = $192.50 per chair on the style, and $192.50 also typed into the add-on base.
+    await prisma.optionValue.update({ where: { id: ids["Chair Style:X Back"]! }, data: { displayName: "X Back Farm Chair", priceModifierCents: 19250 } });
+    const free = { [ids["Chair Style"]!]: ids["Chair Style:X Back"]!, [ids["Chair Wood Species"]!]: ids["Chair Wood Species:Pine"]!, [ids["Chair Finish"]!]: ids["Chair Finish:Natural"]!, [ids["Seat Finish"]!]: ids["Seat Finish:Natural"]! };
+    const sel = { options: { [seeded.ids.size]: seeded.ids.s60, [seeded.ids.wood]: seeded.ids.pine }, addOns: { [chairsId]: 2 }, addOnOptions: { [chairsId]: free }, customDetails: {} };
+    const request = () => createConfigurationQuote({ name: "Jamie Rivers", email: "jamie@example.com", phone: null, zipCode: "43215", timeline: null, notes: null, productId: seeded.product.id, selection: sel });
+
+    // Before the switch: the style price is an ADJUSTMENT on top of the base → $385 per chair → $770 (the reported number).
+    const before = await request();
+    const beforeLine = await prisma.quoteLineItem.findFirstOrThrow({ where: { revision: { quoteId: before.id }, kind: "ADDON" } });
+    expect([beforeLine.unitPriceCents, beforeLine.quantity, beforeLine.lineTotalCents]).toEqual([38500, 2, 77000]);
+    const preview1 = (await loadAddOnPreview(chairsId))!;
+    expect(configuredAddOnUnitPrice(preview1, free).unitCents).toBe(38500);
+
+    // Admin turns on "Sets the price per unit" for Chair Style.
+    expect(await addOnActions.updateAddOnOptionGroup(chairsId, ids["Chair Style"]!, form({ displayNameOverride: "Choose Your Chair Style", requiredOverride: "inherit", setsUnitPrice: "on" }))).toMatchObject({ ok: true });
+    // Only one group can set the price.
+    await addOnActions.updateAddOnOptionGroup(chairsId, ids["Chair Wood Species"]!, form({ setsUnitPrice: "on", requiredOverride: "inherit" }));
+    await addOnActions.updateAddOnOptionGroup(chairsId, ids["Chair Style"]!, form({ setsUnitPrice: "on", requiredOverride: "inherit" }));
+    expect((await prisma.addOnOptionGroup.findMany({ where: { addOnId: chairsId, setsUnitPrice: true } })).map((g) => g.optionGroupId)).toEqual([ids["Chair Style"]]);
+
+    // Product page / server pricing (same canonical function).
+    const product = (await loadConfigurableProduct({ id: seeded.product.id }))!;
+    const pricing = priceConfiguration(product, sel);
+    expect(pricing.lines.find((l) => l.kind === "addon")).toMatchObject({ quantity: 2, unitCents: 19250, amountCents: 38500 });
+    expect(pricing.totalCents).toBe(120000 + 38500);
+    expect(configuredAddOnUnitPrice((await loadAddOnPreview(chairsId))!, free).unitCents).toBe(19250);
+
+    // Quote creation, snapshot and email text.
+    const quote = await request();
+    const q = await prisma.quoteRequest.findUniqueOrThrow({ where: { id: quote.id }, include: { currentRevision: { include: { lineItems: { orderBy: { position: "asc" } } } } } });
+    const snap = parseSnapshot(q.configuration)!;
+    expect(snap.addOns[0]).toMatchObject({ quantity: 2, unitPriceCents: 19250, totalCents: 38500 });
+    expect(q.estimatedTotalCents).toBe(158500);
+    expect(describeSnapshot(snap, true).join("\n")).toContain("$192.50 each · $385 total");
+    // Quote lines (admin quote view and customer quote page read these).
+    const chairLine = q.currentRevision!.lineItems[1]!;
+    expect([chairLine.description, chairLine.quantity, chairLine.unitPriceCents, chairLine.lineTotalCents]).toEqual(["Add Dining Chairs", 2, 19250, 38500]);
+    expect(parseAddOnLine(chairLine.addOn)).toMatchObject({ unitPriceCents: 19250, basePriceCents: 19250 });
+    expect(q.currentRevision!.totalCents).toBe(158500);
+    await quotes.sendQuote(admin, quote.id);
+    const view = (await loadCustomerQuote(q.customerToken!))!.view;
+    expect(view.revision!.lines[1]).toMatchObject({ quantity: 2, unitPriceCents: 19250, lineTotalCents: 38500 });
+
+    // Order and invoice.
+    const r = await quotes.acceptQuote(q.customerToken!, { revisionNumber: 1, name: "Jamie Rivers", agreeTerms: true, agreeDeposit: true }, meta);
+    const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: r.order.id, kind: "ADDON" } });
+    expect([item.quantity, item.unitPriceCents, item.lineTotalCents]).toEqual([2, 19250, 38500]);
+    const invoice = await prisma.invoice.findFirstOrThrow({ where: { orderId: r.order.id }, include: { lineItems: { where: { kind: "ADDON" } } } });
+    expect([invoice.lineItems[0]!.quantity, invoice.lineItems[0]!.unitPriceCents, invoice.lineItems[0]!.lineTotalCents]).toEqual([2, 19250, 38500]);
+    expect(invoice.totalCents).toBe(158500);
+    expect((await customerInvoiceView(invoice.publicToken!))!.lines[1]).toMatchObject({ quantity: 2, unitPriceCents: 19250, lineTotalCents: 38500 });
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: r.order.id } });
+    expect(order.totalCents).toBe(158500);
+    expect((await customerOrderView(order.customerToken!))!.items[1]).toMatchObject({ quantity: 2, unitPriceCents: 19250, lineTotalCents: 38500 });
+
+    // The quote saved before the change is exactly as it was (never recalculated).
+    expect(await prisma.quoteLineItem.findUniqueOrThrow({ where: { id: beforeLine.id } })).toEqual(beforeLine);
   });
 
   it("existing quote lines, orders and invoices without add-on details are untouched", async () => {

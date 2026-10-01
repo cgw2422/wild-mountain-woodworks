@@ -1,4 +1,5 @@
 import type {
+  ConfigAddOn,
   ConfigOptionValue,
   ConfigurableProduct,
   ConfigurationSelection,
@@ -26,10 +27,72 @@ export function addOnFieldKey(addOnId: string, groupId: string) {
   return `${addOnId}.${groupId}`;
 }
 
+export interface ConfiguredAddOnPrice {
+  /** Price of ONE configured unit (e.g. one chair); null while a required choice is missing or invalid. */
+  unitCents: number | null;
+  /** What the unit price starts from: the chosen value of the "sets the price" group, else the add-on base. */
+  basePriceCents: number;
+  choices: Array<{ groupId: string; label: string; value: string; priceModifierCents: number; setsUnitPrice?: boolean }>;
+  /** Field errors keyed by addOnFieldKey(addOn, group). */
+  errors: Record<string, string>;
+  unknownChoice: boolean;
+}
+
+/**
+ * THE canonical price of one configured add-on unit (e.g. one chair):
+ *
+ *   unit = (chosen value of the group that sets the unit price, e.g. Chair Style
+ *           — or the add-on's base price when no group does)
+ *        + Σ the other chosen values' adjustments (wood, chair finish, seat finish…)
+ *
+ * Quantity is NOT applied here: the add-on total is unit × quantity, once, by
+ * the caller (priceConfiguration). The configurator, the server re-pricing,
+ * snapshots, quote/order/invoice lines and emails all derive from this.
+ */
+export function configuredAddOnUnitPrice(addOn: ConfigAddOn, picks: Record<string, string>): ConfiguredAddOnPrice {
+  const errors: Record<string, string> = {};
+  const known = new Set(addOn.optionGroups.map((g) => g.id));
+  const unknownChoice = Object.keys(picks).some((g) => !known.has(g));
+  const priceGroup = addOn.optionGroups.find((g) => g.setsUnitPrice);
+  let basePriceCents = addOn.priceCents;
+  let adjustments = 0;
+  let complete = true;
+  const choices: ConfiguredAddOnPrice["choices"] = [];
+  for (const group of addOn.optionGroups) {
+    const key = addOnFieldKey(addOn.id, group.id);
+    const valueId = picks[group.id];
+    if (!valueId) {
+      if (group.required || group === priceGroup) {
+        errors[key] = `Please choose a ${group.displayName.toLowerCase()}.`;
+        complete = false;
+      }
+      continue;
+    }
+    const value = group.values.find((v) => v.id === valueId);
+    if (!value) {
+      errors[key] = `That ${group.displayName.toLowerCase()} is not available.`;
+      complete = false;
+      continue;
+    }
+    if (group === priceGroup) basePriceCents = value.priceModifierCents;
+    else adjustments += value.priceModifierCents;
+    choices.push({ groupId: group.id, label: group.displayName, value: value.displayName, priceModifierCents: value.priceModifierCents, ...(group === priceGroup ? { setsUnitPrice: true } : {}) });
+  }
+  return { unitCents: complete ? basePriceCents + adjustments : null, basePriceCents, choices, errors, unknownChoice };
+}
+
+/** Lowest possible price of one configured unit (cheapest choice in each required group). */
+export function cheapestAddOnUnitPrice(addOn: ConfigAddOn): number {
+  const priceGroup = addOn.optionGroups.find((g) => g.setsUnitPrice && g.values.length);
+  let unit = priceGroup ? Math.min(...priceGroup.values.map((v) => v.priceModifierCents)) : addOn.priceCents;
+  for (const g of addOn.optionGroups) if (g !== priceGroup && g.required && g.values.length) unit += Math.min(...g.values.map((v) => v.priceModifierCents));
+  return unit;
+}
+
 /** First available value per required group of an add-on (used when the customer adds it). */
 export function defaultAddOnChoices(addOn: ConfigurableProduct["addOns"][number]): Record<string, string> {
   const picks: Record<string, string> = {};
-  for (const g of addOn.optionGroups) if (g.required && g.values[0]) picks[g.id] = g.values[0].id;
+  for (const g of addOn.optionGroups) if ((g.required || g.setsUnitPrice) && g.values[0]) picks[g.id] = g.values[0].id;
   return picks;
 }
 
@@ -155,44 +218,22 @@ export function priceConfiguration(
       });
       continue;
     }
-    // Configurable add-on: price per configured unit = base + each choice's adjustment; then × quantity.
-    const picks = selection.addOnOptions?.[addOn.id] ?? {};
-    const known = new Set(addOn.optionGroups.map((g) => g.id));
-    if (Object.keys(picks).some((g) => !known.has(g))) errors._form = "The configuration contains an option that is no longer available.";
-    let unit = addOn.priceCents;
-    let complete = true;
-    const choices: NonNullable<PriceLine["addOn"]>["choices"] = [];
-    for (const group of addOn.optionGroups) {
-      const key = addOnFieldKey(addOn.id, group.id);
-      const valueId = picks[group.id];
-      if (!valueId) {
-        if (group.required) {
-          errors[key] = `Please choose a ${group.displayName.toLowerCase()}.`;
-          complete = false;
-        }
-        continue;
-      }
-      const value = group.values.find((v) => v.id === valueId);
-      if (!value) {
-        errors[key] = `That ${group.displayName.toLowerCase()} is not available.`;
-        complete = false;
-        continue;
-      }
-      unit += value.priceModifierCents;
-      choices.push({ groupId: group.id, label: group.displayName, value: value.displayName, priceModifierCents: value.priceModifierCents });
-    }
-    if (!complete) {
+    // Configurable add-on: ONE configured unit price, then × quantity (exactly once).
+    const priced = configuredAddOnUnitPrice(addOn, selection.addOnOptions?.[addOn.id] ?? {});
+    if (priced.unknownChoice) errors._form = "The configuration contains an option that is no longer available.";
+    Object.assign(errors, priced.errors);
+    if (priced.unitCents == null) {
       errors[addOn.id] = `Please complete the ${addOn.name.toLowerCase()} choices.`;
       continue;
     }
     lines.push({
       kind: "addon",
       label: addOn.name,
-      detail: choices.map((c) => c.value).join(" · ") || undefined,
+      detail: priced.choices.map((c) => c.value).join(" · ") || undefined,
       quantity: qty,
-      unitCents: unit,
-      amountCents: unit * qty,
-      addOn: { addOnId: addOn.id, basePriceCents: addOn.priceCents, choices },
+      unitCents: priced.unitCents,
+      amountCents: priced.unitCents * qty,
+      addOn: { addOnId: addOn.id, basePriceCents: priced.basePriceCents, choices: priced.choices },
     });
   }
 
@@ -248,9 +289,7 @@ export function startingPrice(product: ConfigurableProduct, opts: { regular?: bo
   }
   for (const addOn of product.addOns) {
     const min = addOn.required ? Math.max(1, addOn.minQuantity) : addOn.minQuantity;
-    // Cheapest configured unit: base + the cheapest value of each required group.
-    const cheapest = addOn.optionGroups.reduce((sum, g) => (g.required && g.values.length ? sum + Math.min(...g.values.map((v) => v.priceModifierCents)) : sum), 0);
-    total += (addOn.priceCents + cheapest) * min;
+    total += (addOn.optionGroups.length ? cheapestAddOnUnitPrice(addOn) : addOn.priceCents) * min;
   }
   return total;
 }

@@ -194,12 +194,21 @@ export const updateAddOnOptionGroup = adminAction(async (admin, addOnId: string,
   const label = optionalText(120).parse(fd.str(data, "displayNameOverride"));
   const req = fd.str(data, "requiredOverride");
   const requiredOverride = req === "required" ? true : req === "optional" ? false : null;
-  const row = await prisma.addOnOptionGroup.update({
-    where: { addOnId_optionGroupId: { addOnId, optionGroupId } },
-    data: { displayNameOverride: label, requiredOverride },
-    include: { addOn: { select: { name: true } }, optionGroup: { select: { name: true } } },
+  // "Sets the price per unit": the chosen value's price is the full unit price (e.g. X Back = $192.50 per chair). One group per add-on.
+  const setsUnitPrice = fd.bool(data, "setsUnitPrice");
+  const row = await prisma.$transaction(async (tx) => {
+    if (setsUnitPrice) await tx.addOnOptionGroup.updateMany({ where: { addOnId, optionGroupId: { not: optionGroupId }, setsUnitPrice: true }, data: { setsUnitPrice: false } });
+    return tx.addOnOptionGroup.update({
+      where: { addOnId_optionGroupId: { addOnId, optionGroupId } },
+      data: { displayNameOverride: label, requiredOverride, setsUnitPrice },
+      include: { addOn: { select: { name: true } }, optionGroup: { select: { name: true } } },
+    });
   });
-  await logActivity("addon.updated", `${admin.name} updated "${row.optionGroup.name}" on add-on "${row.addOn.name}"`, { actorId: admin.id, entityType: "addOn", entityId: addOnId });
+  await logActivity(
+    "addon.updated",
+    `${admin.name} updated "${row.optionGroup.name}" on add-on "${row.addOn.name}"${setsUnitPrice ? " (sets the price per unit)" : ""}`,
+    { actorId: admin.id, entityType: "addOn", entityId: addOnId },
+  );
   revalidateSite();
   return { ok: true, message: "Saved." };
 });

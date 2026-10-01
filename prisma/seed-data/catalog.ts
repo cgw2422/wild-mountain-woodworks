@@ -210,9 +210,10 @@ export const CHAIR_OPTION_GROUPS: SeedOptionGroup[] = [
     name: "Chair Style",
     displayName: "Choose Your Chair Style",
     inputType: "BUTTONS",
+    // Full price of ONE chair (this group "sets the price per unit" on the add-on).
     values: [
-      { name: "X Back", description: "Classic cross back", price: 0 },
-      { name: "Double X Back", description: "Two crosses, a fuller back", price: 25 },
+      { name: "X Back", description: "Classic cross back", price: 192.5 },
+      { name: "Double X Back", description: "Two crosses, a fuller back", price: 217.5 },
     ],
   },
   {
@@ -270,6 +271,8 @@ export const ADD_ONS = [
     maxQuantity: 12,
     defaultQuantity: 4,
     groups: ["chair-style", "chair-wood", "chair-finish", "seat-finish"],
+    /** Chair Style values are full per-chair prices; wood and finishes are adjustments. */
+    unitPriceGroup: "chair-style",
   },
   { key: "bench", name: "Matching Bench", description: "A bench built to match your table's wood and finish.", price: 325, maxQuantity: 2, image: "addon-bench" },
   { key: "breadboard", name: "Breadboard Ends", description: "Classic end caps across the width of the top.", price: 150 },

@@ -177,7 +177,7 @@ async function seedSampleCatalog() {
         maxQuantity: a.maxQuantity ?? 1,
         defaultQuantity: a.defaultQuantity ?? null,
         // Configurable add-ons (e.g. Dining Chairs) get their own option groups.
-        optionGroups: a.groups ? { create: a.groups.map((key, j) => ({ optionGroupId: groupIds[key]!, displayOrder: j })) } : undefined,
+        optionGroups: a.groups ? { create: a.groups.map((key, j) => ({ optionGroupId: groupIds[key]!, displayOrder: j, setsUnitPrice: key === a.unitPriceGroup })) } : undefined,
         scope: a.scope ?? "REUSABLE",
         active: a.active ?? true,
         displayOrder: i,
