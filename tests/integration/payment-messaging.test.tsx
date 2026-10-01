@@ -10,8 +10,8 @@ vi.mock("next/cache", async () => (await import("../support/next-request")).next
 const { prisma } = await import("@/lib/db");
 const { createSignedInAdmin, resetRequest } = await import("../support/next-request");
 const messagingLib = await import("@/lib/payments/messaging");
-const { paymentMessaging, financingClaimIssue, defaultFinancingText, quoteFinancingNotice, CHECKOUT_NOTE, METHODS_INTRO, METHODS_NOTE } = messagingLib;
-const { PaymentOptions, FinancingNotice } = await import("@/components/payments/PaymentOptions");
+const { paymentMessaging, financingClaimIssue, defaultFinancingText, quoteFinancingNotice, CHECKOUT_NOTE, METHODS_INTRO, METHODS_NOTE, FINANCING_FULL_PURCHASE_NOTE } = messagingLib;
+const { PaymentOptions, FinanceNote, DepositMethodsNote } = await import("@/components/payments/PaymentOptions");
 const { QuoteResponse } = await import("@/components/documents/QuoteResponse");
 const { saveSettings } = await import("@/app/admin/(panel)/settings/actions");
 const { checkoutSessionParams, setInvoicingProviderForTests } = await import("@/lib/sales/stripe");
@@ -28,12 +28,12 @@ const defaults: Settings = {
   paymentAffirmMessaging: true,
   paymentKlarnaMessaging: true,
   paymentMethodsMessaging: true,
-  paymentMessagingHeading: "Flexible payment options available",
+  paymentMessagingHeading: "Flexible financing available",
   paymentMessagingText: null,
-  paymentMethodsText: "Card · Bank · Apple Pay · Link · Cash App Pay · Amazon Pay · Affirm · Klarna",
+  paymentMethodsText: "Card · Bank · Apple Pay · Link · Cash App Pay · Amazon Pay",
 };
 const html = (el: React.ReactElement) => renderToStaticMarkup(el).replace(/&#x27;|&#39;/g, "'");
-const QUOTE_NOTICE = "Flexible payment options available at checkout, including Affirm and Klarna when eligible.";
+const QUOTE_NOTICE = "Pay over time with Affirm or Klarna when eligible.";
 
 /** Anything that reads like a promised plan: an amount per period, payment counts, rates, approval. */
 const PROMISE = /\$\s?\d|\d\s*%|\bAPR\b|\d+\s+payments|per month|\/mo\b|guarantee|interest[- ]free|as low as/i;
@@ -42,35 +42,46 @@ describe("payment messaging content", () => {
   it("is hidden entirely unless online payments are on", () => {
     expect(paymentMessaging(defaults, false)).toEqual({ financing: null, methods: null });
     expect(html(<PaymentOptions messaging={paymentMessaging(defaults, false)} />)).toBe("");
-    expect(html(<FinancingNotice messaging={paymentMessaging(defaults, false)} />)).toBe("");
+    expect(html(<FinanceNote messaging={paymentMessaging(defaults, false)} />)).toBe("");
+    expect(html(<DepositMethodsNote messaging={paymentMessaging(defaults, false)} />)).toBe("");
   });
 
-  it("shows Affirm and Klarna 'when eligible' and the secondary methods line when enabled", () => {
+  it("product pages advertise FULL-PURCHASE financing with Affirm and Klarna 'when eligible', never deposit financing", () => {
     const m = paymentMessaging(defaults, true);
     expect(m.financing).toMatchObject({
-      heading: "Flexible payment options available",
-      text: "Pay over time with Affirm or Klarna when eligible.",
+      heading: "Flexible financing available",
+      text: "Finance your full purchase with Affirm or Klarna when eligible.",
       checkoutNote: "Final payment options are shown securely at checkout.",
       quoteNotice: QUOTE_NOTICE,
+      fullPurchaseNote: FINANCING_FULL_PURCHASE_NOTE,
       providers: ["affirm", "klarna"],
     });
-    expect(m.methods).toEqual({ intro: "Secure payment options may include:", list: "Card · Bank · Apple Pay · Link · Cash App Pay · Amazon Pay · Affirm · Klarna", note: "Payment options vary by eligibility, device and transaction." });
+    expect(FINANCING_FULL_PURCHASE_NOTE).toMatch(/full order/);
+    expect(FINANCING_FULL_PURCHASE_NOTE).toMatch(/subject to approval/i);
+    expect(m.methods).toEqual({ intro: "Secure payment options may include:", list: "Card · Bank · Apple Pay · Link · Cash App Pay · Amazon Pay", note: "Payment options vary by eligibility, device and transaction." });
     const out = html(<PaymentOptions messaging={m} />);
-    for (const s of ["Flexible payment options available", "Pay over time with Affirm or Klarna when eligible.", CHECKOUT_NOTE, METHODS_INTRO, METHODS_NOTE]) expect(out).toContain(s);
+    for (const s of ["Flexible financing available", "Finance your full purchase with Affirm or Klarna when eligible.", CHECKOUT_NOTE, METHODS_INTRO, METHODS_NOTE]) expect(out).toContain(s);
+    expect(out).not.toMatch(/deposit/i);
+  });
+
+  it("the ordinary-methods line never lists Affirm or Klarna (they're only for the full purchase)", () => {
+    const m = paymentMessaging({ ...defaults, paymentMethodsText: "Card · Bank · Affirm · Klarna · Afterpay" }, true);
+    expect(m.methods!.list).toBe("Card · Bank");
+    expect(html(<DepositMethodsNote messaging={m} />)).not.toMatch(/Affirm|Klarna|Afterpay/);
   });
 
   it("each switch controls only its own wording", () => {
     const noFinancing = paymentMessaging({ ...defaults, paymentFinancingMessaging: false }, true);
     expect(noFinancing.financing).toBeNull();
-    expect(noFinancing.methods!.list).toBe("Card · Bank · Apple Pay · Link · Cash App Pay · Amazon Pay"); // no financing brands without financing messaging
-    expect(html(<PaymentOptions messaging={noFinancing} />)).not.toMatch(/Affirm|Klarna|Pay over time/);
+    expect(noFinancing.methods!.list).toBe("Card · Bank · Apple Pay · Link · Cash App Pay · Amazon Pay");
+    expect(html(<PaymentOptions messaging={noFinancing} />)).not.toMatch(/Affirm|Klarna|Pay over time|Finance/);
 
     const klarnaOnly = paymentMessaging({ ...defaults, paymentAffirmMessaging: false }, true);
-    expect(klarnaOnly.financing).toMatchObject({ text: "Pay over time with Klarna when eligible.", quoteNotice: "Flexible payment options available at checkout, including Klarna when eligible.", providers: ["klarna"] });
+    expect(klarnaOnly.financing).toMatchObject({ text: "Finance your full purchase with Klarna when eligible.", quoteNotice: "Pay over time with Klarna when eligible.", providers: ["klarna"] });
     expect(klarnaOnly.methods!.list).not.toMatch(/Affirm/);
 
     const neither = paymentMessaging({ ...defaults, paymentAffirmMessaging: false, paymentKlarnaMessaging: false }, true);
-    expect(neither.financing).toMatchObject({ text: "Pay over time when eligible.", providers: [] });
+    expect(neither.financing).toMatchObject({ text: "Finance your full purchase when eligible.", providers: [] });
 
     expect(paymentMessaging({ ...defaults, paymentMethodsMessaging: false }, true).methods).toBeNull();
     const nothing = paymentMessaging({ ...defaults, paymentMethodsMessaging: false, paymentFinancingMessaging: false }, true);
@@ -85,6 +96,7 @@ describe("payment messaging content", () => {
       CHECKOUT_NOTE,
       METHODS_INTRO,
       METHODS_NOTE,
+      FINANCING_FULL_PURCHASE_NOTE,
       ...[[], ["affirm"], ["klarna"], ["affirm", "klarna"]].flatMap((p) => [defaultFinancingText(p as never), quoteFinancingNotice(p as never)]),
     ];
     for (const s of strings) {
@@ -93,8 +105,8 @@ describe("payment messaging content", () => {
     }
     // Anything shown about financing is qualified.
     for (const p of [["affirm"], ["klarna"], ["affirm", "klarna"]] as const) expect(defaultFinancingText([...p])).toMatch(/when eligible/);
-    // Rendered output has no amounts or rates (the deposit amount only ever goes to Stripe's element).
-    const rendered = html(<PaymentOptions messaging={paymentMessaging(defaults, true)} />) + html(<FinancingNotice messaging={paymentMessaging(defaults, true)} />);
+    // Rendered output has no amounts or rates (the financed total only ever goes to Stripe's element).
+    const rendered = html(<PaymentOptions messaging={paymentMessaging(defaults, true)} />) + html(<FinanceNote messaging={paymentMessaging(defaults, true)} />);
     expect(rendered).not.toMatch(PROMISE);
   });
 
@@ -103,51 +115,60 @@ describe("payment messaging content", () => {
       expect(financingClaimIssue(bad), bad).toMatch(/can't promise/);
     }
     for (const ok of ["Pay over time with Affirm or Klarna when eligible.", "Financing may be available at checkout for eligible customers."]) expect(financingClaimIssue(ok)).toBeNull();
+    // Affirm/Klarna finance the full purchase only.
+    for (const bad of ["Finance your deposit with Affirm", "Pay your deposit over time"]) expect(financingClaimIssue(bad), bad).toMatch(/full purchase only/);
   });
 
   it("Stripe's element gets only the amount due at checkout — terms and eligibility come from Stripe", () => {
     const src = readFileSync(path.resolve("src/components/payments/StripeMessaging.tsx"), "utf8");
     expect(src).toContain('create("paymentMethodMessaging", { amount: amountCents, currency: "USD", countryCode: "US", paymentMethodTypes: providers })');
     expect(src).not.toMatch(PROMISE);
-    // The product page never passes an amount (only the deposit at checkout is financed, and it's set per quote).
+    // The product page never passes an amount (the financed amount is the quote's full total, set per quote).
     const product = readFileSync(path.resolve("src/components/product/ProductView.tsx"), "utf8");
     expect(product).toContain("<PaymentOptions messaging={paymentMessaging(settings, flags.onlinePayments)} />");
     expect(readFileSync(path.resolve("src/components/payments/PaymentOptions.tsx"), "utf8")).not.toMatch(/\$\d|\d%/);
   });
 });
 
-describe("Stripe Checkout decides the payment methods", () => {
-  it("the deposit Checkout Session never lists payment methods, so Stripe shows every eligible one", () => {
-    const params = checkoutSessionParams({
-      idempotencyKey: "k",
-      amountCents: 78450,
-      productName: "Deposit",
-      description: "Deposit",
-      customerEmail: "a@example.com",
-      clientReferenceId: "inv",
-      successUrl: "https://x/s",
-      cancelUrl: "https://x/c",
-      metadata: {},
-    });
+describe("Stripe Checkout payment method control", () => {
+  const input = { idempotencyKey: "k", amountCents: 78450, productName: "Deposit", description: "Deposit", customerEmail: "a@example.com", clientReferenceId: "inv", successUrl: "https://x/s", cancelUrl: "https://x/c", metadata: {} };
+  it("never pins payment_method_types; a deposit session only EXCLUDES the BNPL methods", () => {
+    const params = checkoutSessionParams({ ...input, excludedPaymentMethodTypes: messagingLib.BNPL_PAYMENT_METHOD_TYPES });
+    expect(Object.keys(params).filter((k) => /^payment_method_types/.test(k))).toEqual([]);
+    expect(params).toMatchObject({ mode: "payment", "excluded_payment_method_types[0]": "affirm", "excluded_payment_method_types[1]": "klarna" });
+  });
+  it("a full-purchase financing session excludes nothing, so eligible Affirm/Klarna can appear", () => {
+    const params = checkoutSessionParams({ ...input, excludedPaymentMethodTypes: [] });
     expect(Object.keys(params).filter((k) => /payment_method/.test(k))).toEqual([]);
-    expect(params.mode).toBe("payment");
   });
 });
 
-describe("quote acceptance notice", () => {
-  const props = { revision: 1, totalCents: 156900, depositCents: 78450, balanceCents: 78450, depositLabel: "Deposit (50%)", customerName: "Jamie", contactHref: "/contact", accept: async () => ({ status: "idle" as const }), decline: async () => ({ status: "idle" as const }) };
+describe("quote acceptance choices", () => {
+  const props = { revision: 1, totalCents: 240000, depositCents: 120000, balanceCents: 120000, depositLabel: "Deposit (50%)", customerName: "Jamie", contactHref: "/contact", accept: async () => ({ status: "idle" as const }), decline: async () => ({ status: "idle" as const }) };
+  const notes = () => {
+    const m = paymentMessaging(defaults, true);
+    return { depositNote: <DepositMethodsNote messaging={m} />, financeNote: <FinanceNote messaging={m} /> };
+  };
 
-  it("shows the financing notice before 'Accept Quote & Pay $X Deposit'", () => {
-    const out = html(<QuoteResponse {...props} onlinePayments paymentNotice={<FinancingNotice messaging={paymentMessaging(defaults, true)} />} />);
+  it("offers 'Pay $1,200 Deposit' and 'Finance Full $2,400 Purchase' as two clearly separate choices", () => {
+    const out = html(<QuoteResponse {...props} onlinePayments financingAvailable {...notes()} />);
+    expect(out).toContain("Choose how you'd like to proceed");
+    expect(out).toContain("Pay $1,200 Deposit");
+    expect(out).toContain("Pay the required deposit today. The remaining $1,200 will be due later.");
+    expect(out).toContain("Finance Full $2,400 Purchase");
     expect(out).toContain(QUOTE_NOTICE);
-    expect(out).toContain("Accept Quote &amp; Pay $784.50 Deposit");
-    expect(out.indexOf(QUOTE_NOTICE)).toBeLessThan(out.indexOf("Accept Quote &amp; Pay"));
+    expect(out).toContain(FINANCING_FULL_PURCHASE_NOTE);
+    // Affirm/Klarna are only mentioned in the financing choice, never with the deposit.
+    const depositPart = out.slice(out.indexOf("Pay $1,200 Deposit"), out.indexOf("Finance Full $2,400 Purchase"));
+    expect(depositPart).not.toMatch(/Affirm|Klarna/);
+    expect(out).not.toMatch(/approved|guarantee/i);
   });
 
-  it("has no financing notice when there's nothing to pay online", () => {
-    const notice = <FinancingNotice messaging={paymentMessaging(defaults, true)} />;
-    expect(html(<QuoteResponse {...props} onlinePayments={false} paymentNotice={notice} />)).not.toContain("Affirm");
-    expect(html(<QuoteResponse {...props} depositCents={0} balanceCents={156900} onlinePayments paymentNotice={notice} />)).not.toContain("Affirm");
+  it("without financing it's the single 'Accept Quote & Pay $X Deposit' button and no Affirm/Klarna", () => {
+    const out = html(<QuoteResponse {...props} onlinePayments {...notes()} />);
+    expect(out).toContain("Accept Quote &amp; Pay $1,200 Deposit");
+    expect(out).not.toMatch(/Affirm|Klarna|Finance Full/);
+    expect(html(<QuoteResponse {...props} onlinePayments={false} financingAvailable {...notes()} />)).not.toMatch(/Affirm|Klarna|Finance Full/);
   });
 });
 
@@ -182,26 +203,29 @@ describe.skipIf(!hasTestDb)("payment messaging settings", () => {
     return quote;
   }
 
-  it("quote and order (deposit) pages carry the notice, plus Stripe's messaging key; hidden when switched off or offline", async () => {
+  it("quote and order pages offer full-purchase financing next to the deposit; hidden when switched off or offline", async () => {
     const quote = await sentQuote();
     const view = (await loadCustomerQuote(quote.customerToken!))!.view;
     expect(view.paymentMessaging.financing!.quoteNotice).toBe(QUOTE_NOTICE);
+    expect(view.financingAvailable).toBe(true);
     expect(view.stripePublishableKey).toBe("pk_test_abc123");
 
     const { order } = await quotes.acceptQuote(quote.customerToken!, { revisionNumber: 1, name: "Jamie", agreeTerms: true, agreeDeposit: true }, { ip: null, userAgent: null });
     const ov = (await customerOrderView(order.customerToken!))!;
     expect(ov.deposit).toMatchObject({ dueCents: 78450, payHref: expect.any(String) });
-    expect(ov.paymentMessaging.financing!.quoteNotice).toBe(QUOTE_NOTICE);
+    expect(ov.financing).toEqual({ amountCents: 156900, href: `/order/${order.customerToken}/finance` });
 
     await prisma.siteSetting.update({ where: { id: "default" }, data: { paymentFinancingMessaging: false } });
-    expect((await customerOrderView(order.customerToken!))!.paymentMessaging.financing).toBeNull();
+    const off = (await customerOrderView(order.customerToken!))!;
+    expect(off.paymentMessaging.financing).toBeNull();
+    expect(off.financing).toBeNull();
     await prisma.siteSetting.update({ where: { id: "default" }, data: { paymentFinancingMessaging: true, stripeInvoicingEnabled: false } });
     const offline = (await customerOrderView(order.customerToken!))!;
     expect(offline.paymentMessaging).toEqual({ financing: null, methods: null });
     expect(offline.stripePublishableKey).toBeNull();
   });
 
-  it("messaging switches never change what Stripe Checkout is asked for", async () => {
+  it("the deposit Checkout excludes Affirm/Klarna even with every messaging switch off", async () => {
     const stripe = fakeStripe();
     setInvoicingProviderForTests(stripe.provider);
     await prisma.siteSetting.update({ where: { id: "default" }, data: { paymentFinancingMessaging: false, paymentAffirmMessaging: false, paymentKlarnaMessaging: false, paymentMethodsMessaging: false } });
@@ -209,7 +233,8 @@ describe.skipIf(!hasTestDb)("payment messaging settings", () => {
     const { order } = await quotes.acceptQuote(quote.customerToken!, { revisionNumber: 1, name: "Jamie", agreeTerms: true, agreeDeposit: true }, { ip: null, userAgent: null });
     expect(await startDepositCheckout(order.customerToken!)).toMatchObject({ kind: "redirect" });
     const params = checkoutSessionParams(stripe.latest().input);
-    expect(Object.keys(params).filter((k) => /payment_method/.test(k))).toEqual([]);
+    expect(Object.keys(params).filter((k) => /^payment_method_types/.test(k))).toEqual([]);
+    expect(Object.values(params)).toEqual(expect.arrayContaining(["affirm", "klarna"]));
   });
 
   it("admin can edit the wording and switches, but specific terms are refused", async () => {
@@ -223,7 +248,7 @@ describe.skipIf(!hasTestDb)("payment messaging settings", () => {
     expect(await saveSettings("payments", fd(base))).toMatchObject({ ok: true });
     const saved = await prisma.siteSetting.findUniqueOrThrow({ where: { id: "default" } });
     expect(saved).toMatchObject({ paymentFinancingMessaging: true, paymentAffirmMessaging: false, paymentKlarnaMessaging: true, paymentMessagingHeading: "Pay your way", paymentMessagingText: null, paymentMethodsText: "Card, Bank, Klarna" });
-    expect(paymentMessaging(saved, true)).toMatchObject({ financing: { text: "Pay over time with Klarna when eligible." }, methods: { list: "Card · Bank · Klarna" } });
+    expect(paymentMessaging(saved, true)).toMatchObject({ financing: { text: "Finance your full purchase with Klarna when eligible." }, methods: { list: "Card · Bank" } });
     // The switches are wording only: the Stripe switch is untouched.
     expect(saved.stripeInvoicingEnabled).toBe(true);
 
@@ -231,6 +256,7 @@ describe.skipIf(!hasTestDb)("payment messaging settings", () => {
     expect(res).toMatchObject({ ok: false, fieldErrors: { paymentMessagingText: expect.stringMatching(/can't promise/) } });
     expect((await prisma.siteSetting.findUniqueOrThrow({ where: { id: "default" } })).paymentMessagingText).toBeNull();
     expect(await saveSettings("payments", fd({ ...base, paymentMessagingHeading: "Guaranteed approval" }))).toMatchObject({ ok: false });
+    expect(await saveSettings("payments", fd({ ...base, paymentMessagingText: "Finance your deposit with Klarna when eligible." }))).toMatchObject({ ok: false, fieldErrors: { paymentMessagingText: expect.stringMatching(/full purchase only/) } });
     expect(await prisma.activityLog.count({ where: { type: "settings.updated" } })).toBe(1);
   });
 

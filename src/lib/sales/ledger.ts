@@ -76,6 +76,20 @@ export function invoiceMoney(inv: InvoiceMoneyInput & { amountPaidCents: number;
   return { totalCents: inv.totalCents, depositCents: inv.depositCents, paidCents: paid, pendingCents: pending, remainingCents: remaining, collectibleCents: collectible, dueNowCents: Math.max(0, dueNow), dueNowType };
 }
 
+/**
+ * Full-purchase financing (Affirm/Klarna when eligible) is only for the WHOLE
+ * order total: the order's one invoice, issued, not void, with nothing paid
+ * or pending yet. Once any money (a deposit, a check…) is on the invoice the
+ * customer continues with the ordinary deposit/balance flow — BNPL is never
+ * used for a deposit, a partial amount or a remaining balance.
+ */
+export function financingAmountFor(inv: { kind: string; status: string; totalCents: number; amountPaidCents: number; pendingCents: number }): number | null {
+  if (inv.kind !== "FULL") return null;
+  if (["DRAFT", "VOIDED", "CANCELED", "PAID"].includes(inv.status)) return null;
+  if (inv.totalCents <= 0 || inv.amountPaidCents !== 0 || inv.pendingCents !== 0) return null;
+  return inv.totalCents;
+}
+
 export async function recomputeInvoice(db: Db, invoiceId: string, now = new Date()) {
   const invoice = await db.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { payments: true } });
   const paid = invoice.payments.reduce((s, p) => s + netPaid(p), 0);

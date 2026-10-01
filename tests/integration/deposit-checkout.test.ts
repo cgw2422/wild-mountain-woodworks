@@ -106,6 +106,7 @@ describe("Checkout Session parameters", () => {
       successUrl: "https://x/s",
       cancelUrl: "https://x/c",
       metadata: { payment_type: "deposit", order_number: "WMWO-2001" },
+      excludedPaymentMethodTypes: ["affirm", "klarna"],
     });
     expect(params).toMatchObject({
       mode: "payment",

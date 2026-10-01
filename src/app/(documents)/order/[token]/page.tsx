@@ -9,7 +9,7 @@ import { siteDateLong } from "@/lib/site-time";
 import { buttonClasses } from "@/components/ui/Button";
 import { AutoRefresh } from "@/components/documents/AutoRefresh";
 import { DocHeading, Facts, Files, Prose, Section, statusPill } from "@/components/documents/parts";
-import { FinancingNotice } from "@/components/payments/PaymentOptions";
+import { DepositMethodsNote, FinanceFullPurchase } from "@/components/payments/PaymentOptions";
 
 type Props = { params: Promise<{ token: string }>; searchParams: Promise<{ payment?: string }> };
 
@@ -19,6 +19,7 @@ const PAYMENT_NOTICES: Record<string, string> = {
   canceled: "Your payment wasn't completed, so nothing was charged. You can pay whenever you're ready.",
   error: "We couldn't open the secure payment page just now. Please try again in a moment, or contact us.",
   limited: "Too many attempts in a short time. Please wait a few minutes and try again.",
+  "financing-unavailable": "Financing is only available for the full order total before any payment has been made. You can pay the amount due instead, or contact us.",
 };
 
 /**
@@ -93,6 +94,12 @@ export default async function CustomerOrderPage({ params, searchParams }: Props)
           </h2>
           <span className="text-sm text-muted">{ORDER_PAYMENT_STATUS_LABELS[o.paymentStatus]}</span>
         </div>
+        {o.balanceCents <= 0 && o.paidInFullWith ? (
+          <p className="mt-2 text-sm text-muted">
+            Paid with {o.paidInFullWith}
+            {o.paidInFullFinanced ? ` — any repayments are between you and ${o.paidInFullWith}; nothing more is owed to Wild Mountain Woodworks for this order.` : "."}
+          </p>
+        ) : null}
         <dl className="mt-5 grid max-w-md grid-cols-[1fr_auto] gap-x-6 gap-y-2 text-[0.98rem]">
           <dt>Invoice total</dt>
           <dd className="text-right tabular-nums">{formatCents(o.totalCents, { showZeroCents: true })}</dd>
@@ -112,14 +119,28 @@ export default async function CustomerOrderPage({ params, searchParams }: Props)
             <p className="mt-5 text-muted">Stripe has your payment and is confirming it with us. This page will update shortly.</p>
             <AutoRefresh />
           </>
-        ) : due?.payHref && !canceled ? (
+        ) : (due?.payHref || o.financing) && !canceled ? (
           <div className="print:hidden">
-            <FinancingNotice className="mt-6 max-w-xl" messaging={o.paymentMessaging} stripe={o.stripePublishableKey ? { publishableKey: o.stripePublishableKey, amountCents: due.amountCents } : null} />
-            {/* A plain link: the server opens a fresh, correctly priced Stripe Checkout each time. */}
-            <a href={due.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
-              Pay {formatCents(due.amountCents, { showZeroCents: true })} {dueLabel}
-            </a>
-            <p className="mt-3 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page, which shows the payment options available to you. Wild Mountain Woodworks never stores your payment details.</p>
+            {due?.payHref ? (
+              <>
+                {/* A plain link: the server opens a fresh, correctly priced Stripe Checkout each time (no Affirm/Klarna for a deposit or balance). */}
+                <a href={due.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
+                  Pay {formatCents(due.amountCents, { showZeroCents: true })} {dueLabel}
+                </a>
+                {due.type === "DEPOSIT" ? <p className="mt-2 max-w-xl text-sm text-charcoal">Pay the required deposit today. The remaining {formatCents(Math.max(0, o.totalCents - due.amountCents - o.paidCents), { showZeroCents: true })} will be due later.</p> : null}
+                <DepositMethodsNote messaging={o.paymentMessaging} className="mt-3 max-w-xl" />
+              </>
+            ) : null}
+            {o.financing ? (
+              <FinanceFullPurchase
+                className="mt-6 max-w-xl"
+                messaging={o.paymentMessaging}
+                totalCents={o.financing.amountCents}
+                href={o.financing.href}
+                stripe={o.stripePublishableKey ? { publishableKey: o.stripePublishableKey, amountCents: o.financing.amountCents } : null}
+              />
+            ) : null}
+            <p className="mt-4 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page, which shows the payment options available to you. Wild Mountain Woodworks never stores your payment details.</p>
           </div>
         ) : o.paymentInstructions && due ? (
           <div className="mt-5 whitespace-pre-line leading-relaxed text-charcoal-muted">{o.paymentInstructions}</div>

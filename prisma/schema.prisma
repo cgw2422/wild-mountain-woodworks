@@ -1048,10 +1048,11 @@ model SiteSetting {
   paymentAffirmMessaging       Boolean  @default(true)
   paymentKlarnaMessaging       Boolean  @default(true)
   paymentMethodsMessaging      Boolean  @default(true)
-  paymentMessagingHeading      String   @default("Flexible payment options available")
+  paymentMessagingHeading      String   @default("Flexible financing available")
   /// Null = automatic wording from the Affirm/Klarna switches.
   paymentMessagingText         String?
-  paymentMethodsText           String   @default("Card · Bank · Apple Pay · Link · Cash App Pay · Amazon Pay · Affirm · Klarna")
+  /// Ordinary methods only — Affirm/Klarna are offered separately, for the full purchase.
+  paymentMethodsText           String   @default("Card · Bank · Apple Pay · Link · Cash App Pay · Amazon Pay")
   /// Dashboard alert: NEW quotes older than this many days.
   quoteAlertDays               Int      @default(3)
   // Internal pricing calculator defaults (never shown publicly)
@@ -1482,6 +1483,9 @@ model Invoice {
   stripeCheckoutExpiresAt DateTime?
   /// open | complete | expired | processing | failed (mirrors Stripe)
   stripeCheckoutStatus    String?
+  /// What the current session pays: DEPOSIT | FINAL_BALANCE | FULL_PURCHASE_FINANCING.
+  /// A session is only reused for the same purpose and amount.
+  stripeCheckoutPurpose   String?
   /// Sessions created so far; part of the Stripe idempotency key, so
   /// simultaneous clicks share one session instead of creating two.
   checkoutAttempts        Int            @default(0)
@@ -1558,6 +1562,9 @@ enum PaymentType {
   FINAL_BALANCE
   PARTIAL_PAYMENT
   ADDITIONAL_PAYMENT
+  /// The whole order total in one online payment — the full-purchase
+  /// financing path (Affirm / Klarna when eligible). Leaves nothing owed.
+  FULL_PURCHASE
   OTHER
 }
 
@@ -1596,6 +1603,8 @@ model Payment {
   clearedAt             DateTime?
   returnedAt            DateTime?
   stripeTerminalReaderId String?
+  /// Stripe payment method type used online (card, affirm, klarna, us_bank_account…), when Stripe reports it.
+  stripePaymentMethodType String?
   failureMessage        String?
   /// Set when an owner allowed this payment to exceed the balance.
   overpaymentApprovedById String?

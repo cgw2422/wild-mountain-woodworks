@@ -8,7 +8,7 @@ import { getSettings, salesFlags } from "@/lib/settings";
 import { siteDateInput } from "@/lib/site-time";
 import { invoiceMoney } from "@/lib/sales/ledger";
 import { customerLinks } from "@/lib/sales/links";
-import { INVOICE_KIND_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_TYPE_LABELS, paymentStatusLabel } from "@/lib/sales/status";
+import { INVOICE_KIND_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_TYPE_LABELS, paymentStatusLabel, stripeMethodName } from "@/lib/sales/status";
 import { listTerminalReaders, terminalTestMode } from "@/lib/sales/terminal";
 import type { LineKind } from "@/lib/sales/totals";
 import { ActionButton, ConfirmAction, MoneyInput, Select, TextInput } from "@/components/admin/forms";
@@ -285,7 +285,10 @@ export default async function InvoiceDetailPage({ params }: Props) {
                           <Money cents={p.amountCents} />
                           {p.refundedCents ? <p className="text-xs text-neutral-500">refunded {formatCents(p.refundedCents)}</p> : null}
                         </td>
-                        <td className={table.td}>{PAYMENT_METHOD_LABELS[p.method]}</td>
+                        <td className={table.td}>
+                          {PAYMENT_METHOD_LABELS[p.method]}
+                          {stripeMethodName(p.stripePaymentMethodType) ? <span className="block text-xs text-neutral-500">{stripeMethodName(p.stripePaymentMethodType)}</span> : null}
+                        </td>
                         <td className={table.td}>{PAYMENT_TYPE_LABELS[p.type]}</td>
                         <td className={table.td}>
                           <Badge tone={p.status === "SUCCEEDED" ? "green" : p.status === "PENDING" ? "amber" : ["FAILED", "RETURNED", "VOIDED"].includes(p.status) ? "red" : "neutral"}>{paymentStatusLabel(p.method, p.status)}</Badge>

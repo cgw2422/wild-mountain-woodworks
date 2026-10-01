@@ -9,7 +9,7 @@ import { buttonClasses } from "@/components/ui/Button";
 import { AutoRefresh } from "@/components/documents/AutoRefresh";
 import { DocHeading, Facts, LinesTable, Prose, Section, TotalsBlock, statusPill } from "@/components/documents/parts";
 import { PrintButton } from "@/components/documents/PrintButton";
-import { FinancingNotice } from "@/components/payments/PaymentOptions";
+import { DepositMethodsNote, FinanceFullPurchase } from "@/components/payments/PaymentOptions";
 
 type Props = { params: Promise<{ token: string }>; searchParams: Promise<{ payment?: string | string[] }> };
 
@@ -19,6 +19,7 @@ const NOTICES: Record<string, string> = {
   canceled: "Your payment wasn't completed — nothing was charged. You can pay whenever you're ready.",
   error: "We couldn't open the secure payment page just now. Please try again in a moment, or contact us.",
   limited: "Too many attempts. Please wait a few minutes and try again.",
+  "financing-unavailable": "Financing is only available for the full order total before any payment has been made. You can pay the amount due instead, or contact us.",
 };
 
 /**
@@ -60,10 +61,16 @@ export default async function CustomerInvoicePage({ params, searchParams }: Prop
           <h2 id="balance-heading" className="font-display text-2xl">
             {inv.remainingCents <= 0 ? "Paid in full — thank you" : inv.dueNowCents > 0 ? `${dueLabel} due` : "Balance"}
           </h2>
+          {inv.remainingCents <= 0 && inv.paidInFullWith ? (
+            <p className="mt-2 text-sm text-muted">
+              Paid with {inv.paidInFullWith}
+              {inv.paidInFullFinanced ? ` — any repayments are between you and ${inv.paidInFullWith}; nothing more is owed to Wild Mountain Woodworks for this invoice.` : "."}
+            </p>
+          ) : null}
           <dl className="mt-5 grid max-w-md grid-cols-[1fr_auto] gap-x-6 gap-y-2 text-[0.98rem]">
             <dt>Order total</dt>
             <dd className="text-right tabular-nums">{formatCents(inv.totalCents, { showZeroCents: true })}</dd>
-            {inv.depositCents > 0 ? (
+            {inv.depositCents > 0 && !inv.paidInFullWith ? (
               <>
                 <dt className="text-muted">Deposit required</dt>
                 <dd className="text-right tabular-nums text-muted">{formatCents(inv.depositCents, { showZeroCents: true })}</dd>
@@ -86,18 +93,28 @@ export default async function CustomerInvoicePage({ params, searchParams }: Prop
               <p className="mt-5 text-muted">Stripe has your payment and is confirming it with us. This page updates on its own.</p>
               <AutoRefresh />
             </>
-          ) : inv.payHref ? (
+          ) : inv.payHref || inv.financing ? (
             <div className="print:hidden">
-              <FinancingNotice
-                className="mt-6 max-w-xl"
-                messaging={inv.paymentMessaging}
-                stripe={inv.stripePublishableKey ? { publishableKey: inv.stripePublishableKey, amountCents: inv.dueNowCents } : null}
-              />
-              {/* A plain link: the server opens a Stripe Checkout for exactly what's due. */}
-              <a href={inv.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
-                Pay {formatCents(inv.dueNowCents, { showZeroCents: true })} {dueLabel}
-              </a>
-              <p className="mt-3 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page, which shows the payment options available to you. Wild Mountain Woodworks never stores your payment details.</p>
+              {inv.payHref ? (
+                <>
+                  {/* A plain link: the server opens a Stripe Checkout for exactly what's due (Affirm/Klarna aren't offered for it). */}
+                  <a href={inv.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
+                    {inv.dueNowType === "FINAL_BALANCE" ? "Pay Remaining Balance" : `Pay ${formatCents(inv.dueNowCents, { showZeroCents: true })} ${dueLabel}`}
+                  </a>
+                  {inv.dueNowType === "FINAL_BALANCE" ? <p className="mt-2 text-sm tabular-nums">{formatCents(inv.dueNowCents, { showZeroCents: true })} due now</p> : null}
+                  <DepositMethodsNote messaging={inv.paymentMessaging} className="mt-3 max-w-xl" />
+                </>
+              ) : null}
+              {inv.financing ? (
+                <FinanceFullPurchase
+                  className="mt-6 max-w-xl"
+                  messaging={inv.paymentMessaging}
+                  totalCents={inv.financing.amountCents}
+                  href={inv.financing.href}
+                  stripe={inv.stripePublishableKey ? { publishableKey: inv.stripePublishableKey, amountCents: inv.financing.amountCents } : null}
+                />
+              ) : null}
+              <p className="mt-4 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page, which shows the payment options available to you. Wild Mountain Woodworks never stores your payment details.</p>
             </div>
           ) : inv.remainingCents > 0 && !inv.paymentInstructions ? (
             <p className="mt-5 text-sm text-muted">{inv.depositCents > 0 && inv.paidCents >= inv.depositCents ? "Your deposit is received. We'll let you know when the remaining balance is due." : "We'll let you know when a payment is due."}</p>

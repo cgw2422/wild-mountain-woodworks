@@ -5,7 +5,7 @@ import { clientIpFromHeaders } from "@/lib/auth/client-ip";
 import { logger } from "@/lib/logger";
 import { rateLimit } from "@/lib/rate-limit";
 import { SalesError } from "@/lib/sales/errors";
-import { depositPayPath } from "@/lib/sales/checkout";
+import { depositPayPath, orderFinancePath } from "@/lib/sales/checkout";
 import { acceptQuote, declineQuote } from "@/lib/sales/quotes";
 import { isTokenShape } from "@/lib/sales/tokens";
 import { acceptQuoteSchema, declineQuoteSchema, fieldErrorsFrom, formDataToObject, type FormState } from "@/lib/validation/forms";
@@ -37,10 +37,20 @@ export async function acceptQuoteAction(token: string, fd: FormData): Promise<Fo
   const meta = await requestMeta();
   if (!(await rateLimit(`quote-response:${meta.ip}`, 10, 600)).allowed) return LIMITED;
   try {
-    const { order, payNow } = await acceptQuote(token, { revisionNumber: parsed.data.revision, name: parsed.data.name, agreeTerms: true, agreeDeposit: true }, meta);
-    // With a deposit due and online payments on, continue straight to the
-    // secure deposit payment (which opens Stripe Checkout).
-    const next = order.customerToken ? (payNow ? depositPayPath(order.customerToken) : `/order/${order.customerToken}`) : undefined;
+    const { order, payNow, financing } = await acceptQuote(
+      token,
+      { revisionNumber: parsed.data.revision, name: parsed.data.name, agreeTerms: true, agreeDeposit: true, paymentPath: parsed.data.paymentPath },
+      meta,
+    );
+    // Continue straight to secure payment: the full order total for financing
+    // (Affirm/Klarna when eligible), or the deposit (never Affirm/Klarna).
+    const next = order.customerToken
+      ? financing
+        ? orderFinancePath(order.customerToken)
+        : payNow
+          ? depositPayPath(order.customerToken)
+          : `/order/${order.customerToken}`
+      : undefined;
     return { status: "success", reference: order.number, redirect: next };
   } catch (err) {
     return failure(err, "Quote acceptance");

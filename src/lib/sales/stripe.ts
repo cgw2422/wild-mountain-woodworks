@@ -2,10 +2,11 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * Stripe is used only to collect money: Checkout (payment mode) for the
- * deposit at quote acceptance, and Invoices (hosted invoice page + PDF)
- * for final balances and later requests, plus webhooks. Wild Mountain Woodworks owns
- * quotes, orders and the amounts due; Stripe Quotes and carts are never used.
+ * Stripe is used only to collect money: one-time Checkout Sessions (payment
+ * mode) for the deposit, the balance or full-purchase financing; Terminal for
+ * in-person cards; webhooks; and — for older records only — Invoices. Wild
+ * Mountain Woodworks owns quotes, orders and the amounts due; Stripe Quotes
+ * and carts are never used.
  *
  * Every write sends an Idempotency-Key derived from the Wild Mountain Woodworks record,
  * so a retried request can never create a duplicate customer, invoice or
@@ -47,6 +48,12 @@ export interface CreateCheckoutInput {
   successUrl: string;
   cancelUrl: string;
   metadata: Record<string, string>;
+  /**
+   * Payment method types Stripe must not offer on this session. Deposits and
+   * partial/balance payments exclude Affirm/Klarna (full purchase only); the
+   * full-purchase financing session excludes nothing, so eligible BNPL shows.
+   */
+  excludedPaymentMethodTypes: readonly string[];
 }
 
 /** A Stripe Terminal reader (smart reader driven from the server). */
@@ -69,6 +76,8 @@ export interface PaymentIntentInfo {
   amount: number;
   failureMessage: string | null;
   latestChargeId: string | null;
+  /** card, affirm, klarna, us_bank_account… — from the charge, when Stripe returns it. */
+  paymentMethodType: string | null;
 }
 
 export interface CreateTerminalPaymentInput {
@@ -153,12 +162,14 @@ function toReaderInfo(o: StripeObject): TerminalReaderInfo {
 
 function toPaymentIntentInfo(o: StripeObject): PaymentIntentInfo {
   const err = (o.last_payment_error ?? null) as { message?: string } | null;
+  const charge = (o.latest_charge && typeof o.latest_charge === "object" ? o.latest_charge : null) as { id?: string; payment_method_details?: { type?: string } } | null;
   return {
     id: String(o.id),
     status: String(o.status ?? ""),
     amount: Number(o.amount ?? 0),
     failureMessage: err?.message ?? null,
-    latestChargeId: typeof o.latest_charge === "string" ? o.latest_charge : null,
+    latestChargeId: typeof o.latest_charge === "string" ? o.latest_charge : (charge?.id ?? null),
+    paymentMethodType: charge?.payment_method_details?.type ?? null,
   };
 }
 
@@ -199,6 +210,9 @@ export function checkoutSessionParams(c: CreateCheckoutInput): Record<string, st
     params[`metadata[${k}]`] = v;
     params[`payment_intent_data[metadata][${k}]`] = v;
   }
+  // Methods stay dynamic (never payment_method_types): Stripe offers what's
+  // enabled and eligible, minus anything this session's purpose rules out.
+  c.excludedPaymentMethodTypes.forEach((t, i) => (params[`excluded_payment_method_types[${i}]`] = t));
   return params;
 }
 
@@ -315,7 +329,7 @@ class StripeInvoicingProvider implements InvoicingProvider {
   }
 
   async retrievePaymentIntent(id: string) {
-    return toPaymentIntentInfo(await this.get(`payment_intents/${encodeURIComponent(id)}`));
+    return toPaymentIntentInfo(await this.get(`payment_intents/${encodeURIComponent(id)}?expand[]=latest_charge`));
   }
 
   async cancelPaymentIntent(id: string) {

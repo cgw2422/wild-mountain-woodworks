@@ -3,13 +3,19 @@ import type { SiteSetting } from "@/generated/prisma/client";
 /**
  * Customer-facing payment messaging (Admin → Settings → Payments).
  *
- * This is wording only. It never turns a payment method on or off: Stripe
- * Checkout decides which methods (card, bank, wallets, Affirm, Klarna…) a
- * customer is offered, based on the Stripe account, the amount, device and
- * eligibility. So the copy always says "when eligible" / "may include", and
- * it never states terms (monthly amounts, number of payments, rates,
- * approval). Plan-specific wording only ever comes from Stripe's own Payment
- * Method Messaging Element, for the exact amount due at checkout.
+ * Two different ways to pay after accepting a quote:
+ *  - the standard deposit (ordinary methods — card, bank, wallets…; Affirm
+ *    and Klarna are excluded from that Checkout), and
+ *  - full-purchase financing: the WHOLE order total in one Checkout, where
+ *    Affirm/Klarna may appear when the customer and amount are eligible.
+ * Affirm and Klarna are never offered for a deposit or a partial amount.
+ *
+ * The financing switch decides whether the full-purchase option is offered;
+ * Stripe still decides which methods are actually eligible. So the copy
+ * always says "when eligible" / "subject to approval", and never states terms
+ * (monthly amounts, number of payments, rates, approval). Plan-specific
+ * wording only ever comes from Stripe's own Payment Method Messaging Element,
+ * for the full order total being financed.
  */
 
 export type PaymentMessagingSettings = Pick<
@@ -31,8 +37,10 @@ export interface PaymentMessaging {
     text: string;
     /** Fixed qualifier, always shown with the financing text. */
     checkoutNote: string;
-    /** Short line for the quote/deposit step. */
+    /** Explanation next to the "Finance full purchase" choice. */
     quoteNotice: string;
+    /** Fixed: the full order is paid now; repayments go to the financing provider. */
+    fullPurchaseNote: string;
     /** For Stripe's messaging element (lowercase Stripe payment method types). */
     providers: FinancingProvider[];
   } | null;
@@ -47,6 +55,10 @@ export interface PaymentMessaging {
 const BRAND: Record<FinancingProvider, string> = { affirm: "Affirm", klarna: "Klarna" };
 
 export const CHECKOUT_NOTE = "Final payment options are shown securely at checkout.";
+/** Always shown with the full-purchase financing choice. */
+export const FINANCING_FULL_PURCHASE_NOTE = "Wild Mountain Woodworks receives payment for the full order now while you make payments to your financing provider. Subject to approval; available options are shown at checkout.";
+/** Stripe payment method types that are buy-now-pay-later: full purchase only, never a deposit or partial amount. */
+export const BNPL_PAYMENT_METHOD_TYPES = ["affirm", "klarna", "afterpay_clearpay"] as const;
 export const METHODS_INTRO = "Secure payment options may include:";
 export const METHODS_NOTE = "Payment options vary by eligibility, device and transaction.";
 
@@ -57,13 +69,11 @@ function brandList(providers: FinancingProvider[], joiner: "or" | "and") {
 
 /** The automatic wording used when no custom text is saved. */
 export function defaultFinancingText(providers: FinancingProvider[]) {
-  return providers.length ? `Pay over time with ${brandList(providers, "or")} when eligible.` : "Pay over time when eligible.";
+  return providers.length ? `Finance your full purchase with ${brandList(providers, "or")} when eligible.` : "Finance your full purchase when eligible.";
 }
 
 export function quoteFinancingNotice(providers: FinancingProvider[]) {
-  return providers.length
-    ? `Flexible payment options available at checkout, including ${brandList(providers, "and")} when eligible.`
-    : "Flexible payment options are available at checkout when eligible.";
+  return providers.length ? `Pay over time with ${brandList(providers, "or")} when eligible.` : "Pay over time when eligible.";
 }
 
 /**
@@ -76,18 +86,16 @@ export function paymentMessaging(settings: PaymentMessagingSettings, onlinePayme
   const providers = ([settings.paymentAffirmMessaging && "affirm", settings.paymentKlarnaMessaging && "klarna"].filter(Boolean) as FinancingProvider[]);
   const financing = settings.paymentFinancingMessaging
     ? {
-        heading: settings.paymentMessagingHeading.trim() || "Flexible payment options available",
+        heading: settings.paymentMessagingHeading.trim() || "Flexible financing available",
         text: settings.paymentMessagingText?.trim() || defaultFinancingText(providers),
         checkoutNote: CHECKOUT_NOTE,
         quoteNotice: quoteFinancingNotice(providers),
+        fullPurchaseNote: FINANCING_FULL_PURCHASE_NOTE,
         providers,
       }
     : null;
-  // A financing brand switched off is also left out of the general list.
-  const hidden = new Set<string>([
-    ...(!financing || !settings.paymentAffirmMessaging ? ["affirm"] : []),
-    ...(!financing || !settings.paymentKlarnaMessaging ? ["klarna"] : []),
-  ]);
+  // Affirm/Klarna are never one of the ordinary methods (they finance the full purchase only).
+  const hidden = new Set<string>(["affirm", "klarna", "afterpay", "afterpay / clearpay", "clearpay"]);
   const list = settings.paymentMethodsText
     .split(/[·•,|]/)
     .map((m) => m.trim())
@@ -112,6 +120,7 @@ const CLAIMS: Array<[RegExp, string]> = [
 
 export function financingClaimIssue(text: string | null | undefined): string | null {
   if (!text) return null;
+  if (/\bdeposits?\b/i.test(text)) return "Affirm and Klarna finance the full purchase only — financing wording can't mention a deposit.";
   for (const [re, what] of CLAIMS) {
     if (re.test(text)) {
       return `Payment messaging can't promise ${what}. Affirm and Klarna terms depend on each customer's eligibility — Stripe shows the eligible plans at checkout.`;

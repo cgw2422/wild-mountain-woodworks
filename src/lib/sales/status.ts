@@ -148,15 +148,37 @@ export const PAYMENT_METHOD_LABELS = {
   BANK_TRANSFER: "Bank transfer",
   OTHER: "Other",
 } as const;
+/** Purposes staff can choose when recording a payment. */
 export const PAYMENT_TYPES = ["DEPOSIT", "FINAL_BALANCE", "PARTIAL_PAYMENT", "ADDITIONAL_PAYMENT", "OTHER"] as const;
-export type PaymentTypeValue = (typeof PAYMENT_TYPES)[number];
+/** FULL_PURCHASE is only ever set by a verified full-purchase financing checkout. */
+export type PaymentTypeValue = (typeof PAYMENT_TYPES)[number] | "FULL_PURCHASE";
 export const PAYMENT_TYPE_LABELS: Record<PaymentTypeValue, string> = {
   DEPOSIT: "Deposit",
   FINAL_BALANCE: "Final balance",
   PARTIAL_PAYMENT: "Partial payment",
   ADDITIONAL_PAYMENT: "Additional payment",
+  FULL_PURCHASE: "Full purchase",
   OTHER: "Payment",
 };
+
+/** Customer-friendly names for the Stripe payment method actually used online. */
+const STRIPE_METHOD_NAMES: Record<string, string> = {
+  affirm: "Affirm",
+  klarna: "Klarna",
+  afterpay_clearpay: "Afterpay",
+  card: "Card",
+  link: "Link",
+  us_bank_account: "Bank account",
+  cashapp: "Cash App Pay",
+  amazon_pay: "Amazon Pay",
+};
+export function stripeMethodName(type: string | null | undefined): string | null {
+  return type ? (STRIPE_METHOD_NAMES[type] ?? null) : null;
+}
+/** Affirm / Klarna (/ Afterpay): the financing provider handles the customer's repayments. */
+export function isFinancingMethod(type: string | null | undefined) {
+  return type === "affirm" || type === "klarna" || type === "afterpay_clearpay";
+}
 export const PAYMENT_STATUS_LABELS = {
   SUCCEEDED: "Succeeded",
   PENDING: "Pending",

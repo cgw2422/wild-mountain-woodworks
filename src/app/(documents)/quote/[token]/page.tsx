@@ -10,7 +10,7 @@ import { buttonClasses } from "@/components/ui/Button";
 import { DocHeading, Facts, Files, LinesTable, Prose, Section, TotalsBlock, statusPill } from "@/components/documents/parts";
 import { PrintButton } from "@/components/documents/PrintButton";
 import { QuoteResponse } from "@/components/documents/QuoteResponse";
-import { FinancingNotice } from "@/components/payments/PaymentOptions";
+import { DepositMethodsNote, FinanceNote } from "@/components/payments/PaymentOptions";
 import { acceptQuoteAction, declineQuoteAction } from "./actions";
 
 type Props = { params: Promise<{ token: string }> };
@@ -182,11 +182,11 @@ export default async function CustomerQuotePage({ params }: Props) {
             balanceCents={rev.balanceCents}
             depositLabel={rev.depositLabel}
             onlinePayments={q.onlinePayments}
-            paymentNotice={
-              <FinancingNotice
-                messaging={q.paymentMessaging}
-                stripe={q.stripePublishableKey && rev.depositCents > 0 ? { publishableKey: q.stripePublishableKey, amountCents: rev.depositCents } : null}
-              />
+            financingAvailable={q.financingAvailable}
+            depositNote={<DepositMethodsNote messaging={q.paymentMessaging} />}
+            financeNote={
+              // Stripe's plan messaging is for the FULL total — Affirm/Klarna never finance the deposit.
+              <FinanceNote messaging={q.paymentMessaging} stripe={q.stripePublishableKey ? { publishableKey: q.stripePublishableKey, amountCents: rev.totals.totalCents } : null} />
             }
             customerName={rev.customer.name}
             contactHref={contactHref}

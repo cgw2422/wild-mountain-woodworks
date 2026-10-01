@@ -32,18 +32,23 @@ export default async function PaymentSuccessPage({ params, searchParams }: Props
   const justPaid = !confirming && o.recentlyPaid;
   if (!justPaid && !confirming) {
     // Nothing recent and no completed checkout: this isn't a payment confirmation.
-    const what = o.due?.type === "FINAL_BALANCE" ? "payment" : "deposit";
+    const what = o.due?.type === "DEPOSIT" ? "deposit" : "payment";
     return (
       <article>
         <DocHeading eyebrow={`Order ${o.number}`} title={`Your ${what} hasn't been received yet`} status={{ label: o.due?.type === "FINAL_BALANCE" ? "Balance due" : "Deposit due", tone: "warn" }}>
           <p className="lede mt-4 max-w-2xl text-muted">
-            {o.due?.payHref ? "If you left the payment page before finishing, you can pick up where you left off." : "Please see your order page for how to pay."}
+            {o.due?.payHref || o.financing ? "If you left the payment page before finishing, or financing wasn't approved, nothing was charged — you can choose how to pay again below." : "Please see your order page for how to pay."}
           </p>
         </DocHeading>
         <div className="mt-10 flex flex-wrap gap-3">
           {o.due?.payHref ? (
             <a href={o.due.payHref} rel="nofollow" className={buttonClasses("primary", "lg")}>
               Pay {formatCents(o.due.amountCents)} {o.due.type === "FINAL_BALANCE" ? "Balance" : "Deposit"}
+            </a>
+          ) : null}
+          {o.financing ? (
+            <a href={o.financing.href} rel="nofollow" className={buttonClasses("secondary", "lg")}>
+              Finance Full {formatCents(o.financing.amountCents)} Purchase
             </a>
           ) : null}
           <Link href={`/order/${token}`} className={buttonClasses(o.due?.payHref ? "secondary" : "primary", "lg")}>
@@ -64,7 +69,9 @@ export default async function PaymentSuccessPage({ params, searchParams }: Props
             ? "Stripe has your payment and is confirming it with us. This usually takes a few seconds — this page updates on its own."
             : deposit
               ? "Your piece is now ready to move into the next stage of production. We've emailed you a confirmation."
-              : "We've emailed you a receipt."}
+              : o.balanceCents <= 0 && o.paidInFullFinanced
+                ? `Your order is paid in full with ${o.paidInFullWith}. Any repayments are between you and ${o.paidInFullWith} — nothing more is owed to Wild Mountain Woodworks for this order. We've emailed you a receipt.`
+                : "We've emailed you a receipt."}
         </p>
       </DocHeading>
       {confirming ? <AutoRefresh /> : null}

@@ -124,6 +124,8 @@ export const acceptQuoteSchema = z.object({
   name: nameSchema,
   agreeTerms: z.literal("on", { error: "Please confirm this statement." }),
   agreeDeposit: z.literal("on", { error: "Please confirm this statement." }),
+  /** How the customer wants to proceed: the standard deposit, or financing the full purchase. */
+  paymentPath: z.enum(["deposit", "finance"]).default("deposit"),
 });
 export type AcceptQuoteInput = z.infer<typeof acceptQuoteSchema>;
 

@@ -11,8 +11,8 @@ import { SalesError } from "./errors";
 import { invoiceMoney, netPaid, recomputeInvoice } from "./ledger";
 import { adminLinks, customerLinks } from "./links";
 import { notifyAutoConfirmed, type Actor } from "./orders";
-import { MANUAL_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, PAYMENT_TYPES, PAYMENT_TYPE_LABELS, type ManualPaymentMethod } from "./status";
-import type { PaymentIntentInfo, StripeEvent } from "./stripe";
+import { MANUAL_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, PAYMENT_TYPES, PAYMENT_TYPE_LABELS, stripeMethodName, type ManualPaymentMethod } from "./status";
+import { getInvoicingProvider, type PaymentIntentInfo, type StripeEvent } from "./stripe";
 
 /*
  * Payments are always applied to a Wild Mountain Woodworks invoice. Every method has
@@ -50,7 +50,8 @@ async function sendReceipt(paymentId: string) {
       invoiceNumber: p.invoice.number,
       orderNumber: p.order?.number,
       amountPaid: formatCents(p.amountCents),
-      paymentMethod: PAYMENT_METHOD_LABELS[p.method],
+      // "Affirm" / "Klarna" / "Card" when Stripe reported it.
+      paymentMethod: stripeMethodName(p.stripePaymentMethodType) ?? PAYMENT_METHOD_LABELS[p.method],
       paymentFor: PAYMENT_TYPE_LABELS[p.type],
       balanceRemaining: formatCents(money.remainingCents),
     },
@@ -347,7 +348,21 @@ function idOf(v: string | { id: string } | null | undefined) {
 
 function typeFromMetadata(v: string | undefined): PaymentType {
   const t = (v ?? "").toUpperCase();
+  // The whole order financed in one payment (Affirm/Klarna when eligible).
+  if (t === "FULL_PURCHASE_FINANCING" || t === "FULL_PURCHASE") return "FULL_PURCHASE";
   return (PAYMENT_TYPES as readonly string[]).includes(t) ? (t as PaymentType) : "OTHER";
+}
+
+/** Best effort: note which Stripe method paid (card, affirm, klarna…) for the ledger and receipts. */
+async function recordStripeMethodType(paymentId: string, intentId: string | null) {
+  const provider = getInvoicingProvider();
+  if (!provider || !intentId) return;
+  try {
+    const pi = await provider.retrievePaymentIntent(intentId);
+    if (pi.paymentMethodType) await prisma.payment.update({ where: { id: paymentId }, data: { stripePaymentMethodType: pi.paymentMethodType.slice(0, 60) } });
+  } catch (error) {
+    logger.warn("Could not read the Stripe payment method type", { error, paymentId });
+  }
 }
 
 async function findStripeInvoice(tx: Prisma.TransactionClient, obj: StripeInvoiceObject) {
@@ -462,7 +477,8 @@ export async function processStripeEvent(event: StripeEvent): Promise<"processed
             await recordCustomerActivity(tx, { customerId: invoice.customerId, type: "payment.received", message: `${formatCents(amount)} ${PAYMENT_TYPE_LABELS[type].toLowerCase()} paid online for ${invoice.number}`, invoiceId: invoice.id, orderId: invoice.orderId });
             const r = await recomputeInvoice(tx, invoice.id);
             followUps.push(async () => {
-              await logActivity("payment.recorded", `Stripe Checkout payment of ${formatCents(amount)} (${PAYMENT_TYPE_LABELS[type].toLowerCase()}) received for invoice ${invoice.number}`, { entityType: "invoice", entityId: invoice.id });
+              await recordStripeMethodType(payment.id, intentId);
+              await logActivity("payment.recorded", `Stripe Checkout payment of ${formatCents(amount)} (${PAYMENT_TYPE_LABELS[type].toLowerCase()}${type === "FULL_PURCHASE" ? " — financed/paid in full" : ""}) received for invoice ${invoice.number}`, { entityType: "invoice", entityId: invoice.id });
               if (type === "DEPOSIT") await sendDepositReceived(payment.id);
               else await sendReceipt(payment.id);
               // The deposit confirmation already tells the customer their order is confirmed.

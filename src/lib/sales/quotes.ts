@@ -7,7 +7,8 @@ import type { ConfigurationSnapshot } from "@/lib/pricing/snapshot";
 import { adminRecipient, sendTemplateEmail, type SendResult } from "@/lib/email/send";
 import { getSettings, salesFlags } from "@/lib/settings";
 import { siteDateLong } from "@/lib/site-time";
-import { ACCEPT_DEPOSIT_LABEL, ACCEPT_NO_DEPOSIT_LABEL, ACCEPT_TERMS_LABEL } from "./acceptance";
+import { ACCEPT_DEPOSIT_LABEL, ACCEPT_FINANCE_LABEL, ACCEPT_NO_DEPOSIT_LABEL, ACCEPT_TERMS_LABEL } from "./acceptance";
+import { financingOffered } from "./checkout";
 import { findOrCreateCustomer, recordCustomerActivity } from "./customers";
 import { SalesError } from "./errors";
 import { VOIDED_QUOTE_MESSAGE } from "./voiding";
@@ -708,7 +709,11 @@ async function afterAcceptance(r: Awaited<ReturnType<typeof finalizeAcceptance>>
  * everything accepted. Creates the order and, when a deposit is required,
  * the deposit request. `payNow`: continue straight to Stripe Checkout.
  */
-export async function acceptQuote(token: string, input: { revisionNumber: number; name: string; agreeTerms: boolean; agreeDeposit: boolean }, meta: CustomerMeta) {
+export async function acceptQuote(
+  token: string,
+  input: { revisionNumber: number; name: string; agreeTerms: boolean; agreeDeposit: boolean; /** "finance": pay the full order total with Affirm/Klarna (when offered). */ paymentPath?: "deposit" | "finance" },
+  meta: CustomerMeta,
+) {
   const quote = await prisma.quoteRequest.findUnique({ where: { customerToken: token }, include: { revisions: true } });
   if (!quote) throw new SalesError("This quote link is not valid.");
   const rev = customerRevisionOf(quote.revisions);
@@ -716,16 +721,20 @@ export async function acceptQuote(token: string, input: { revisionNumber: number
   if (!input.agreeTerms || !input.agreeDeposit) throw new SalesError("Please confirm both statements to accept.", { ...(input.agreeTerms ? {} : { agreeTerms: "Required." }), ...(input.agreeDeposit ? {} : { agreeDeposit: "Required." }) });
   const name = input.name.trim().replace(/\s+/g, " ");
   if (name.length < 2) throw new SalesError("Please type your full name to accept.", { name: "Type your full name." });
-  const agreements = [ACCEPT_TERMS_LABEL, rev.depositCents > 0 ? ACCEPT_DEPOSIT_LABEL : ACCEPT_NO_DEPOSIT_LABEL];
-  const online = salesFlags(await getSettings()).onlinePayments;
+  const settings = await getSettings();
+  const online = salesFlags(settings).onlinePayments;
+  const financing = input.paymentPath === "finance";
+  if (financing && !(financingOffered(settings) && rev.totalCents > 0)) throw new SalesError("Financing isn't available for this quote right now. Please choose the deposit option, or contact us.");
+  const agreements = [ACCEPT_TERMS_LABEL, financing ? ACCEPT_FINANCE_LABEL : rev.depositCents > 0 ? ACCEPT_DEPOSIT_LABEL : ACCEPT_NO_DEPOSIT_LABEL];
   const result = await finalizeAcceptance(quote.id, rev.id, { name, method: "online", agreements, meta, actorId: null, online });
-  const payNow = online && rev.depositCents > 0;
-  await logActivity("quote.accepted", `${name} accepted ${quote.number} rev ${rev.number} online (${formatCents(rev.totalCents)}); order ${result.order.number} created${payNow ? "; continuing to deposit payment" : ""}`, {
-    entityType: "quote",
-    entityId: quote.id,
-  });
-  await afterAcceptance(result, { payingNow: payNow, online });
-  return { order: result.order, payNow };
+  const payNow = online && rev.depositCents > 0 && !financing;
+  await logActivity(
+    "quote.accepted",
+    `${name} accepted ${quote.number} rev ${rev.number} online (${formatCents(rev.totalCents)}); order ${result.order.number} created${financing ? "; chose full-purchase financing" : payNow ? "; continuing to deposit payment" : ""}`,
+    { entityType: "quote", entityId: quote.id },
+  );
+  await afterAcceptance(result, { payingNow: payNow || financing, online });
+  return { order: result.order, payNow, financing };
 }
 
 /** Staff record an acceptance received by phone, email or in person. */

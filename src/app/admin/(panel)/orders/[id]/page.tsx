@@ -21,6 +21,7 @@ import {
   PRODUCTION_STATUS_LABELS,
   paymentStatusLabel,
   statusLabel,
+  stripeMethodName,
 } from "@/lib/sales/status";
 import { ActionButton, ActionForm, ConfirmAction, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { Badge, Card, DescriptionList, PageHeader, adminButton, formatDate } from "@/components/admin/ui";
@@ -83,6 +84,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const live = order.invoices.filter((i) => i.status !== "VOIDED" && i.status !== "CANCELED");
   const primary = live.find((i) => i.kind === "FULL") ?? live.find((i) => i.totalCents > i.amountPaidCents && i.status !== "DRAFT") ?? live[0] ?? null;
   const primaryMoney = primary ? invoiceMoney(primary) : null;
+  const fullPurchase = primary ? order.payments.find((p) => p.invoiceId === primary.id && p.type === "FULL_PURCHASE" && p.status === "SUCCEEDED") : undefined;
   const legacy = live.some((i) => i.kind === "DEPOSIT" || i.kind === "BALANCE");
   const invoicedLive = live.reduce((s, i) => s + i.totalCents, 0);
   const canCreateInvoice = !live.some((i) => i.kind === "FULL") && invoicedLive < order.totalCents;
@@ -187,6 +189,12 @@ export default async function OrderDetailPage({ params }: Props) {
                       redirectToId="/admin/invoices/"
                     />
                   ) : null}
+                  {primary && primaryMoney && primaryMoney.remainingCents <= 0 && order.customerId ? (
+                    // A paid (possibly financed) order is never re-priced: extra work gets its own invoice.
+                    <Link href={`/admin/invoices/new?customer=${order.customerId}&order=${order.id}`} className={adminButton.small}>
+                      Bill a change order
+                    </Link>
+                  ) : null}
                 </div>
               ) : null
             }
@@ -212,6 +220,11 @@ export default async function OrderDetailPage({ params }: Props) {
                   <Stat label="Due now" value={formatCents(primaryMoney.dueNowCents, { showZeroCents: true })} />
                 </dl>
                 {primary.balanceDueAt ? <p className="text-xs text-neutral-600">Final balance requested {formatDate(primary.balanceDueAt, true)}.</p> : null}
+                {fullPurchase ? (
+                  <p className="text-xs text-neutral-600">
+                    Paid in full in one online payment{stripeMethodName(fullPurchase.stripePaymentMethodType) ? ` with ${stripeMethodName(fullPurchase.stripePaymentMethodType)}` : ""} (full-purchase financing checkout). The customer repays their financing provider — nothing is owed to us. Bill any later change as a separate change order; the original payment is never altered.
+                  </p>
+                ) : null}
               </div>
             ) : (
               <p className="text-sm text-neutral-500">{canceled ? "Canceled order." : "Create the order's invoice to take payments."}</p>
@@ -240,7 +253,8 @@ export default async function OrderDetailPage({ params }: Props) {
                   {order.payments.map((p) => (
                     <li key={p.id} className={cn("flex flex-wrap items-center justify-between gap-2", ["VOIDED", "FAILED", "RETURNED"].includes(p.status) && "text-neutral-400")}>
                       <span>
-                        {formatDate(p.receivedAt)} · {PAYMENT_METHOD_LABELS[p.method]} — {PAYMENT_TYPE_LABELS[p.type]}
+                        {formatDate(p.receivedAt)} · {PAYMENT_METHOD_LABELS[p.method]}
+                        {stripeMethodName(p.stripePaymentMethodType) ? ` (${stripeMethodName(p.stripePaymentMethodType)})` : ""} — {PAYMENT_TYPE_LABELS[p.type]}
                         {p.method === "CHECK" && p.reference ? ` · #${p.reference}` : ""}
                       </span>
                       <span className="flex items-center gap-2">

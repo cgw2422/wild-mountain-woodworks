@@ -197,7 +197,7 @@ export default async function SettingsPage() {
         <Card
           id="payments"
           title="Payments"
-          description="What customers are told about payment options on product, quote and order pages. These switches only change wording — they never turn a payment method on or off. Which methods a customer actually sees (card, bank, wallets, Affirm, Klarna…) is decided by your Stripe settings and each customer's eligibility at checkout."
+          description="Customers choose between two ways to proceed after accepting a quote: pay the deposit (card, bank, wallets… — Affirm and Klarna are never offered for a deposit), or finance the FULL purchase with Affirm or Klarna when eligible (one Stripe Checkout for the whole order total; the invoice is then paid in full and the provider handles repayments). Which methods actually appear is decided by your Stripe settings and each customer's eligibility."
         >
           <ActionForm action={saveSettings.bind(null, "payments")} className="space-y-5">
             <p role="note" className="rounded bg-neutral-50 p-3 text-sm text-neutral-700">
@@ -207,14 +207,19 @@ export default async function SettingsPage() {
                 <>Online payments are <Badge tone="neutral">OFF</Badge> — nothing here is shown until they&apos;re on (see Features below), since there&apos;s no online checkout yet.</>
               )}
               <span className="mt-2 block text-xs text-neutral-600">
-                Stripe&apos;s own Affirm/Klarna messaging (eligible plans for the exact deposit, with their official marks) on quote and order pages:{" "}
+                Stripe&apos;s own Affirm/Klarna messaging (eligible plans for the full order total, with their official marks) on quote, order and invoice pages:{" "}
                 {stripePublishableKey() ? <Badge tone="green">Configured</Badge> : <>off — your developer can set <code>STRIPE_PUBLISHABLE_KEY</code> to turn it on.</>} Product pages always use the wording below, without amounts.
               </span>
             </p>
-            <Toggle name="paymentFinancingMessaging" label="Show financing messaging" defaultChecked={settings.paymentFinancingMessaging} description="A small “Flexible payment options available” note under the request button on product pages, and before the deposit payment on quotes and orders." />
+            <Toggle
+              name="paymentFinancingMessaging"
+              label="Offer full-purchase financing"
+              defaultChecked={settings.paymentFinancingMessaging}
+              description="Shows “Finance full purchase” next to the deposit on quotes, orders and invoices (only while nothing has been paid), and the “Finance your full purchase with Affirm or Klarna when eligible” note on product pages. Affirm/Klarna must also be enabled in your Stripe Dashboard."
+            />
             <div className="grid gap-5 border-l-2 border-neutral-200 pl-4 md:grid-cols-2">
-              <Toggle name="paymentAffirmMessaging" label="Mention Affirm" defaultChecked={settings.paymentAffirmMessaging} description="Only if Affirm is enabled in your Stripe account." />
-              <Toggle name="paymentKlarnaMessaging" label="Mention Klarna" defaultChecked={settings.paymentKlarnaMessaging} description="Only if Klarna is enabled in your Stripe account." />
+              <Toggle name="paymentAffirmMessaging" label="Affirm" defaultChecked={settings.paymentAffirmMessaging} description="Only if Affirm is enabled in your Stripe account." />
+              <Toggle name="paymentKlarnaMessaging" label="Klarna" defaultChecked={settings.paymentKlarnaMessaging} description="Only if Klarna is enabled in your Stripe account." />
             </div>
             <TextInput name="paymentMessagingHeading" label="Financing heading" defaultValue={settings.paymentMessagingHeading} maxLength={80} required />
             <TextArea
@@ -224,10 +229,10 @@ export default async function SettingsPage() {
               defaultValue={s(settings.paymentMessagingText)}
               maxLength={300}
               placeholder={defaultFinancingText(["affirm", "klarna"])}
-              help="Leave blank for automatic wording that follows the Affirm/Klarna switches. Always say “when eligible”; specific terms (monthly amounts, number of payments, rates, approval) are refused — Stripe shows eligible plans at checkout. “Final payment options are shown securely at checkout.” is always added."
+              help="Leave blank for automatic wording (“Finance your full purchase with Affirm or Klarna when eligible.”). Always say “when eligible”; specific terms (monthly amounts, number of payments, rates, approval) and any mention of financing a deposit are refused — Affirm and Klarna finance the full purchase only, and Stripe shows eligible plans at checkout."
             />
             <Toggle name="paymentMethodsMessaging" label="Show general payment methods" defaultChecked={settings.paymentMethodsMessaging} description="A secondary “Secure payment options may include: …” line, always followed by “Payment options vary by eligibility, device and transaction.”" />
-            <TextInput name="paymentMethodsText" label="Payment methods list" defaultValue={settings.paymentMethodsText} maxLength={200} required help="Separate with · or commas. Affirm and Klarna are left out automatically when their switch is off." />
+            <TextInput name="paymentMethodsText" label="Payment methods list" defaultValue={settings.paymentMethodsText} maxLength={200} required help="Ordinary methods, shown with the deposit and balance buttons. Separate with · or commas. Affirm and Klarna are always left out here — they're offered only as full-purchase financing." />
             <div className="flex justify-end border-t border-neutral-100 pt-4">
               <SubmitButton>Save payment messaging</SubmitButton>
             </div>

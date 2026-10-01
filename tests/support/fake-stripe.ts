@@ -63,7 +63,7 @@ export function fakeStripe(overrides: Partial<InvoicingProvider> = {}) {
       const id = `pi_term_${++intentSeq}`;
       const params = terminalPaymentIntentParams(c);
       calls.push(`terminal_intent:${c.amountCents}`);
-      const pi = { id, status: "requires_payment_method", amount: c.amountCents, failureMessage: null, latestChargeId: null, params, key: c.idempotencyKey };
+      const pi = { id, status: "requires_payment_method", amount: c.amountCents, failureMessage: null, latestChargeId: null, paymentMethodType: null, params, key: c.idempotencyKey };
       intents.set(id, pi);
       intentByKey.set(c.idempotencyKey, id);
       return pi;
@@ -151,11 +151,13 @@ export function fakeStripe(overrides: Partial<InvoicingProvider> = {}) {
       pi.failureMessage = message;
       return pi;
     },
-    /** The customer finished paying on Stripe's page (not yet confirmed to us). */
-    complete(id: string, paymentStatus: "paid" | "unpaid" = "paid") {
+    /** The customer finished paying on Stripe's page (not yet confirmed to us), with the method they chose. */
+    complete(id: string, paymentStatus: "paid" | "unpaid" = "paid", paymentMethodType = "card") {
       const s = sessions.get(id)!;
       s.status = "complete";
       s.paymentStatus = paymentStatus;
+      // The session's PaymentIntent, as Stripe would report it (with the method used).
+      intents.set(`pi_${id}`, { id: `pi_${id}`, status: paymentStatus === "paid" ? "succeeded" : "processing", amount: s.amountTotal ?? 0, failureMessage: null, latestChargeId: `ch_${id}`, paymentMethodType, params: {}, key: `checkout-${id}` });
       return s;
     },
     /** Stripe expired the session (24h passed). */
