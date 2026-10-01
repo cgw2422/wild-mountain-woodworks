@@ -7,6 +7,7 @@ import { formatCents } from "@/lib/money";
 import { sendTemplateEmail, type SendResult } from "@/lib/email/send";
 import { getSettings, salesFlags } from "@/lib/settings";
 import { siteDateLong } from "@/lib/site-time";
+import { closeOpenCheckout } from "./checkout";
 import { recordCustomerActivity } from "./customers";
 import { SalesError } from "./errors";
 import { recomputeInvoice } from "./ledger";
@@ -71,7 +72,18 @@ async function invoicedSoFar(db: Db | typeof prisma, orderId: string, excludeId?
  *  - FULL:    every line of the accepted quote (orders without a deposit)
  * Amounts come from the order/accepted revision on the server only.
  */
-export async function createInvoiceForOrder(db: Db, orderId: string, kind: Exclude<InvoiceKind, "CUSTOM">, actorId: string | null) {
+export async function createInvoiceForOrder(
+  db: Db,
+  orderId: string,
+  kind: Exclude<InvoiceKind, "CUSTOM">,
+  actorId: string | null,
+  /**
+   * issue: create it as an open payment request instead of a draft (the
+   * deposit at quote acceptance — no admin "send" step). online: Stripe
+   * payments are on (OPEN, payable by Checkout) vs offline (SENT).
+   */
+  opts: { issue?: boolean; online?: boolean } = {},
+) {
   const order = await db.order.findUnique({ where: { id: orderId }, include: { quote: { select: { number: true } }, acceptedRevision: { include: { lineItems: { orderBy: { position: "asc" } } } } } });
   if (!order) throw new SalesError("That order no longer exists.");
   if (order.productionStatus === "CANCELED") throw new SalesError("This order is canceled.");
@@ -108,11 +120,13 @@ export async function createInvoiceForOrder(db: Db, orderId: string, kind: Exclu
   }
 
   const number = await nextNumber("invoice", db);
+  const initial = opts.issue ? (opts.online ? "OPEN" : "SENT") : "DRAFT";
   const invoice = await db.invoice.create({
     data: {
       number,
       kind,
-      status: "DRAFT",
+      status: initial,
+      sentAt: opts.issue ? new Date() : null,
       customerId: order.customerId,
       quoteId: order.quoteId,
       revisionId: order.acceptedRevisionId,
@@ -124,7 +138,7 @@ export async function createInvoiceForOrder(db: Db, orderId: string, kind: Exclu
       publicToken: newCustomerToken(),
       createdById: actorId,
       lineItems: { create: lineRows(lines) },
-      statusEvents: { create: { toStatus: "DRAFT", authorId: actorId } },
+      statusEvents: { create: { toStatus: initial, authorId: actorId } },
     },
   });
   return invoice;
@@ -196,10 +210,13 @@ export async function saveInvoiceDraft(actor: Actor, invoiceId: string, input: {
 const TEMPLATE_BY_KIND: Record<InvoiceKind, string> = { DEPOSIT: "deposit_invoice", BALANCE: "balance_invoice", FULL: "invoice_sent", CUSTOM: "invoice_sent" };
 
 async function emailInvoice(invoiceId: string, template?: string): Promise<SendResult> {
-  const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { order: { select: { number: true } } } });
+  const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { order: { select: { number: true, customerToken: true } } } });
   const settings = await getSettings();
-  const stripe = salesFlags(settings).stripeInvoicing && invoice.stripeHostedInvoiceUrl;
-  const url = stripe ? invoice.stripeHostedInvoiceUrl! : customerLinks.invoice(invoice.publicToken!);
+  const online = salesFlags(settings).stripeInvoicing;
+  // Deposits are paid through Stripe Checkout from the stable order link; other invoices through Stripe's hosted page.
+  const checkoutLink = online && invoice.kind === "DEPOSIT" && !invoice.stripeHostedInvoiceUrl && invoice.order?.customerToken ? customerLinks.depositPay(invoice.order.customerToken) : null;
+  const stripe = online && (invoice.stripeHostedInvoiceUrl || checkoutLink);
+  const url = checkoutLink ?? (stripe ? invoice.stripeHostedInvoiceUrl! : customerLinks.invoice(invoice.publicToken!));
   return sendTemplateEmail({
     template: template ?? TEMPLATE_BY_KIND[invoice.kind],
     to: invoice.customerEmail,
@@ -304,6 +321,8 @@ export async function voidInvoice(actor: Actor, invoiceId: string, reason: strin
   if (!invoice) throw new SalesError("That invoice no longer exists.");
   if (invoice.status === "VOID" || invoice.status === "CANCELED") throw new SalesError("This invoice is already void.");
   if (invoice.amountPaidCents > 0) throw new SalesError("This invoice has payments. Record a refund (or void the manual payment) before voiding it.");
+  // Canceling a deposit request closes its online checkout so it can't be paid afterwards.
+  await closeOpenCheckout(invoice.id);
   if (invoice.stripeInvoiceId) {
     const provider = getInvoicingProvider();
     if (!provider) throw new SalesError("Stripe is not configured, so the Stripe invoice can't be voided.");

@@ -330,8 +330,8 @@ The flow (all in `src/lib/sales/`):
 2. **Edit** (Admin → Quotes). Lines are free-form: product, add-on, custom, discount, delivery, installation or fee. You can add, remove, reorder and duplicate them. Prices no longer follow the catalog. The deposit can be none, a percentage or a fixed amount; tax stays off until enabled. The server recomputes totals on every save, and price changes are written to the audit log.
 3. **Send.** The revision becomes read-only and the customer is emailed a link to `/quote/<token>`. Changes need **Create revision**; sending revision 2 supersedes revision 1, which can no longer be accepted.
 4. **Customer page.** The customer sees the current sent revision only, never drafts, internal notes, costs or ids. The first view marks the quote *Viewed*. Expired quotes stay viewable but can't be accepted (admin can **Extend**).
-5. **Accept or decline.** Accepting requires a typed name and two confirmations. It stores the timestamp, IP, browser and a frozen copy of everything accepted, creates the order `WMO-1001…`, and drafts the deposit invoice `WMI-1001…`. Staff can also **Record acceptance** for phone or in-person approvals.
-6. **Invoices** (Admin → Invoices): deposit, final balance (total minus everything already invoiced), full, or custom. Drafts are editable; sent invoices are never edited (void and re-issue instead).
+5. **Accept and pay the deposit — one step.** Accepting requires a typed name and two confirmations. It stores the timestamp, IP, browser and a frozen copy of everything accepted, creates the order `WMO-1001…`, and issues the deposit request `WMI-1001…` (no admin "send" step). With online payments on, the button reads **Accept Quote & Pay $X Deposit** and shows Quote Total / Deposit Due Today / Remaining Balance; accepting goes straight to Stripe Checkout (see below). Without a deposit it's a plain **Accept Quote** to the order page. Staff can also **Record acceptance** for phone or in-person approvals.
+6. **Invoices** (Admin → Invoices): final balance (**Create final balance invoice** on the order), deposit (total minus everything already invoiced), full, or custom. Drafts are editable; sent invoices are never edited (void and re-issue instead).
 7. **Payments.** Payments come from Stripe webhooks or from **Record payment** (cash, check, bank transfer or other), and several payments per invoice are fine. Invoice and order payment status is always *derived* from payment records. Payments are never deleted: a mistaken manual entry is voided, and refunds are recorded.
 8. **Order** (Admin → Orders). Production status (quote accepted → awaiting deposit → … → completed), payment status and delivery status are separate. Paying the deposit moves the order to *Deposit paid* automatically. Other tools: a printable work order, and optional customer emails for progress, delivery date and completion. The customer's page is `/order/<token>`.
 
@@ -347,7 +347,7 @@ The flow (all in `src/lib/sales/`):
 | Quote requests | on | Configurator "Request Quote" and `/request-quote` |
 | Custom orders | on | Custom build form |
 | Tax on quotes and invoices | **off** | Adds a tax field to quotes when on (no automatic tax rules) |
-| Stripe invoicing | **off** | Effective only when the switch is on **and** `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` are set |
+| Online payments (Stripe) | **off** | Deposits by Stripe Checkout, later invoices by Stripe Invoicing. Effective only when the switch is on **and** `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` are set |
 
 **Settings → Quotes & invoices** holds these defaults:
 - how long quotes are valid, invoice due days, and when to flag unanswered requests;
@@ -356,17 +356,20 @@ The flow (all in `src/lib/sales/`):
 - offline payment instructions;
 - who emails Stripe invoices: Wild Mountain's branded email with the hosted link (option B, the default) or Stripe itself (option A).
 
-### Turning on Stripe invoicing
+### Turning on online payments (Stripe)
 
-1. In Stripe, create a restricted or secret key with access to Customers and Invoices. Add a webhook endpoint `https://<your-domain>/api/stripe/webhook` for these events:
+1. In Stripe, create a restricted key with **Write** access to Core → Customers, Billing → Invoices (and Invoice items) and **Checkout → Checkout Sessions**. Add a webhook endpoint `https://<your-domain>/api/stripe/webhook` for these events:
+   - `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`
    - `invoice.finalized`, `invoice.sent`, `invoice.updated`
    - `invoice.paid`, `invoice.payment_succeeded`, `invoice.payment_failed`
    - `invoice.voided`, `invoice.marked_uncollectible`
    - `charge.refunded`
-2. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` on Railway and redeploy.
-3. Turn on **Settings → Features → Stripe invoicing**.
+2. Set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `NEXT_PUBLIC_SITE_URL` (Stripe's return links) on Railway and redeploy.
+3. Turn on **Settings → Features → Online payments (Stripe)**.
 
-After that, **Send invoice** creates the Stripe customer, invoice and items, then finalizes it. Every call uses an idempotency key, so a double-click or retry can't create duplicates. Only verified, de-duplicated webhooks (the `StripeEvent` table) mark invoices paid. If Stripe fails, the invoice stays a draft. Card details only ever go to Stripe's hosted page.
+**Deposits (Stripe Checkout).** After acceptance the customer goes to `/order/<token>/pay`, which opens a one-time Checkout Session (`mode=payment`) for the unpaid deposit — the amount always comes from the deposit request frozen at acceptance, never from the browser. The session carries `client_reference_id` (the deposit request), the customer's email and metadata `quote_id`, `quote_number`, `quote_revision`, `order_id`, `order_number`, `customer_id`, `payment_type=deposit`. Cards are never saved (no `setup_future_usage`, no Stripe customer, no off-session use). Until paid, the order is *Awaiting deposit* / *Deposit due*. Only the verified `checkout.session.*` webhook records the payment (idempotent per event, session and PaymentIntent), moves the order to *Deposit paid* and emails the "Thank you for your order" confirmation; Stripe returns the customer to `/order/<token>/payment-success`, which only displays the state. If the customer leaves, the quote stays *Accepted* and the order page shows **Pay Deposit**: the same link reuses an open session or replaces an expired one automatically, and one reminder email goes out when a session expires. On the order, admins see the deposit card (quote accepted, order created, deposit due, payment and Checkout status) with **Copy deposit payment link**, **Open payment**, **Resend payment link**, **Mark manual payment** (closes any open checkout first, so it can't also be paid online) and **Cancel payment request**.
+
+**Final balance and later invoices (Stripe Invoicing).** After that, **Send invoice** creates the Stripe customer, invoice and items, then finalizes it. Every call uses an idempotency key, so a double-click or retry can't create duplicates. Only verified, de-duplicated webhooks (the `StripeEvent` table) mark invoices paid. If Stripe fails, the invoice stays a draft. Card details only ever go to Stripe's hosted page.
 
 ## Email notifications
 
@@ -401,7 +404,7 @@ See `.env.example` for a commented template.
 | `EMAIL_FROM` | with email | e.g. `Wild Mountain Woodworks <hello@yourdomain.com>` |
 | `RESEND_API_KEY` / `POSTMARK_SERVER_TOKEN` | with email | Keep secret |
 | `ADMIN_NOTIFICATION_EMAIL` | no | Fallback recipient for notifications |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | no | Only for Stripe invoicing. The site, quotes and offline invoices run fully without them |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | no | Only for online payments (Checkout deposits + Stripe invoices). The site, quotes and offline invoices run fully without them |
 | `LOG_LEVEL` | no | `debug` / `info` / `warn` / `error` |
 | `DATABASE_POOL_SIZE` | no | Default 10 |
 | `TEST_DATABASE_URL` | tests | A separate database for integration tests. Never your real data |

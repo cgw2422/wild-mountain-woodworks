@@ -125,7 +125,10 @@ describe.skipIf(!hasTestDb)("sales admin actions", () => {
     const accepted = await sales.acceptQuoteManuallyAction(quote.id, form({ note: "Accepted by phone" }));
     expect(accepted).toMatchObject({ ok: true, id: expect.any(String) });
     const invoice = await prisma.invoice.findFirstOrThrow({ where: { orderId: accepted.id } });
-    expect(await sales.sendInvoiceAction(invoice.id)).toMatchObject({ ok: true });
+    // The deposit request is issued at acceptance — there's nothing to "send"; resending emails it again.
+    expect(invoice).toMatchObject({ kind: "DEPOSIT", status: "SENT" });
+    expect(await sales.sendInvoiceAction(invoice.id)).toMatchObject({ ok: false, message: expect.stringMatching(/already been sent/) });
+    expect(await sales.resendInvoiceAction(invoice.id, false)).toMatchObject({ ok: true });
     expect(await sales.recordPaymentAction(invoice.id, form({ amount: "abc", method: "CASH", receivedOn: "2026-10-01" }))).toMatchObject({ ok: false, fieldErrors: { amount: expect.any(String) } });
     expect(await sales.recordPaymentAction(invoice.id, form({ amount: "600", method: "CHECK", receivedOn: "2026-10-01", reference: "1042" }))).toMatchObject({ ok: true });
     expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "PAID" });

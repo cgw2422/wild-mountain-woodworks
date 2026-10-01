@@ -46,6 +46,7 @@ export default async function CustomerQuotePage({ params }: Props) {
   }
 
   const accepted = rev.status === "ACCEPTED";
+  const depositInvoice = q.invoices.find((i) => i.kind === "DEPOSIT");
   return (
     <article>
       <DocHeading eyebrow={`Quote ${q.number}${rev.number > 1 ? ` · Revision ${rev.number}` : ""}`} title={`Prepared for ${rev.customer.name}`} status={statusPill(q.status)}>
@@ -70,9 +71,16 @@ export default async function CustomerQuotePage({ params }: Props) {
             {rev.acceptedAt ? ` on ${siteDateLong(rev.acceptedAt)}` : ""}. Thank you!
           </p>
           {q.order ? (
-            <Link href={`/order/${q.order.token}`} className={buttonClasses("text", "md", "mt-2")}>
-              View order {q.order.number}
-            </Link>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              {depositInvoice?.payUrl && depositInvoice.amountDueCents > 0 ? (
+                <a href={depositInvoice.payUrl} className={buttonClasses("primary", "md")} rel="nofollow noopener noreferrer">
+                  Pay {formatCents(depositInvoice.amountDueCents)} Deposit
+                </a>
+              ) : null}
+              <Link href={`/order/${q.order.token}`} className={buttonClasses("text", "md")}>
+                View order {q.order.number}
+              </Link>
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -145,8 +153,11 @@ export default async function CustomerQuotePage({ params }: Props) {
         {!q.blocker ? (
           <QuoteResponse
             revision={rev.number}
-            hasDeposit={rev.depositCents > 0}
+            totalCents={rev.totals.totalCents}
+            depositCents={rev.depositCents}
+            balanceCents={rev.balanceCents}
             depositLabel={rev.depositLabel}
+            onlinePayments={q.onlinePayments}
             customerName={rev.customer.name}
             contactHref={contactHref}
             accept={acceptQuoteAction.bind(null, token)}

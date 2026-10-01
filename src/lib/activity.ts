@@ -36,6 +36,8 @@ export type ActivityType =
   | "invoice.voided"
   | "invoice.stripe_failed"
   | "payment.recorded"
+  | "payment.checkout_started"
+  | "payment.link_sent"
   | "payment.voided"
   | "payment.refunded"
   | "customer.created"

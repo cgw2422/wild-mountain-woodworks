@@ -12,7 +12,8 @@ import { resendLoggedEmail, type SendResult } from "@/lib/email/send";
 import { EMAIL_TEMPLATE_KEYS } from "@/lib/email/template-definitions";
 import { recordCustomerActivity } from "@/lib/sales/customers";
 import { createCustomInvoice, createInvoiceForOrder, resendInvoice, saveInvoiceDraft, sendInvoice, voidInvoice, type InvoiceLineInput } from "@/lib/sales/invoices";
-import { recordManualPayment, recordRefund, voidManualPayment } from "@/lib/sales/payments";
+import { recordManualPayment, recordRefund, sendDepositPaymentRequest, voidManualPayment } from "@/lib/sales/payments";
+import { getSettings, salesFlags } from "@/lib/settings";
 import { updateOrder } from "@/lib/sales/orders";
 import {
   MANUAL_QUOTE_STATUSES,
@@ -296,10 +297,24 @@ export const updateOrderAction = permittedAction("sales", async (admin, orderIdA
 export const createOrderInvoiceAction = permittedAction("finance", async (admin, orderIdArg: string, kind: "DEPOSIT" | "BALANCE" | "FULL") => {
   const orderId = idSchema.parse(orderIdArg);
   if (!["DEPOSIT", "BALANCE", "FULL"].includes(kind)) throw new AdminError("Unknown invoice type.");
-  const invoice = await prisma.$transaction((tx) => createInvoiceForOrder(tx, orderId, kind, admin.id));
+  // With online payments on, a deposit is a ready-to-pay Checkout request (no
+  // Stripe invoice); balances and other invoices start as drafts to review and send.
+  const onlineDeposit = kind === "DEPOSIT" && salesFlags(await getSettings()).onlinePayments;
+  const invoice = await prisma.$transaction((tx) => createInvoiceForOrder(tx, orderId, kind, admin.id, onlineDeposit ? { issue: true, online: true } : {}));
   await logActivity("invoice.created", `${admin.name} created ${kind.toLowerCase()} invoice ${invoice.number}`, { actorId: admin.id, entityType: "invoice", entityId: invoice.id });
   refreshSales(`/admin/orders/${orderId}`, "/admin/invoices");
-  return { ok: true, id: invoice.id, message: `Draft invoice ${invoice.number} created.` };
+  return { ok: true, id: invoice.id, message: onlineDeposit ? `Deposit payment request ${invoice.number} created — use “Resend payment link” to email it.` : `Draft invoice ${invoice.number} created.` };
+});
+
+/** Email the customer the secure deposit payment link (opens a fresh Stripe Checkout each time). */
+export const resendDepositLinkAction = permittedAction("finance", async (admin, invoiceIdArg: string) => {
+  const invoiceId = idSchema.parse(invoiceIdArg);
+  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId }, select: { kind: true, status: true, number: true, orderId: true } });
+  if (!invoice || invoice.kind !== "DEPOSIT" || ["VOID", "CANCELED", "PAID", "DRAFT"].includes(invoice.status)) throw new AdminError("There's no open deposit request to send.");
+  const r = await sendDepositPaymentRequest(invoiceId);
+  await logActivity("payment.link_sent", `${admin.name} emailed the deposit payment link for ${invoice.number}`, { actorId: admin.id, entityType: "invoice", entityId: invoiceId });
+  refreshSales(`/admin/invoices/${invoiceId}`, ...(invoice.orderId ? [`/admin/orders/${invoice.orderId}`] : []));
+  return emailOutcome(r, "Payment link emailed to the customer.");
 });
 
 /* ================================================================ invoices */

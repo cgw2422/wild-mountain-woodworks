@@ -5,7 +5,7 @@ import { logActivity } from "@/lib/activity";
 import { formatCents } from "@/lib/money";
 import type { ConfigurationSnapshot } from "@/lib/pricing/snapshot";
 import { adminRecipient, sendTemplateEmail, type SendResult } from "@/lib/email/send";
-import { getSettings } from "@/lib/settings";
+import { getSettings, salesFlags } from "@/lib/settings";
 import { siteDateLong } from "@/lib/site-time";
 import { ACCEPT_DEPOSIT_LABEL, ACCEPT_NO_DEPOSIT_LABEL, ACCEPT_TERMS_LABEL } from "./acceptance";
 import { findOrCreateCustomer, recordCustomerActivity } from "./customers";
@@ -618,7 +618,7 @@ function acceptedSnapshot(quote: { number: string | null }, rev: RevisionWithLin
 async function finalizeAcceptance(
   quoteId: string,
   revisionId: string,
-  opts: { name: string; method: "online" | "manual"; agreements: string[]; meta: CustomerMeta; actorId: string | null },
+  opts: { name: string; method: "online" | "manual"; agreements: string[]; meta: CustomerMeta; actorId: string | null; online: boolean },
 ) {
   const now = new Date();
   return prisma.$transaction(async (tx) => {
@@ -647,8 +647,10 @@ async function finalizeAcceptance(
       data: { status: "ACCEPTED", acceptedRevisionId: rev.id, statusEvents: { create: { fromStatus: quote.status, toStatus: "ACCEPTED", authorId: opts.actorId } } },
     });
     const order = await createOrderFromRevision(tx, quote, rev);
+    // The deposit is requested straight away (no draft for staff to send):
+    // online it's paid through Stripe Checkout right after acceptance.
     let depositInvoice = null;
-    if (rev.depositCents > 0) depositInvoice = await createInvoiceForOrder(tx, order.id, "DEPOSIT", opts.actorId);
+    if (rev.depositCents > 0) depositInvoice = await createInvoiceForOrder(tx, order.id, "DEPOSIT", opts.actorId, { issue: true, online: opts.online });
     await recordCustomerActivity(tx, {
       customerId: quote.customerId,
       type: "quote.accepted",
@@ -661,27 +663,40 @@ async function finalizeAcceptance(
   });
 }
 
-async function afterAcceptance(r: Awaited<ReturnType<typeof finalizeAcceptance>>) {
+/**
+ * Emails after acceptance. When the customer is about to pay the deposit
+ * online (Stripe Checkout right now), their confirmation is sent after the
+ * verified payment instead ("deposit_received") — never a promise of an
+ * invoice they don't need.
+ */
+async function afterAcceptance(r: Awaited<ReturnType<typeof finalizeAcceptance>>, opts: { payingNow: boolean; online: boolean }) {
   const { quote, rev, order } = r;
   const deposit = rev.depositCents > 0 ? formatCents(rev.depositCents) : null;
+  const settings = await getSettings();
   const vars = {
     customerName: rev.customerName,
     quoteNumber: quote.number,
     orderNumber: order.number,
     total: formatCents(rev.totalCents),
     deposit,
-    nextStep: deposit
-      ? `Next, we'll send an invoice for the ${deposit} deposit. Once it's received, your piece is scheduled into the shop.`
-      : "We'll be in touch shortly to confirm the details and schedule your piece.",
+    nextStep: !deposit
+      ? "We'll be in touch shortly to confirm the details and schedule your piece."
+      : opts.online
+        ? `Your ${deposit} deposit is due to begin. You can pay it securely from your order page at any time.`
+        : `Your ${deposit} deposit is due to begin. ${settings.paymentInstructions?.trim() || "Payment details are on your order page."}`,
   };
-  await sendTemplateEmail({ template: "quote_accepted", to: rev.customerEmail, vars, actionUrl: order.customerToken ? customerLinks.order(order.customerToken) : null, links: { customerId: quote.customerId, quoteId: quote.id, orderId: order.id } });
+  const links = { customerId: quote.customerId, quoteId: quote.id, orderId: order.id };
+  if (!opts.payingNow) {
+    await sendTemplateEmail({ template: "quote_accepted", to: rev.customerEmail, vars, actionUrl: order.customerToken ? customerLinks.order(order.customerToken) : null, links });
+  }
   await sendTemplateEmail({ template: "admin_quote_accepted", to: await adminRecipient(), vars, actionUrl: adminLinks.order(order.id), links: { quoteId: quote.id, orderId: order.id } });
 }
 
 /**
  * Customer acceptance from /quote/[token]. Requires the typed name and both
  * confirmations; records time, IP, user agent, revision and a frozen copy of
- * everything accepted. Creates the order (and a draft deposit invoice).
+ * everything accepted. Creates the order and, when a deposit is required,
+ * the deposit request. `payNow`: continue straight to Stripe Checkout.
  */
 export async function acceptQuote(token: string, input: { revisionNumber: number; name: string; agreeTerms: boolean; agreeDeposit: boolean }, meta: CustomerMeta) {
   const quote = await prisma.quoteRequest.findUnique({ where: { customerToken: token }, include: { revisions: true } });
@@ -692,10 +707,15 @@ export async function acceptQuote(token: string, input: { revisionNumber: number
   const name = input.name.trim().replace(/\s+/g, " ");
   if (name.length < 2) throw new SalesError("Please type your full name to accept.", { name: "Type your full name." });
   const agreements = [ACCEPT_TERMS_LABEL, rev.depositCents > 0 ? ACCEPT_DEPOSIT_LABEL : ACCEPT_NO_DEPOSIT_LABEL];
-  const result = await finalizeAcceptance(quote.id, rev.id, { name, method: "online", agreements, meta, actorId: null });
-  await logActivity("quote.accepted", `${name} accepted ${quote.number} rev ${rev.number} online (${formatCents(rev.totalCents)}); order ${result.order.number} created`, { entityType: "quote", entityId: quote.id });
-  await afterAcceptance(result);
-  return result.order;
+  const online = salesFlags(await getSettings()).onlinePayments;
+  const result = await finalizeAcceptance(quote.id, rev.id, { name, method: "online", agreements, meta, actorId: null, online });
+  const payNow = online && rev.depositCents > 0;
+  await logActivity("quote.accepted", `${name} accepted ${quote.number} rev ${rev.number} online (${formatCents(rev.totalCents)}); order ${result.order.number} created${payNow ? "; continuing to deposit payment" : ""}`, {
+    entityType: "quote",
+    entityId: quote.id,
+  });
+  await afterAcceptance(result, { payingNow: payNow, online });
+  return { order: result.order, payNow };
 }
 
 /** Staff record an acceptance received by phone, email or in person. */
@@ -704,9 +724,10 @@ export async function acceptQuoteManually(actor: Actor, quoteId: string, note: s
   if (!quote) throw new SalesError("That quote no longer exists.");
   const rev = customerRevisionOf(quote.revisions);
   if (!rev) throw new SalesError("Send the quote before recording an acceptance.");
-  const result = await finalizeAcceptance(quote.id, rev.id, { name: rev.customerName, method: "manual", agreements: [`Recorded by ${actor.name}: ${note}`], meta: { ip: null, userAgent: null }, actorId: actor.id });
+  const online = salesFlags(await getSettings()).onlinePayments;
+  const result = await finalizeAcceptance(quote.id, rev.id, { name: rev.customerName, method: "manual", agreements: [`Recorded by ${actor.name}: ${note}`], meta: { ip: null, userAgent: null }, actorId: actor.id, online });
   await logActivity("quote.accepted", `${actor.name} recorded acceptance of ${quote.number} rev ${rev.number}: ${note}`.slice(0, 480), { actorId: actor.id, entityType: "quote", entityId: quote.id });
-  await afterAcceptance(result);
+  await afterAcceptance(result, { payingNow: false, online });
   return result.order;
 }
 

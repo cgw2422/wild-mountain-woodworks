@@ -114,7 +114,7 @@ export const saveSettings = adminAction(async (admin, section: SettingsSection, 
   await logActivity("settings.updated", `${admin.name} updated ${def.label}`, { actorId: admin.id, entityType: "settings" });
   // Payment-related switches get their own audit entries.
   for (const [key, label] of [
-    ["stripeInvoicingEnabled", "Stripe invoicing"],
+    ["stripeInvoicingEnabled", "Online payments (Stripe)"],
     ["taxEnabled", "Tax"],
   ] as const) {
     if (key in parsed && (before?.[key] ?? false) !== parsed[key]) {

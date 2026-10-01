@@ -2,9 +2,10 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * Stripe is used ONLY for invoicing: customers, invoices, hosted invoice
- * pages/payment links, invoice PDFs and webhooks. Wild Mountain owns quotes;
- * Stripe Quotes, Checkout and carts are never used.
+ * Stripe is used only to collect money: Checkout (payment mode) for the
+ * deposit at quote acceptance, and Invoices (hosted invoice page + PDF)
+ * for final balances and later requests, plus webhooks. Wild Mountain owns
+ * quotes, orders and the amounts due; Stripe Quotes and carts are never used.
  *
  * Every write sends an Idempotency-Key derived from the Wild Mountain record,
  * so a retried request can never create a duplicate customer, invoice or
@@ -24,6 +25,30 @@ export interface CreatedStripeInvoice {
   invoicePdfUrl: string | null;
 }
 
+export interface CheckoutSessionInfo {
+  id: string;
+  url: string | null;
+  /** open | complete | expired */
+  status: string;
+  /** paid | unpaid | no_payment_required */
+  paymentStatus: string;
+  expiresAt: Date | null;
+  amountTotal: number | null;
+}
+
+export interface CreateCheckoutInput {
+  /** Same key → same session (Stripe idempotency), so retries/double clicks never create two. */
+  idempotencyKey: string;
+  amountCents: number;
+  productName: string;
+  description: string;
+  customerEmail: string;
+  clientReferenceId: string;
+  successUrl: string;
+  cancelUrl: string;
+  metadata: Record<string, string>;
+}
+
 export interface InvoicingProvider {
   readonly name: string;
   ensureCustomer(c: { customerId: string; name: string; email: string; stripeCustomerId: string | null }): Promise<string>;
@@ -41,6 +66,48 @@ export interface InvoicingProvider {
   /** Ask Stripe to email the hosted invoice (email option A). */
   sendInvoice(stripeInvoiceId: string, idempotencyKey: string): Promise<void>;
   voidInvoice(stripeInvoiceId: string, idempotencyKey: string): Promise<void>;
+  /** Stripe Checkout, payment mode — one-time payment; the card is never saved. */
+  createCheckoutSession(c: CreateCheckoutInput): Promise<CheckoutSessionInfo>;
+  retrieveCheckoutSession(id: string): Promise<CheckoutSessionInfo>;
+  /** Close an open session so it can't be paid (e.g. paid another way). */
+  expireCheckoutSession(id: string): Promise<void>;
+}
+
+function toSessionInfo(o: StripeObject): CheckoutSessionInfo {
+  return {
+    id: String(o.id),
+    url: typeof o.url === "string" ? o.url : null,
+    status: String(o.status ?? "open"),
+    paymentStatus: String(o.payment_status ?? "unpaid"),
+    expiresAt: typeof o.expires_at === "number" ? new Date(o.expires_at * 1000) : null,
+    amountTotal: typeof o.amount_total === "number" ? o.amount_total : null,
+  };
+}
+
+/**
+ * Form parameters for a deposit Checkout Session. Deliberately never sets
+ * setup_future_usage, saved_payment_method_options or a Stripe Customer,
+ * so no payment method is saved for later or off-session use.
+ */
+export function checkoutSessionParams(c: CreateCheckoutInput): Record<string, string> {
+  const params: Record<string, string> = {
+    mode: "payment",
+    "line_items[0][quantity]": "1",
+    "line_items[0][price_data][currency]": "usd",
+    "line_items[0][price_data][unit_amount]": String(c.amountCents),
+    "line_items[0][price_data][product_data][name]": c.productName.slice(0, 250),
+    "line_items[0][price_data][product_data][description]": c.description.slice(0, 500),
+    customer_email: c.customerEmail,
+    client_reference_id: c.clientReferenceId,
+    success_url: c.successUrl,
+    cancel_url: c.cancelUrl,
+    "payment_intent_data[description]": c.description.slice(0, 500),
+  };
+  for (const [k, v] of Object.entries(c.metadata)) {
+    params[`metadata[${k}]`] = v;
+    params[`payment_intent_data[metadata][${k}]`] = v;
+  }
+  return params;
 }
 
 type StripeObject = Record<string, unknown> & { id?: string; error?: { message?: string } };
@@ -110,6 +177,21 @@ class StripeInvoicingProvider implements InvoicingProvider {
 
   async voidInvoice(stripeInvoiceId: string, idempotencyKey: string) {
     await this.call(`invoices/${stripeInvoiceId}/void`, {}, idempotencyKey);
+  }
+
+  async createCheckoutSession(c: CreateCheckoutInput) {
+    return toSessionInfo(await this.call("checkout/sessions", checkoutSessionParams(c), c.idempotencyKey));
+  }
+
+  async retrieveCheckoutSession(id: string) {
+    const res = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${this.secretKey}` } });
+    const json = (await res.json().catch(() => ({}))) as StripeObject;
+    if (!res.ok) throw new Error(`Stripe: ${json.error?.message ?? `HTTP ${res.status}`}`);
+    return toSessionInfo(json);
+  }
+
+  async expireCheckoutSession(id: string) {
+    await this.call(`checkout/sessions/${encodeURIComponent(id)}/expire`, {}, `wm-checkout-expire-${id}`);
   }
 }
 

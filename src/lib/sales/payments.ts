@@ -5,6 +5,7 @@ import { logActivity } from "@/lib/activity";
 import { logger } from "@/lib/logger";
 import { formatCents } from "@/lib/money";
 import { adminRecipient, sendTemplateEmail } from "@/lib/email/send";
+import { closeOpenCheckout } from "./checkout";
 import { recordCustomerActivity } from "./customers";
 import { SalesError } from "./errors";
 import { netPaid, recomputeInvoice } from "./ledger";
@@ -33,6 +34,40 @@ async function sendReceipt(paymentId: string) {
   });
 }
 
+/** Confirmation after the deposit is paid (replaces "we'll send an invoice"). */
+async function sendDepositReceived(paymentId: string) {
+  const p = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { invoice: true, order: { include: { quote: { select: { number: true } }, payments: true } } } });
+  if (!p.invoice || !p.order) return sendReceipt(paymentId);
+  const paid = p.order.payments.reduce((s, x) => s + netPaid(x), 0);
+  await sendTemplateEmail({
+    template: "deposit_received",
+    to: p.order.customerEmail,
+    vars: {
+      customerName: p.order.customerName,
+      quoteNumber: p.order.quote?.number,
+      orderNumber: p.order.number,
+      amountPaid: formatCents(p.amountCents),
+      balanceRemaining: formatCents(Math.max(0, p.order.totalCents - paid)),
+    },
+    actionUrl: p.order.customerToken ? customerLinks.order(p.order.customerToken) : null,
+    links: { customerId: p.customerId, invoiceId: p.invoiceId, orderId: p.orderId, quoteId: p.order.quoteId },
+  });
+}
+
+/** Email the customer the stable deposit payment link (/order/<token>/pay). */
+export async function sendDepositPaymentRequest(invoiceId: string) {
+  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId }, include: { order: true } });
+  if (!invoice?.order?.customerToken) throw new SalesError("This deposit isn't linked to an order.");
+  if (invoice.totalCents - invoice.amountPaidCents <= 0) throw new SalesError("This deposit is already paid.");
+  return sendTemplateEmail({
+    template: "deposit_payment_request",
+    to: invoice.order.customerEmail,
+    vars: { customerName: invoice.order.customerName, orderNumber: invoice.order.number, amountDue: formatCents(invoice.totalCents - invoice.amountPaidCents) },
+    actionUrl: customerLinks.depositPay(invoice.order.customerToken),
+    links: { customerId: invoice.customerId, invoiceId: invoice.id, orderId: invoice.orderId, quoteId: invoice.quoteId },
+  });
+}
+
 /**
  * Record a cash / check / bank transfer payment against an invoice. Never
  * creates anything in Stripe. Amount is capped at what's still owed.
@@ -50,6 +85,8 @@ export async function recordManualPayment(
   const owed = invoice.totalCents - invoice.amountPaidCents;
   if (input.amountCents > owed) throw new SalesError(`That's more than the ${formatCents(owed)} still owed on this invoice.`, { amount: `At most ${formatCents(owed)}.` });
   if (input.receivedAt.getTime() > Date.now() + 86_400_000) throw new SalesError("The received date can't be in the future.", { receivedAt: "Can't be in the future." });
+  // Settling a deposit offline closes its online checkout first, so it can't also be paid by card.
+  await closeOpenCheckout(invoice.id);
 
   const payment = await prisma.$transaction(async (tx) => {
     const row = await tx.payment.create({
@@ -125,6 +162,17 @@ type StripeInvoiceObject = {
   charge?: string | { id: string } | null;
   metadata?: Record<string, string>;
   status_transitions?: { paid_at?: number | null };
+};
+
+type CheckoutSessionObject = {
+  id: string;
+  mode?: string;
+  payment_status?: string;
+  amount_total?: number | null;
+  payment_intent?: string | { id: string } | null;
+  client_reference_id?: string | null;
+  metadata?: Record<string, string>;
+  created?: number;
 };
 
 function idOf(v: string | { id: string } | null | undefined) {
@@ -208,6 +256,81 @@ export async function processStripeEvent(event: StripeEvent): Promise<"processed
           await recomputeInvoice(tx, invoice.id);
         }
         return "processed" as const;
+      }
+
+      if (event.type.startsWith("checkout.session.")) {
+        const session = event.data.object as CheckoutSessionObject;
+        if (session.mode && session.mode !== "payment") return "ignored" as const;
+        const invoiceId = session.metadata?.invoice_id ?? session.client_reference_id ?? null;
+        const invoice = invoiceId ? await tx.invoice.findUnique({ where: { id: invoiceId } }) : await tx.invoice.findFirst({ where: { stripeCheckoutSessionId: session.id } });
+        if (!invoice) return "ignored" as const;
+        const isCurrent = invoice.stripeCheckoutSessionId === session.id;
+
+        const paidNow =
+          (event.type === "checkout.session.completed" && session.payment_status === "paid") || event.type === "checkout.session.async_payment_succeeded";
+        if (paidNow) {
+          const amount = session.amount_total ?? 0;
+          const intentId = idOf(session.payment_intent);
+          // One payment per Checkout Session / PaymentIntent, however often Stripe retries.
+          const already = await tx.payment.findFirst({ where: { OR: [{ stripeCheckoutSessionId: session.id }, ...(intentId ? [{ stripePaymentIntentId: intentId }] : [])] } });
+          if (!already && amount > 0) {
+            const owedBefore = invoice.totalCents - invoice.amountPaidCents;
+            const payment = await tx.payment.create({
+              data: {
+                invoiceId: invoice.id,
+                orderId: invoice.orderId,
+                customerId: invoice.customerId,
+                amountCents: amount,
+                method: "STRIPE",
+                source: "STRIPE",
+                status: "SUCCEEDED",
+                stripePaymentIntentId: intentId,
+                stripeCheckoutSessionId: session.id,
+                receivedAt: session.created ? new Date(session.created * 1000) : new Date(),
+                notes: amount > owedBefore ? `Received ${formatCents(amount - Math.max(0, owedBefore))} more than was due — review for a refund.` : null,
+              },
+            });
+            await tx.invoice.update({ where: { id: invoice.id }, data: { stripeCheckoutStatus: "complete" } });
+            await recordCustomerActivity(tx, { customerId: invoice.customerId, type: "payment.received", message: `${formatCents(amount)} ${invoice.kind === "DEPOSIT" ? "deposit " : ""}paid online for ${invoice.number}`, invoiceId: invoice.id, orderId: invoice.orderId });
+            await recomputeInvoice(tx, invoice.id);
+            followUps.push(async () => {
+              await logActivity("payment.recorded", `Stripe Checkout payment of ${formatCents(amount)} received for invoice ${invoice.number}`, { entityType: "invoice", entityId: invoice.id });
+              if (invoice.kind === "DEPOSIT") await sendDepositReceived(payment.id);
+              else await sendReceipt(payment.id);
+              const order = invoice.orderId ? await prisma.order.findUnique({ where: { id: invoice.orderId }, select: { number: true } }) : null;
+              await sendTemplateEmail({
+                template: "admin_payment_received",
+                to: await adminRecipient(),
+                vars: { customerName: invoice.customerName, invoiceNumber: invoice.number, orderNumber: order?.number, amountPaid: formatCents(amount) },
+                actionUrl: adminLinks.invoice(invoice.id),
+                links: { invoiceId: invoice.id, orderId: invoice.orderId },
+              });
+            });
+          }
+          return "processed" as const;
+        }
+        if (event.type === "checkout.session.completed") {
+          // e.g. a bank debit still clearing: wait for async_payment_succeeded.
+          if (isCurrent) await tx.invoice.update({ where: { id: invoice.id }, data: { stripeCheckoutStatus: "processing" } });
+          return "processed" as const;
+        }
+        if (event.type === "checkout.session.async_payment_failed") {
+          if (isCurrent) await tx.invoice.update({ where: { id: invoice.id }, data: { stripeCheckoutStatus: "failed" } });
+          await recordCustomerActivity(tx, { customerId: invoice.customerId, type: "payment.failed", message: `An online payment for ${invoice.number} failed`, invoiceId: invoice.id, orderId: invoice.orderId });
+          return "processed" as const;
+        }
+        if (event.type === "checkout.session.expired") {
+          if (isCurrent) {
+            await tx.invoice.update({ where: { id: invoice.id }, data: { stripeCheckoutStatus: "expired" } });
+            // Abandoned deposit: one friendly email with the payment link (never repeated).
+            const stillDue = invoice.kind === "DEPOSIT" && invoice.totalCents > invoice.amountPaidCents && !["VOID", "CANCELED", "PAID"].includes(invoice.status);
+            if (stillDue && !(await tx.emailLog.findFirst({ where: { invoiceId: invoice.id, template: "deposit_payment_request" } }))) {
+              followUps.push(() => sendDepositPaymentRequest(invoice.id).then(() => undefined));
+            }
+          }
+          return "processed" as const;
+        }
+        return "ignored" as const;
       }
 
       if (event.type === "charge.refunded") {

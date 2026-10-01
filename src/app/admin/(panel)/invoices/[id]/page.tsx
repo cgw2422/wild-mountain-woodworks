@@ -232,7 +232,7 @@ export default async function InvoiceDetailPage({ params }: Props) {
               ]}
             />
           </Card>
-          <Card title="Stripe" description={flags.stripeInvoicing ? "Stripe invoicing is on." : "Stripe invoicing is off — invoices are sent and paid offline."}>
+          <Card title="Stripe" description={flags.stripeInvoicing ? "Online payments (Stripe) are on." : "Online payments (Stripe) are off — invoices are sent and paid offline."}>
             {invoice.stripeInvoiceId ? (
               <div className="space-y-2 text-sm">
                 <p className="font-mono text-xs">{invoice.stripeInvoiceId}</p>

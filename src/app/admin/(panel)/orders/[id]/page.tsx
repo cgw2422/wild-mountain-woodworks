@@ -5,10 +5,12 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/auth/permissions";
 import { siteDateInput } from "@/lib/site-time";
+import { centsToDollarInput, formatCents } from "@/lib/money";
+import { getSettings, salesFlags } from "@/lib/settings";
 import { customerLinks } from "@/lib/sales/links";
 import { orderMoney } from "@/lib/sales/orders";
-import { DELIVERY_STATUSES, DELIVERY_STATUS_LABELS, INVOICE_KIND_LABELS, PAYMENT_METHOD_LABELS, PRODUCTION_STATUSES, PRODUCTION_STATUS_LABELS } from "@/lib/sales/status";
-import { ActionButton, ActionForm, ConfirmAction, Select, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
+import { DELIVERY_STATUSES, DELIVERY_STATUS_LABELS, INVOICE_KIND_LABELS, MANUAL_PAYMENT_METHODS, PAYMENT_METHOD_LABELS, PRODUCTION_STATUSES, PRODUCTION_STATUS_LABELS } from "@/lib/sales/status";
+import { ActionButton, ActionForm, ConfirmAction, MoneyInput, Select, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { Badge, Card, DescriptionList, PageHeader, adminButton, formatDate, table } from "@/components/admin/ui";
 import { NotesPanel } from "@/components/admin/inbox/NotesPanel";
 import { StatusHistory } from "@/components/admin/inbox/StatusHistory";
@@ -22,9 +24,26 @@ import { RevisionLines } from "@/components/admin/sales/RevisionLines";
 import { SalesBadge } from "@/components/admin/sales/SalesBadge";
 import { cn } from "@/lib/cn";
 import { addNoteAction } from "../../inbox-actions";
-import { addSalesAttachmentAction, createOrderInvoiceAction, removeSalesAttachmentAction, setSalesAttachmentVisibilityAction, updateOrderAction } from "../../sales-actions";
+import {
+  addSalesAttachmentAction,
+  createOrderInvoiceAction,
+  recordPaymentAction,
+  removeSalesAttachmentAction,
+  resendDepositLinkAction,
+  setSalesAttachmentVisibilityAction,
+  updateOrderAction,
+  voidInvoiceAction,
+} from "../../sales-actions";
 
 type Props = { params: Promise<{ id: string }> };
+
+const CHECKOUT_LABELS: Record<string, string> = {
+  open: "Customer has an open checkout",
+  complete: "Paid — confirmed by Stripe",
+  processing: "Payment processing (bank payment)",
+  expired: "Checkout expired — a new one opens automatically when the customer pays",
+  failed: "Last payment attempt failed",
+};
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
@@ -41,6 +60,7 @@ export default async function OrderDetailPage({ params }: Props) {
     include: {
       items: { orderBy: { position: "asc" } },
       quote: { select: { id: true, number: true } },
+      acceptedRevision: { select: { acceptedAt: true } },
       customer: { select: { id: true } },
       invoices: { orderBy: { createdAt: "asc" } },
       payments: { orderBy: { receivedAt: "asc" }, include: { invoice: { select: { number: true } } } },
@@ -57,6 +77,11 @@ export default async function OrderDetailPage({ params }: Props) {
   const hasDepositInvoice = live.some((i) => i.kind === "DEPOSIT");
   const canceled = order.productionStatus === "CANCELED";
   const link = order.customerToken ? customerLinks.order(order.customerToken) : null;
+  const online = salesFlags(await getSettings()).onlinePayments;
+  const deposit = live.find((i) => i.kind === "DEPOSIT") ?? null;
+  const depositDue = deposit ? Math.max(0, deposit.totalCents - deposit.amountPaidCents) : 0;
+  const depositOpen = Boolean(deposit && depositDue > 0 && !["DRAFT", "PAID"].includes(deposit.status));
+  const payLink = order.customerToken && deposit && online && !deposit.stripeHostedInvoiceUrl ? customerLinks.depositPay(order.customerToken) : null;
 
   return (
     <>
@@ -115,6 +140,100 @@ export default async function OrderDetailPage({ params }: Props) {
             />
           </Card>
 
+          {order.depositCents > 0 ? (
+            <Card
+              title="Deposit"
+              description={
+                payLink
+                  ? "Collected online: the customer pays by card through Stripe Checkout right after accepting. Nothing to send — the order moves to Deposit Paid once Stripe confirms the payment."
+                  : "Online payments are off — the customer was shown your payment instructions. Record the payment when it arrives."
+              }
+              actions={
+                finance && depositOpen && deposit ? (
+                  <div className="flex flex-wrap gap-2">
+                    {payLink ? (
+                      <>
+                        <CopyButton value={payLink} label="Copy deposit payment link" variant="small" />
+                        <a href={payLink} target="_blank" rel="noopener noreferrer" className={adminButton.small}>
+                          Open payment
+                        </a>
+                        <ActionButton action={resendDepositLinkAction.bind(null, deposit.id)} variant="small" pendingLabel="Sending…">
+                          Resend payment link
+                        </ActionButton>
+                      </>
+                    ) : null}
+                    <FormDialog
+                      label="Mark manual payment"
+                      title="Record a manual deposit payment"
+                      description={`Still owed on the deposit: ${formatCents(depositDue)}. Any open online checkout is closed first, so the customer can't also pay by card.`}
+                      action={recordPaymentAction.bind(null, deposit.id)}
+                      submitLabel="Record payment"
+                      variant="small"
+                    >
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <MoneyInput label="Amount" name="amount" required defaultValue={centsToDollarInput(depositDue)} />
+                        <Select label="Method" name="method" defaultValue="CHECK" options={MANUAL_PAYMENT_METHODS.map((m) => ({ value: m, label: PAYMENT_METHOD_LABELS[m] }))} />
+                        <TextInput label="Date received" name="receivedOn" type="date" required defaultValue={siteDateInput(new Date())} />
+                        <TextInput label="Reference" name="reference" maxLength={120} placeholder="Check #, transfer ref…" />
+                      </div>
+                      <TextArea label="Notes" name="notes" rows={2} maxLength={1000} />
+                      <Toggle label="Email the customer a receipt" name="sendReceipt" defaultChecked />
+                    </FormDialog>
+                    {deposit.amountPaidCents === 0 ? (
+                      <FormDialog
+                        label="Cancel payment request"
+                        title="Cancel the deposit payment request?"
+                        description="The deposit request is voided (kept for the record) and any open online checkout is closed, so the customer can no longer pay it. You can create a new request later."
+                        action={voidInvoiceAction.bind(null, deposit.id)}
+                        submitLabel="Cancel payment request"
+                        variant="small"
+                        submitVariant="danger"
+                      >
+                        <TextInput label="Reason" name="reason" required maxLength={300} />
+                      </FormDialog>
+                    ) : null}
+                  </div>
+                ) : null
+              }
+            >
+              <DescriptionList
+                className="sm:grid-cols-[10rem_1fr]"
+                items={[
+                  { label: "Quote accepted", value: order.acceptedRevision?.acceptedAt ? formatDate(order.acceptedRevision.acceptedAt, true) : order.quote ? "Yes" : "—" },
+                  { label: "Order created", value: formatDate(order.createdAt, true) },
+                  { label: "Deposit due", value: <Money cents={order.depositCents} /> },
+                  {
+                    label: "Payment status",
+                    value: !deposit ? (
+                      <Badge tone="amber">No deposit request</Badge>
+                    ) : depositDue <= 0 ? (
+                      <Badge tone="green">Deposit paid</Badge>
+                    ) : (
+                      <span className="flex flex-wrap items-center gap-2">
+                        <SalesBadge status={order.paymentStatus} />
+                        {deposit.amountPaidCents > 0 ? <span className="text-sm text-neutral-600">{formatCents(deposit.amountPaidCents)} paid · {formatCents(depositDue)} to go</span> : null}
+                      </span>
+                    ),
+                  },
+                  ...(payLink && deposit
+                    ? [
+                        {
+                          label: "Stripe Checkout",
+                          value: (
+                            <span className="text-sm">
+                              {CHECKOUT_LABELS[deposit.stripeCheckoutStatus ?? ""] ?? "Not opened yet"}
+                              {deposit.stripeCheckoutStatus === "open" && deposit.stripeCheckoutExpiresAt ? ` · expires ${formatDate(deposit.stripeCheckoutExpiresAt, true)}` : ""}
+                              {deposit.checkoutAttempts > 1 ? ` · ${deposit.checkoutAttempts} sessions opened` : ""}
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            </Card>
+          ) : null}
+
           <Card
             title="Invoices & payments"
             description={`${money.label}. Invoiced so far: ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(invoiced / 100)}.`}
@@ -123,12 +242,12 @@ export default async function OrderDetailPage({ params }: Props) {
                 <div className="flex flex-wrap gap-2">
                   {order.depositCents > 0 && !hasDepositInvoice ? (
                     <ActionButton action={createOrderInvoiceAction.bind(null, order.id, "DEPOSIT")} variant="small">
-                      Deposit invoice
+                      {online ? "New deposit payment request" : "Deposit invoice"}
                     </ActionButton>
                   ) : null}
                   {invoiced < order.totalCents && invoiced > 0 ? (
                     <ActionButton action={createOrderInvoiceAction.bind(null, order.id, "BALANCE")} variant="small">
-                      Final balance invoice
+                      Create final balance invoice
                     </ActionButton>
                   ) : null}
                   {invoiced === 0 ? (

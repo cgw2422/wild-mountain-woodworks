@@ -1437,6 +1437,17 @@ model Invoice {
   stripeHostedInvoiceUrl String?
   stripeInvoicePdfUrl    String?
   stripeStatus           String?
+  /// Stripe Checkout (immediate deposit payment). The latest session only;
+  /// a new one replaces it when the previous expires. Card details are
+  /// entered on Stripe's page and never saved for reuse.
+  stripeCheckoutSessionId String?
+  stripeCheckoutUrl       String?
+  stripeCheckoutExpiresAt DateTime?
+  /// open | complete | expired | processing | failed (mirrors Stripe)
+  stripeCheckoutStatus    String?
+  /// Sessions created so far; part of the Stripe idempotency key, so
+  /// simultaneous clicks share one session instead of creating two.
+  checkoutAttempts        Int            @default(0)
   sentAt                 DateTime?
   paidAt                 DateTime?
   voidedAt               DateTime?
@@ -1456,6 +1467,7 @@ model Invoice {
   @@index([customerId])
   @@index([quoteId])
   @@index([orderId])
+  @@index([stripeCheckoutSessionId])
 }
 
 model InvoiceLineItem {
@@ -1516,6 +1528,7 @@ model Payment {
   stripePaymentIntentId String?             @unique
   stripeChargeId        String?
   stripeInvoiceId       String?
+  stripeCheckoutSessionId String?
   reference             String?
   notes                 String?
   receivedAt            DateTime

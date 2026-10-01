@@ -94,6 +94,8 @@ export async function loadCustomerQuote(token: string) {
         }
       : null,
     blocker: acceptBlocker(quote, rev),
+    /** Whether accepting continues straight to the secure online deposit payment. */
+    onlinePayments: stripe,
     order: quote.orders[0]?.customerToken ? { number: quote.orders[0].number, token: quote.orders[0].customerToken } : null,
     invoices: quote.invoices.map((i) => ({
       number: i.number,
@@ -102,7 +104,7 @@ export async function loadCustomerQuote(token: string) {
       amountDueCents: Math.max(0, i.totalCents - i.amountPaidCents),
       totalCents: i.totalCents,
       href: i.publicToken ? `/invoice/${i.publicToken}` : null,
-      payUrl: stripe && i.stripeHostedInvoiceUrl ? i.stripeHostedInvoiceUrl : null,
+      payUrl: !stripe || ["PAID", "VOID", "CANCELED"].includes(i.status) ? null : (i.stripeHostedInvoiceUrl ?? (i.kind === "DEPOSIT" && quote.orders[0]?.customerToken ? `/order/${quote.orders[0].customerToken}/pay` : null)),
     })),
     files: quote.files.map((f) => ({ url: f.media.url, name: f.label || f.media.originalName, mimeType: f.media.mimeType })),
   };
@@ -138,9 +140,9 @@ export async function customerInvoiceView(token: string) {
     amountPaidCents: invoice.amountPaidCents,
     amountDueCents: Math.max(0, invoice.totalCents - invoice.amountPaidCents),
     customerNotes: invoice.customerNotes,
-    payUrl: open && stripe && invoice.stripeHostedInvoiceUrl ? invoice.stripeHostedInvoiceUrl : null,
+    payUrl: !open || !stripe ? null : (invoice.stripeHostedInvoiceUrl ?? (invoice.kind === "DEPOSIT" && invoice.order?.customerToken ? `/order/${invoice.order.customerToken}/pay` : null)),
     pdfUrl: stripe && invoice.stripeInvoicePdfUrl ? invoice.stripeInvoicePdfUrl : null,
-    paymentInstructions: open && !(stripe && invoice.stripeHostedInvoiceUrl) ? settings.paymentInstructions : null,
+    paymentInstructions: open && !stripe ? settings.paymentInstructions : null,
     payments: invoice.payments
       .filter((p) => netPaid(p) > 0 || p.refundedCents > 0)
       .map((p) => ({ amountCents: p.amountCents, refundedCents: p.refundedCents, method: p.method, receivedAt: p.receivedAt })),
@@ -166,8 +168,22 @@ export async function customerOrderView(token: string) {
   const [biz, settings] = await Promise.all([business(), getSettings()]);
   const stripe = salesFlags(settings).stripeInvoicing;
   const paid = order.payments.reduce((s, p) => s + netPaid(p), 0);
+  const depositInvoice = order.invoices.find((i) => i.kind === "DEPOSIT" && !["VOID", "CANCELED"].includes(i.status)) ?? null;
+  const depositDue = depositInvoice ? Math.max(0, depositInvoice.totalCents - depositInvoice.amountPaidCents) : 0;
+  const deposit = depositInvoice
+    ? {
+        amountCents: depositInvoice.totalCents,
+        dueCents: depositDue,
+        paid: depositDue === 0,
+        /** Stripe reported the payment complete; we're waiting for its confirmation webhook. */
+        confirming: depositDue > 0 && ["complete", "processing"].includes(depositInvoice.stripeCheckoutStatus ?? ""),
+        payHref: depositDue > 0 && stripe ? `/order/${token}/pay` : null,
+        instructions: depositDue > 0 && !stripe ? settings.paymentInstructions : null,
+      }
+    : null;
   return {
     business: biz,
+    deposit,
     number: order.number,
     placedAt: order.createdAt,
     productionStatus: order.productionStatus,
@@ -191,7 +207,7 @@ export async function customerOrderView(token: string) {
       totalCents: i.totalCents,
       amountDueCents: Math.max(0, i.totalCents - i.amountPaidCents),
       href: i.publicToken ? `/invoice/${i.publicToken}` : null,
-      payUrl: stripe && i.stripeHostedInvoiceUrl && !["PAID", "VOID", "CANCELED"].includes(i.status) ? i.stripeHostedInvoiceUrl : null,
+      payUrl: !stripe || ["PAID", "VOID", "CANCELED"].includes(i.status) ? null : i.stripeHostedInvoiceUrl ?? (i.kind === "DEPOSIT" ? `/order/${token}/pay` : null),
     })),
     files: order.files.map((f) => ({ url: f.media.url, name: f.label || f.media.originalName, mimeType: f.media.mimeType })),
   };

@@ -184,10 +184,10 @@ export default async function SettingsPage() {
                 { value: "WILD_MOUNTAIN", label: "Wild Mountain — our branded email with the Stripe payment link (recommended)" },
                 { value: "STRIPE", label: "Stripe — Stripe's own invoice email" },
               ]}
-              help="Only applies when Stripe invoicing is on. Without Stripe, Wild Mountain always sends the invoice email."
+              help="Only applies when online payments (Stripe) are on. Without Stripe, Wild Mountain always sends the invoice email."
             />
             <TextArea name="defaultQuoteTerms" label="Default quote terms" rows={7} defaultValue={s(settings.defaultQuoteTerms)} maxLength={20000} help="Copied onto every new quote; editable per quote. Customers see these." />
-            <TextArea name="paymentInstructions" label="Offline payment instructions" rows={4} defaultValue={s(settings.paymentInstructions)} maxLength={2000} help="Shown on invoices and invoice emails when Stripe invoicing is off, e.g. who to make checks payable to, or bank transfer details." />
+            <TextArea name="paymentInstructions" label="Offline payment instructions" rows={4} defaultValue={s(settings.paymentInstructions)} maxLength={2000} help="Shown on invoices and invoice emails when online payments are off, e.g. who to make checks payable to, or bank transfer details." />
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-100 pt-4">
               <AdminLinkButton href="/admin/settings/emails">Edit email templates</AdminLinkButton>
               <SubmitButton>Save quote &amp; invoice defaults</SubmitButton>
@@ -224,17 +224,17 @@ export default async function SettingsPage() {
             <div className="rounded border border-neutral-200 p-4">
               <Toggle
                 name="stripeInvoicingEnabled"
-                label="Stripe invoicing (online payment)"
+                label="Online payments (Stripe)"
                 defaultChecked={settings.stripeInvoicingEnabled}
-                description="Send invoices through Stripe so customers can pay on Stripe's secure hosted invoice page. Quotes stay entirely in Wild Mountain; there is no cart or checkout. Manual payments (cash, check, bank transfer) always work."
+                description="Customers pay the deposit by card through Stripe Checkout as soon as they accept a quote, and later invoices (such as the final balance) are sent through Stripe's hosted invoice page. Cards are never saved. There is no cart; manual payments (cash, check, bank transfer) always work."
               />
               <div className="mt-4 rounded bg-neutral-50 p-3 text-sm" role="note">
                 <p className="font-medium text-neutral-900">
-                  Stripe invoicing is currently {flags.stripeInvoicing ? <Badge tone="green">ON</Badge> : <Badge tone="neutral">OFF</Badge>}
+                  Online payments are currently {flags.stripeInvoicing ? <Badge tone="green">ON</Badge> : <Badge tone="neutral">OFF</Badge>}
                 </p>
-                <p className="mt-1 text-neutral-600">It only turns on when both of these are true. Until then, invoices are sent by email and paid offline.</p>
+                <p className="mt-1 text-neutral-600">It only turns on when both of these are true. Until then, deposits and invoices are paid offline using your payment instructions.</p>
                 <ul className="mt-3 space-y-2">
-                  <Condition ok={flags.stripeInvoicingFlag} label="Stripe invoicing switch above is on" detail={flags.stripeInvoicingFlag ? "On" : "Off"} />
+                  <Condition ok={flags.stripeInvoicingFlag} label="Online payments switch above is on" detail={flags.stripeInvoicingFlag ? "On" : "Off"} />
                   <Condition
                     ok={flags.stripeConfigured}
                     label="Stripe keys configured"
@@ -269,7 +269,7 @@ export default async function SettingsPage() {
               label="Stripe payments"
               value={flags.stripeConfigured ? "Configured" : "Not configured"}
               tone={flags.stripeConfigured ? "green" : "neutral"}
-              note={flags.stripeConfigured ? "Keys are present (values are never shown here)." : "Only needed for Stripe invoicing (online payment)."}
+              note={flags.stripeConfigured ? "Keys are present (values are never shown here)." : "Only needed for online payments (Stripe)."}
             />
           </dl>
         </Card>

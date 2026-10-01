@@ -35,6 +35,8 @@ export function salesFlags(settings: Pick<SiteSetting, "stripeInvoicingEnabled" 
     quotes: settings.quotesEnabled,
     customOrders: settings.customOrdersEnabled,
     stripeInvoicing: settings.stripeInvoicingEnabled && stripeConfigured,
+    /** Online card payment: Checkout for deposits at acceptance, Invoices for balances (same switch + keys). */
+    onlinePayments: settings.stripeInvoicingEnabled && stripeConfigured,
     stripeInvoicingFlag: settings.stripeInvoicingEnabled,
     stripeConfigured,
     tax: settings.taxEnabled,

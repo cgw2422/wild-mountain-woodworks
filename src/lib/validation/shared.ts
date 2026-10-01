@@ -26,7 +26,7 @@ export const CONTACT_REASONS = [
 export type FormState =
   | { status: "idle" }
   | { status: "error"; message: string; fieldErrors?: Record<string, string> }
-  | { status: "success"; reference?: string; message?: string };
+  | { status: "success"; reference?: string; message?: string; /** Same-site path to continue to (e.g. deposit payment). */ redirect?: string };
 
 /** Collect a FormData into a plain object of strings (files excluded). */
 export function formDataToObject(fd: FormData): Record<string, string> {

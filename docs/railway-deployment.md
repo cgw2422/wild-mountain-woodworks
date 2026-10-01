@@ -114,7 +114,7 @@ The production seed only inserts records. Migrations normally only add to the sc
 
 Take a database backup before deploying it. If you need to roll back past it, restore that backup together with the previous deployment.
 
-After it deploys, the seed adds the editable email templates and the starter quote terms. Nothing else is needed. Stripe invoicing stays off until you set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and turn on the Settings switch (see README → Sales).
+After it deploys, the seed adds the editable email templates and the starter quote terms. Nothing else is needed. Online payments (Stripe) stay off until you set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and turn on the Settings switch (see README → Sales).
 
 ## 4. Verifying a deploy
 

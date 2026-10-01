@@ -9,12 +9,19 @@ import { siteDateLong } from "@/lib/site-time";
 import { buttonClasses } from "@/components/ui/Button";
 import { DocHeading, Facts, Files, Prose, Section, statusPill } from "@/components/documents/parts";
 
-type Props = { params: Promise<{ token: string }> };
+type Props = { params: Promise<{ token: string }>; searchParams: Promise<{ payment?: string }> };
 
 export const metadata: Metadata = { title: "Your order" };
 
-export default async function CustomerOrderPage({ params }: Props) {
+const PAYMENT_NOTICES: Record<string, string> = {
+  canceled: "Your payment wasn't completed, so nothing was charged. Your deposit is still due whenever you're ready.",
+  error: "We couldn't open the secure payment page just now. Please try again in a moment, or contact us.",
+  limited: "Too many attempts in a short time. Please wait a few minutes and try again.",
+};
+
+export default async function CustomerOrderPage({ params, searchParams }: Props) {
   const { token } = await params;
+  const { payment } = await searchParams;
   const o = await customerOrderView(token);
   if (!o) notFound();
   const canceled = o.productionStatus === "CANCELED";
@@ -25,6 +32,45 @@ export default async function CustomerOrderPage({ params }: Props) {
       <DocHeading eyebrow="Order" title={o.number} status={statusPill(canceled ? "CANCELED" : o.productionStatus === "COMPLETED" ? "COMPLETED" : o.paymentStatus)}>
         <p className="mt-3 text-sm text-muted">Placed {siteDateLong(o.placedAt)}</p>
       </DocHeading>
+
+      {payment && PAYMENT_NOTICES[payment] && o.deposit && !o.deposit.paid ? (
+        <p role="status" className="mt-8 border-l-2 border-bronze bg-paper px-5 py-4">
+          {PAYMENT_NOTICES[payment]}
+        </p>
+      ) : null}
+
+      {o.deposit && !o.deposit.paid && !canceled ? (
+        <section aria-labelledby="deposit-heading" className="mt-8 border border-charcoal bg-paper p-6 print:hidden md:p-8">
+          <h2 id="deposit-heading" className="display-sm">
+            {o.deposit.confirming ? "Confirming your deposit…" : "Deposit due"}
+          </h2>
+          <dl className="mt-4 max-w-sm space-y-1.5">
+            <div className="flex justify-between gap-6">
+              <dt>Order total</dt>
+              <dd className="tabular-nums">{formatCents(o.totalCents, { showZeroCents: true })}</dd>
+            </div>
+            <div className="flex justify-between gap-6 font-semibold">
+              <dt>Deposit due</dt>
+              <dd className="tabular-nums">{formatCents(o.deposit.dueCents, { showZeroCents: true })}</dd>
+            </div>
+          </dl>
+          {o.deposit.confirming ? (
+            <p className="mt-4 text-muted">Stripe has your payment and is confirming it with us. This page will update shortly.</p>
+          ) : o.deposit.payHref ? (
+            <>
+              {/* A plain link: the server opens a fresh, correctly priced Stripe Checkout each time. */}
+              <a href={o.deposit.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
+                Pay {formatCents(o.deposit.dueCents, { showZeroCents: true })} Deposit
+              </a>
+              <p className="mt-3 text-xs text-muted">You&apos;ll pay on Stripe&apos;s secure page. Your card details are never stored by Wild Mountain.</p>
+            </>
+          ) : o.deposit.instructions ? (
+            <div className="mt-4 whitespace-pre-line leading-relaxed text-charcoal-muted">{o.deposit.instructions}</div>
+          ) : (
+            <p className="mt-4 text-muted">We&apos;ll be in touch with payment details.</p>
+          )}
+        </section>
+      ) : null}
 
       {canceled ? (
         <p role="note" className="mt-8 border-l-2 border-error bg-paper px-5 py-4">

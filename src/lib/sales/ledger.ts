@@ -17,7 +17,7 @@ export function netPaid(p: { amountCents: number; refundedCents: number; status:
 }
 
 export function invoiceStatusFor(
-  inv: { status: InvoiceStatus; totalCents: number; dueDate: Date | null; sentAt: Date | null; stripeInvoiceId: string | null },
+  inv: { status: InvoiceStatus; totalCents: number; dueDate: Date | null; sentAt: Date | null; stripeInvoiceId: string | null; stripeCheckoutSessionId?: string | null },
   paidCents: number,
   now = new Date(),
 ): InvoiceStatus {
@@ -26,7 +26,8 @@ export function invoiceStatusFor(
   if (paidCents > 0) return "PARTIALLY_PAID";
   if (inv.status === "DRAFT") return "DRAFT";
   if (inv.dueDate && inv.dueDate < now) return "PAST_DUE";
-  return inv.stripeInvoiceId ? "OPEN" : "SENT";
+  // OPEN = payable online (Stripe invoice or deposit Checkout); SENT = offline.
+  return inv.stripeInvoiceId || inv.stripeCheckoutSessionId || inv.status === "OPEN" ? "OPEN" : "SENT";
 }
 
 export async function recomputeInvoice(db: Db, invoiceId: string, now = new Date()) {
