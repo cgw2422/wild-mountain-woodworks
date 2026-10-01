@@ -7,6 +7,7 @@ import { ButtonLink } from "@/components/ui/Button";
 import { Reveal } from "@/components/ui/Reveal";
 import type { SectionContent } from "@/lib/cms/queries";
 import { ProductCard } from "./ProductCard";
+import { IfPublic } from "@/components/site/IfPublic";
 
 /** Category filter + editorial product grid shared by /furniture and /furniture/[category]. */
 export function CatalogView({
@@ -101,9 +102,11 @@ export function CatalogView({
               There&apos;s nothing listed here right now — but we build to
               order, so tell us what you&apos;re looking for.
             </p>
-            <ButtonLink href="/custom-furniture" className="mt-8" arrow>
-              Start a Custom Build
-            </ButtonLink>
+            <IfPublic path="/custom-furniture">
+              <ButtonLink href="/custom-furniture" className="mt-8" arrow>
+                Start a Custom Build
+              </ButtonLink>
+            </IfPublic>
           </div>
         )}
       </Container>

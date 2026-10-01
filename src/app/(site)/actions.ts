@@ -28,6 +28,12 @@ const GENERIC_FAILURE: FormState = {
   message: "Something went wrong on our side and your request wasn't sent. Please try again in a moment.",
 };
 
+/** Any file part at all, under any field name (empty file inputs included). */
+function hasAnyFile(fd: FormData): boolean {
+  for (const [, v] of fd.entries()) if (typeof v === "object" && v !== null) return true;
+  return false;
+}
+
 function files(fd: FormData, key = "attachments"): File[] {
   return fd.getAll(key).filter((v): v is File => typeof v === "object" && v !== null && "size" in v && (v as File).size > 0);
 }
@@ -61,10 +67,13 @@ export async function submitConfigurationQuote(fd: FormData): Promise<FormState>
   if (isHoneypotTripped(fd)) return BOT_ACCEPTED;
   const parsed = configurationQuoteSchema.safeParse(formDataToObject(fd));
   if (!parsed.success) return { status: "error", message: "Please check the highlighted fields.", fieldErrors: fieldErrorsFrom(parsed.error) };
+  // Product quotes are a structured configuration + notes. File uploads
+  // belong to custom furniture requests, so any file here is refused.
+  if (hasAnyFile(fd)) return { status: "error", message: "Photos can't be attached to a product quote request. Please describe anything extra in the notes, or use the Custom Furniture form to share inspiration photos." };
   const blocked = await guard(fd, "quote");
   if (blocked) return blocked;
   try {
-    const quote = await createConfigurationQuote(parsed.data, files(fd));
+    const quote = await createConfigurationQuote(parsed.data);
     return { status: "success", reference: quote.reference };
   } catch (err) {
     return handleError(err, "Configuration quote");

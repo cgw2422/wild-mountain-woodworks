@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getPageContent } from "@/lib/cms/queries";
+import { NOT_FOUND_METADATA, getVisiblePage, requireVisiblePage, withPreviewRobots } from "@/lib/cms/pages";
 import { buildMetadata } from "@/lib/seo";
 import { getPortfolioList } from "@/lib/catalog/queries";
 import { Container } from "@/components/ui/Container";
@@ -8,14 +8,17 @@ import { Reveal } from "@/components/ui/Reveal";
 import { PageHero } from "@/components/site/PageHero";
 import { PortfolioCard } from "@/components/site/PortfolioCard";
 import { CtaBand } from "@/components/site/CtaBand";
+import { IfPublic } from "@/components/site/IfPublic";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const page = await getPageContent("our-work");
-  return buildMetadata({ title: page.seoTitle ?? "Our Work", description: page.seoDescription, path: "/our-work", image: page.ogImage ?? page.section("hero").image });
+  const visible = await getVisiblePage("our-work");
+  if (!visible) return NOT_FOUND_METADATA;
+  const page = visible.page;
+  return withPreviewRobots(visible, buildMetadata({ title: page.seoTitle ?? "Our Work", description: page.seoDescription, path: "/our-work", image: page.ogImage ?? page.section("hero").image }));
 }
 
 export default async function OurWorkPage() {
-  const [page, projects] = await Promise.all([getPageContent("our-work"), getPortfolioList()]);
+  const [page, projects] = await Promise.all([requireVisiblePage("our-work").then((v) => v.page), getPortfolioList()]);
   return (
     <>
       <PageHero section={page.section("hero")} fallbackTitle="Our Work" breadcrumbs={[{ label: "Our Work" }]} />
@@ -36,10 +39,14 @@ export default async function OurWorkPage() {
             <h2 className="display-sm">Our portfolio is coming soon.</h2>
             <p className="mt-4 max-w-md text-muted">In the meantime, browse the collection or tell us about a piece you have in mind.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <ButtonLink href="/furniture">Explore Furniture</ButtonLink>
-              <ButtonLink href="/custom-furniture" variant="secondary">
-                Start a Custom Build
-              </ButtonLink>
+              <IfPublic path="/furniture">
+                <ButtonLink href="/furniture">Explore Furniture</ButtonLink>
+              </IfPublic>
+              <IfPublic path="/custom-furniture">
+                <ButtonLink href="/custom-furniture" variant="secondary">
+                  Start a Custom Build
+                </ButtonLink>
+              </IfPublic>
             </div>
           </div>
         )}

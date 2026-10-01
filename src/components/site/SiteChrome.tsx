@@ -1,5 +1,6 @@
 import { getSettings, salesFlags } from "@/lib/settings";
 import { getMenu } from "@/lib/navigation/menus";
+import { unpublishedPagePaths } from "@/lib/cms/pages";
 import { getActiveAnnouncement } from "@/lib/promotions/queries";
 import { AnnouncementBar } from "./AnnouncementBar";
 import { SiteAdminBar } from "@/components/admin-bar/SiteAdminBar";
@@ -18,7 +19,14 @@ export async function SiteChrome({ children, banner }: { children: React.ReactNo
     getMenu("LEGAL"),
   ]);
   const flags = salesFlags(settings);
-  const cta = flags.quotes ? { label: "Request a Quote", href: "/request-quote" } : { label: "Contact Us", href: "/contact" };
+  // The header button only points at a page visitors can open.
+  const hidden = await unpublishedPagePaths();
+  const cta =
+    flags.quotes && !hidden.has("/request-quote")
+      ? { label: "Request a Quote", href: "/request-quote" }
+      : !hidden.has("/contact")
+        ? { label: "Contact Us", href: "/contact" }
+        : null;
   return (
     <>
       <a

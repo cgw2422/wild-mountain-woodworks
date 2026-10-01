@@ -70,7 +70,11 @@ Wild Mountain owns the whole quote workflow. Stripe is optional and is only used
   - Upload, search and filter.
   - Alt text, focal-point cropping and replacing a file everywhere it's used.
   - Usage tracking and safe delete.
-- **Quotes, Custom Requests and Messages:** statuses, status history, internal notes and private reference images.
+- **Quotes, Custom Requests and Messages:** statuses, status history and internal notes.
+  - **Product quotes** take the configuration and notes only, with no customer uploads; the server refuses files.
+  - **Custom furniture requests** still accept inspiration photos.
+  - Staff can attach drawings and photos to quotes and orders.
+  - Older uploads stay viewable.
 - **Settings:** business details, social links, SEO defaults and feature flags. Also your account password, admin users and a system status panel.
 - **Future Orders:** the order-management screens, ready for when checkout is enabled.
 - **Pricing Calculator:** internal cost-and-margin pricing for custom work ([details](#internal-pricing-calculator)).
@@ -222,7 +226,14 @@ If a section is added to the code later, the site still renders it with empty va
 
 Admin → Pages lists the site's structured pages, customer care/policy pages and **your pages** (created with **Create page**, public at `/{address}`, using a template with a header, Markdown text, an optional feature block and an optional call-to-action band).
 
-- New pages start as **Draft**. Draft and **Archived** pages return "page not found" to visitors, disappear from every menu and from the sitemap immediately, and keep all their content. Publishing restores them. About, FAQ, Contact, Custom Furniture, policy pages and created pages can change status; the homepage, catalog, sale page and product/project templates are always published.
+- New pages start as **Draft**. **Every page with its own address** can be Published, Draft or Archived: core pages (About, FAQ, Contact, Custom Furniture, Our Work, Furniture, Sale, Request a Quote), every policy page, and every page created in admin. There is no allow-list, so pages added later are covered automatically. Only the homepage (the site root) and the shared product/project content blocks have no status.
+- Draft and Archived pages:
+  - return "page not found" to visitors;
+  - disappear immediately from every menu (page items *and* custom links to their URL), breadcrumbs, the header button, built-in links and the sitemap;
+  - keep all their content and menu items.
+- Publishing restores everything, menu placement included.
+- Admin → Pages has checkboxes for **bulk Publish / Move to draft / Archive**. Important pages (Privacy, Terms, Contact, Request a Quote, Furniture) show a caution before unpublishing, but it never blocks.
+- System routes are not CMS pages: `/admin`, sign-in, `/api/*`, customer quote/invoice/order links, webhooks and preview.
 - **Preview** uses Next.js Draft Mode (`/api/admin/preview?path=…`). It only switches on after the server checks the staff session and the "content" permission, and every previewed render checks the session again — a copied preview cookie alone shows nothing. Previews are `noindex` and the admin toolbar shows **DRAFT PREVIEW** with Publish, Edit and Exit Preview.
 - Pages record created/published dates and who created and last edited them. Duplicate copies a created or policy page into a new draft.
 

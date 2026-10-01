@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import {requirePermission} from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/session";
+import { canChangeStatus } from "@/lib/cms/definitions";
 import { resolvePageDefinition } from "@/lib/cms/pages";
 import { PageStatusControls } from "@/components/admin/pages/PageStatusControls";
 import { ActionButton, ActionForm, SubmitButton, TextArea } from "@/components/admin/forms";
@@ -27,7 +28,8 @@ export default async function EditPage({ params }: Props) {
 
   const { page, sections } = await loadPageForEditor(def);
   const links = await linkSuggestions();
-  const sharedTemplate = slug === "product" || slug === "portfolio-project";
+  const sharedTemplate = Boolean(def.template);
+  const statusEditable = canChangeStatus(def);
   const status = page?.status ?? "PUBLISHED";
   const title = page?.title ?? def.title;
   const path = def.kind === "custom" ? `/${slug}` : def.path;
@@ -46,9 +48,10 @@ export default async function EditPage({ params }: Props) {
         actions={
           <PageStatusControls
             status={status}
-            canChangeStatus={Boolean(def.statusControl)}
+            canChangeStatus={statusEditable}
             previewHref={previewHref}
-            setStatus={def.statusControl ? setPageStatus.bind(null, slug) : null}
+            setStatus={statusEditable ? setPageStatus.bind(null, slug) : null}
+            warning={def.unpublishWarning}
             duplicate={def.kind === "system" ? null : duplicatePage.bind(null, slug)}
           />
         }
@@ -63,7 +66,7 @@ export default async function EditPage({ params }: Props) {
 
       <Card title="Page details" className="mb-6">
         <dl className="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <Detail term="Status">{status === "PUBLISHED" ? "Published" : status === "DRAFT" ? "Draft" : "Archived"}{def.statusControl ? "" : " (always)"}</Detail>
+          <Detail term="Status">{status === "PUBLISHED" ? "Published" : status === "DRAFT" ? "Draft" : "Archived"}{statusEditable ? "" : def.siteRoot ? " (the homepage is always live)" : " (shared content block)"}</Detail>
           <Detail term="Published">{page?.publishedAt ? formatDate(page.publishedAt, true) : "Not yet"}</Detail>
           <Detail term="Created">{page ? `${formatDate(page.createdAt, true)}${page.createdBy ? ` by ${page.createdBy.name}` : ""}` : "—"}</Detail>
           <Detail term="Last edited">{page ? `${formatDate(page.updatedAt, true)}${page.updatedBy ? ` by ${page.updatedBy.name}` : ""}` : "Not edited yet"}</Detail>

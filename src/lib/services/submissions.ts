@@ -106,8 +106,10 @@ async function notifyQuoteRequested(quote: { id: string; number: string | null; 
  * "Request a quote" for a configuration: re-price the selection from the
  * database (never trusting the browser), snapshot it (including any sale
  * active right now), and store it as a quote with a first draft revision.
+ * Product quotes take no customer files (see createCustomRequest for
+ * inspiration photos); staff can attach files to the quote in admin.
  */
-export async function createConfigurationQuote(input: Omit<ConfigurationQuoteInput, "quantity" | "address"> & { quantity?: number; address?: string | null }, files: File[] = []) {
+export async function createConfigurationQuote(input: Omit<ConfigurationQuoteInput, "quantity" | "address"> & { quantity?: number; address?: string | null }) {
   const quantity = input.quantity ?? 1;
   const settings = await getSettings();
   if (!settings.quotesEnabled) throw new SubmissionError("Quote requests are temporarily unavailable. Please contact us directly.");
@@ -124,39 +126,32 @@ export async function createConfigurationQuote(input: Omit<ConfigurationQuoteInp
   const snapshot = buildConfigurationSnapshot(product, input.selection, pricing, { priceShownToCustomer: priceShown });
 
   const customDims = snapshot.options.find((o) => o.isCustom && o.customDetails)?.customDetails ?? null;
-  const attachments = await storeAttachments(files);
-  try {
-    const quote = await prisma.$transaction((tx) =>
-      createQuoteRecord(tx, {
-        source: "CONFIGURATOR",
-        name: input.name,
-        email: input.email,
-        phone: input.phone,
-        zipCode: input.zipCode,
-        address: input.address ?? null,
-        quantity,
-        productId: product.id,
-        productName: product.name,
-        configuration: snapshot,
-        estimatedTotalCents: pricing.totalCents == null ? null : pricing.totalCents * quantity,
-        requestedDimensions: customDims,
-        notes: input.notes,
-        timeline: input.timeline,
-        attachments,
-      }),
-    );
-    await logActivity("quote.received", `Quote ${quote.number} from ${quote.name} — ${product.name}${quantity > 1 ? ` × ${quantity}` : ""}`, { entityType: "quote", entityId: quote.id });
-    const summary = [
-      ...describeSnapshot(snapshot, priceShown),
-      ...(quantity > 1 ? [`Quantity: ${quantity}`] : []),
-    ].join("\n");
-    // Awaited so the emails are logged before we reply (sending never throws).
-    await notifyQuoteRequested(quote, summary).catch((error) => logger.error("Quote request emails failed", { error }));
-    return quote;
-  } catch (err) {
-    await cleanupAttachments(attachments);
-    throw err;
-  }
+  const quote = await prisma.$transaction((tx) =>
+    createQuoteRecord(tx, {
+      source: "CONFIGURATOR",
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+      zipCode: input.zipCode,
+      address: input.address ?? null,
+      quantity,
+      productId: product.id,
+      productName: product.name,
+      configuration: snapshot,
+      estimatedTotalCents: pricing.totalCents == null ? null : pricing.totalCents * quantity,
+      requestedDimensions: customDims,
+      notes: input.notes,
+      timeline: input.timeline,
+    }),
+  );
+  await logActivity("quote.received", `Quote ${quote.number} from ${quote.name} — ${product.name}${quantity > 1 ? ` × ${quantity}` : ""}`, { entityType: "quote", entityId: quote.id });
+  const summary = [
+    ...describeSnapshot(snapshot, priceShown),
+    ...(quantity > 1 ? [`Quantity: ${quantity}`] : []),
+  ].join("\n");
+  // Awaited so the emails are logged before we reply (sending never throws).
+  await notifyQuoteRequested(quote, summary).catch((error) => logger.error("Quote request emails failed", { error }));
+  return quote;
 }
 
 /** General quote request (no configurator). */

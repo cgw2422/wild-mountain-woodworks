@@ -19,13 +19,21 @@ export function PageStatusControls({
   previewHref,
   setStatus,
   duplicate,
+  warning,
 }: {
   status: Status;
   canChangeStatus: boolean;
   previewHref: string | null;
   setStatus: ((next: Status) => Promise<ActionResult>) | null;
   duplicate: (() => Promise<ActionResult>) | null;
+  /** Extra caution for important pages (shown in the confirmation, never blocks). */
+  warning?: string;
 }) {
+  const caution = warning ? (
+    <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+      <strong>Heads up:</strong> {warning}
+    </p>
+  ) : null;
   return (
     <div className="flex flex-wrap items-center gap-2">
       {canChangeStatus && setStatus ? (
@@ -39,7 +47,12 @@ export function PageStatusControls({
               action={() => setStatus("DRAFT")}
               label="Move to draft"
               title="Move this page to draft?"
-              body="It disappears from the public site, every menu and the sitemap straight away. Visitors get a “page not found”. You can still edit and preview it, and publish it again at any time."
+              body={
+                <>
+                  <p>It disappears from the public site, every menu, breadcrumbs and the sitemap straight away. Visitors get a “page not found”. You can still edit and preview it, and publishing it again brings its menu links back.</p>
+                  {caution}
+                </>
+              }
               confirmLabel="Move to draft"
               confirmVariant="primary"
             />
@@ -53,7 +66,12 @@ export function PageStatusControls({
               action={() => setStatus("ARCHIVED")}
               label="Archive"
               title="Archive this page?"
-              body="It's removed from the public site, menus and sitemap and moved to the Archived list. Nothing is deleted — you can restore it later."
+              body={
+                <>
+                  <p>It&apos;s removed from the public site, menus and sitemap and moved to the Archived list. Nothing is deleted — you can restore it later.</p>
+                  {status === "PUBLISHED" ? caution : null}
+                </>
+              }
               confirmLabel="Archive"
             />
           )}

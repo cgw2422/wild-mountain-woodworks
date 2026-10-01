@@ -17,6 +17,7 @@ import { PortfolioCard } from "@/components/site/PortfolioCard";
 import { CtaBand } from "@/components/site/CtaBand";
 import { JsonLd } from "@/components/site/JsonLd";
 import { RidgeLine } from "@/components/brand/Logo";
+import { IfPublic } from "@/components/site/IfPublic";
 
 export async function generateMetadata(): Promise<Metadata> {
   const page = await getPageContent("home");
@@ -111,10 +112,12 @@ export default async function HomePage() {
                 subheading={categoriesSection.subheading}
                 className="[&_h2]:scroll-mt-24"
                 action={
-                  <Link href="/furniture" className="inline-flex min-h-11 items-center gap-3 text-[0.74rem] font-semibold uppercase tracking-[0.16em]">
-                    <span className="link-underline">Shop all furniture</span>
-                    <Arrow />
-                  </Link>
+                  <IfPublic path="/furniture">
+                    <Link href="/furniture" className="inline-flex min-h-11 items-center gap-3 text-[0.74rem] font-semibold uppercase tracking-[0.16em]">
+                      <span className="link-underline">Shop all furniture</span>
+                      <Arrow />
+                    </Link>
+                  </IfPublic>
                 }
               />
             </Reveal>

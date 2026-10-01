@@ -6,7 +6,10 @@ vi.mock("next/cache", async () => (await import("../support/next-request")).next
 
 const { prisma } = await import("@/lib/db");
 const { createSignedInAdmin, resetRequest, request, jar } = await import("../support/next-request");
-const { getVisiblePage } = await import("@/lib/cms/pages");
+const { getVisiblePage, isPathPublic, unpublishedPagePaths } = await import("@/lib/cms/pages");
+const { PAGE_DEFINITIONS, canChangeStatus } = await import("@/lib/cms/definitions");
+const { visibleCrumbs } = await import("@/components/site/Breadcrumbs");
+const { IfPublic } = await import("@/components/site/IfPublic");
 const { getMenu } = await import("@/lib/navigation/menus");
 const pageActions = await import("@/app/admin/(panel)/pages/actions");
 const navActions = await import("@/app/admin/(panel)/navigation/actions");
@@ -95,20 +98,93 @@ describe.skipIf(!hasTestDb)("CMS pages, preview and navigation", () => {
     expect((await urls()).some((u) => u.endsWith("/financing"))).toBe(true);
   });
 
-  it("archived pages and drafted system pages are hidden too", async () => {
-    await createSignedInAdmin();
-    await createPublishedPage();
-    await pageActions.setPageStatus("financing", "ARCHIVED");
-    await pageActions.setPageStatus("about", "DRAFT");
-    // Core structure can't be unpublished.
-    expect((await pageActions.setPageStatus("furniture", "DRAFT")).ok).toBe(false);
+  it("EVERY standalone page can be drafted, hidden everywhere, previewed and republished — no allow-list", async () => {
+    await prisma.$transaction((tx) => applyRequiredDefaults(tx, quiet, {}));
+    await seedRidge();
+    await createSignedInAdmin({ role: "EDITOR", email: "editor@example.com" });
+    const pages = PAGE_DEFINITIONS.filter((d) => canChangeStatus(d));
+    // Every core/policy page with its own address is covered (and future ones automatically).
+    expect(pages.map((d) => d.slug)).toEqual(
+      expect.arrayContaining(["about", "faq", "contact", "custom-furniture", "our-work", "furniture", "sale", "request-quote", "shipping-delivery", "returns-cancellations", "warranty", "wood-characteristics", "furniture-care", "privacy", "terms"]),
+    );
+    await prisma.menu.deleteMany(); // replace the starter menus with one item per page
+    const menu = await mainMenu();
+    for (const d of pages) {
+      const row = await prisma.page.findUniqueOrThrow({ where: { slug: d.slug } });
+      await prisma.menuItem.create({ data: { menuId: menu.id, type: "INTERNAL_PAGE", pageId: row.id, label: d.slug } });
+    }
+    const publicMenu = async () => (await getMenu("MAIN")).items.map((i) => i.label);
+    expect(await publicMenu()).toHaveLength(pages.length);
+
+    for (const status of ["DRAFT", "ARCHIVED"] as const) {
+      const res = await pageActions.bulkSetPageStatus(
+        pages.map((d) => d.slug),
+        status,
+      );
+      expect(res).toMatchObject({ ok: true, message: expect.stringContaining(`${pages.length} pages`) });
+      jar.clear(); // anonymous
+      for (const d of pages) expect(await getVisiblePage(d.slug), `${d.slug} ${status}`).toBeNull();
+      expect(await publicMenu()).toEqual([]);
+      const urls = (await sitemap()).map((e) => new URL(e.url).pathname);
+      for (const d of pages) expect(urls, d.slug).not.toContain(d.path);
+      expect(urls).toContain("/"); // the homepage stays
+      // Staff can still preview every one of them.
+      await createSignedInAdmin({ role: "EDITOR", email: `e-${status}@example.com` });
+      request.draftMode = true;
+      for (const d of pages) expect(await getVisiblePage(d.slug), d.slug).toMatchObject({ preview: true });
+      request.draftMode = false;
+    }
+    // Content and menu relationships survive; republishing restores everything.
+    expect(await prisma.menuItem.count({ where: { menuId: menu.id } })).toBe(pages.length);
+    await pageActions.bulkSetPageStatus(
+      pages.map((d) => d.slug),
+      "PUBLISHED",
+    );
     jar.clear();
-    expect(await getVisiblePage("financing")).toBeNull();
+    for (const d of pages) expect(await getVisiblePage(d.slug), d.slug).not.toBeNull();
+    expect(await publicMenu()).toHaveLength(pages.length);
+    expect(await prisma.activityLog.count({ where: { type: "page.drafted" } })).toBe(pages.length);
+    expect(await prisma.activityLog.count({ where: { type: "page.archived" } })).toBe(pages.length);
+  });
+
+  it("the homepage and shared content blocks can't change status; bulk actions skip them", async () => {
+    await createSignedInAdmin();
+    expect(await pageActions.setPageStatus("home", "DRAFT")).toMatchObject({ ok: false, message: expect.stringMatching(/homepage/) });
+    expect(await pageActions.setPageStatus("product", "DRAFT")).toMatchObject({ ok: false, message: expect.stringMatching(/shared content block/) });
+    const res = await pageActions.bulkSetPageStatus(["home", "about", "product"], "DRAFT");
+    expect(res).toMatchObject({ ok: true, message: expect.stringMatching(/1 page moved to draft\. Skipped: Homepage, Product pages/) });
+    jar.clear();
+    expect(await getVisiblePage("home")).not.toBeNull();
     expect(await getVisiblePage("about")).toBeNull();
-    expect(await getVisiblePage("furniture")).not.toBeNull();
-    const urls = (await sitemap()).map((e) => e.url);
-    expect(urls.some((u) => u.endsWith("/about"))).toBe(false);
-    expect(urls.some((u) => u.endsWith("/faq"))).toBe(true);
+  });
+
+  it("menus suppress custom links to unpublished pages; breadcrumbs and header CTA skip them too", async () => {
+    await prisma.$transaction((tx) => applyRequiredDefaults(tx, quiet, {}));
+    await createSignedInAdmin();
+    await prisma.menu.deleteMany();
+    const menu = await mainMenu();
+    await prisma.menuItem.createMany({
+      data: [
+        { menuId: menu.id, type: "CUSTOM_INTERNAL_LINK", label: "About us", url: "/about/", displayOrder: 0 },
+        { menuId: menu.id, type: "CUSTOM_INTERNAL_LINK", label: "Sale", url: "/furniture/sale?ref=nav", displayOrder: 1 },
+        { menuId: menu.id, type: "CUSTOM_INTERNAL_LINK", label: "Shop", url: "/furniture", displayOrder: 2 },
+      ],
+    });
+    expect((await getMenu("MAIN")).items.map((i) => i.label)).toEqual(["About us", "Sale", "Shop"]);
+    await pageActions.bulkSetPageStatus(["about", "sale", "request-quote"], "DRAFT");
+    jar.clear();
+    expect(await unpublishedPagePaths()).toEqual(new Set(["/about", "/furniture/sale", "/request-quote"]));
+    expect((await getMenu("MAIN")).items.map((i) => i.label)).toEqual(["Shop"]);
+    expect(await isPathPublic("/furniture")).toBe(true);
+    expect(await isPathPublic("/About?x=1")).toBe(false);
+    // Breadcrumbs drop links to unpublished pages (never the current page).
+    await createSignedInAdmin({ email: "o3@example.com" });
+    await pageActions.setPageStatus("furniture", "DRAFT");
+    jar.clear();
+    expect(await visibleCrumbs([{ label: "Furniture", href: "/furniture" }, { label: "FAQ", href: "/faq" }, { label: "Ridge Table" }])).toEqual([{ label: "FAQ", href: "/faq" }, { label: "Ridge Table" }]);
+    // IfPublic hides built-in links to drafted pages.
+    expect(await IfPublic({ path: "/furniture", children: "link" })).toMatchObject({ props: { children: null } });
+    expect(await IfPublic({ path: "/faq", children: "link" })).toMatchObject({ props: { children: "link" } });
   });
 
   it("authorized staff can preview a draft; anonymous visitors with the preview cookie can't", async () => {

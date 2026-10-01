@@ -47,10 +47,16 @@ export interface PageDefinition {
   kind: "system" | "policy" | "custom";
   description: string;
   /**
-   * Whether the page can be moved to Draft/Archived. Core templates (home,
-   * catalog, product and project templates, quote flow) are always on.
+   * A shared content block rendered inside other pages (e.g. the product
+   * and project page sections), not a standalone public page. Templates
+   * have no URL of their own, so they have no status, menu link or sitemap
+   * entry.
    */
-  statusControl?: boolean;
+  template?: boolean;
+  /** The homepage. Always published: drafting it would take the whole site offline. */
+  siteRoot?: boolean;
+  /** Extra caution shown before this page is unpublished (never blocks it). */
+  unpublishWarning?: string;
   /** Policy/content pages have a markdown body. */
   hasBody?: boolean;
   sections: SectionDefinition[];
@@ -72,7 +78,6 @@ const policyPage = (slug: string, title: string, description: string): PageDefin
   kind: "policy",
   description,
   hasBody: true,
-  statusControl: true,
   sections: [hero({ fields: ["eyebrow", "heading", "body", "image"], imageHelp: "Optional header image." })],
 });
 
@@ -82,6 +87,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
     title: "Homepage",
     path: "/",
     kind: "system",
+    siteRoot: true,
     description: "The homepage, organized by section.",
     sections: [
       {
@@ -149,6 +155,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "furniture",
+    unpublishWarning: "This is the catalog landing page that breadcrumbs and menus point to. Individual product pages stay live.",
     title: "Furniture catalog",
     path: "/furniture",
     kind: "system",
@@ -178,7 +185,6 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "custom-furniture",
-    statusControl: true,
     title: "Custom Furniture",
     path: "/custom-furniture",
     kind: "system",
@@ -226,6 +232,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
     slug: "portfolio-project",
     title: "Portfolio project pages",
     path: "/our-work",
+    template: true,
     kind: "system",
     description: "Shared call to action shown on every portfolio project.",
     sections: [{ key: "cta", label: "“Want something similar?” prompt", fields: ["eyebrow", "heading", "body", "primaryCta"] }],
@@ -234,6 +241,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
     slug: "product",
     title: "Product pages",
     path: "/furniture",
+    template: true,
     kind: "system",
     description: "Shared content shown on every product page.",
     sections: [
@@ -245,7 +253,6 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "about",
-    statusControl: true,
     title: "About",
     path: "/about",
     kind: "system",
@@ -274,7 +281,6 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "faq",
-    statusControl: true,
     title: "FAQ",
     path: "/faq",
     kind: "system",
@@ -283,7 +289,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "contact",
-    statusControl: true,
+    unpublishWarning: "Customers use this page to reach you, and quote and order pages link to it.",
     title: "Contact",
     path: "/contact",
     kind: "system",
@@ -292,6 +298,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   },
   {
     slug: "request-quote",
+    unpublishWarning: "This is the general quote request form. Product configurators keep working, but the “Request a Quote” page and its header button go away.",
     title: "Request a Quote",
     path: "/request-quote",
     kind: "system",
@@ -303,8 +310,14 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   policyPage("warranty", "Furniture Warranty", "Warranty terms."),
   policyPage("wood-characteristics", "Wood Characteristics & Natural Variation", "Educational page about natural wood."),
   policyPage("furniture-care", "Furniture Care", "Care instructions."),
-  policyPage("privacy", "Privacy Policy", "Privacy policy."),
-  policyPage("terms", "Terms & Conditions", "Terms and conditions."),
+  {
+    ...policyPage("privacy", "Privacy Policy", "Privacy policy."),
+    unpublishWarning: "Forms on the site link to the privacy policy, and many visitors (and some laws) expect one to be available while you collect personal details.",
+  },
+  {
+    ...policyPage("terms", "Terms & Conditions", "Terms and conditions."),
+    unpublishWarning: "Your terms are referenced by quotes and invoices. Customers won't be able to read them while the page is unpublished.",
+  },
 ];
 
 export function getPageDefinition(slug: string): PageDefinition | undefined {
@@ -337,6 +350,16 @@ export const CUSTOM_PAGE_SECTIONS: SectionDefinition[] = [
   },
 ];
 
+/**
+ * Every standalone public page can be Draft, Published or Archived: all
+ * code-defined pages with their own URL and every page created in admin.
+ * Only the homepage (the site root) and shared content blocks (templates)
+ * are exempt — there is no allow-list to maintain.
+ */
+export function canChangeStatus(def: Pick<PageDefinition, "template" | "siteRoot">): boolean {
+  return !def.template && !def.siteRoot;
+}
+
 export function customPageDefinition(page: { slug: string; title: string }): PageDefinition {
   return {
     slug: page.slug,
@@ -345,7 +368,6 @@ export function customPageDefinition(page: { slug: string; title: string }): Pag
     kind: "custom",
     description: "Page created in the admin.",
     hasBody: true,
-    statusControl: true,
     sections: CUSTOM_PAGE_SECTIONS,
   };
 }

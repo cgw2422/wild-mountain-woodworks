@@ -1,4 +1,5 @@
 import { getPageContent } from "@/lib/cms/queries";
+import { unpublishedPagePaths } from "@/lib/cms/pages";
 import type { getProductPage } from "@/lib/catalog/queries";
 import { getSettings, salesFlags } from "@/lib/settings";
 import { siteUrl } from "@/lib/site-url";
@@ -18,11 +19,12 @@ import { ProductGallery } from "./ProductGallery";
 import { PriceTag } from "./PriceTag";
 import { SaleBadge } from "./SaleBadge";
 import { Configurator, type PurchaseMode } from "./Configurator";
+import { IfPublic } from "@/components/site/IfPublic";
 
 type Data = NonNullable<Awaited<ReturnType<typeof getProductPage>>>;
 
 export async function ProductView({ data }: { data: Data }) {
-  const [settings, shared, quotePage] = await Promise.all([getSettings(), getPageContent("product"), getPageContent("request-quote")]);
+  const [settings, shared, quotePage, hidden] = await Promise.all([getSettings(), getPageContent("product"), getPageContent("request-quote"), unpublishedPagePaths()]);
   const { product, images, videos, configurable, pricesVisible, startingPriceCents, regularPriceCents, sale, saleEndsAt, related, faqs } = data;
   const flags = salesFlags(settings);
   // Sales are quote-based: every configuration becomes a quote request (no cart/checkout).
@@ -154,6 +156,7 @@ export async function ProductView({ data }: { data: Data }) {
                 mode={mode}
                 requestCopy={{ heading: request.heading, body: request.body ? <RichText text={request.body} className="mt-3 leading-relaxed text-muted" /> : null }}
                 confirmationCopy={{ heading: confirmation.heading, body: confirmation.body ? <RichText text={confirmation.body} className="mt-3 leading-relaxed text-muted" /> : null }}
+                publicLinks={{ contact: !hidden.has("/contact"), privacy: !hidden.has("/privacy") }}
               />
             </div>
           </div>
@@ -201,9 +204,11 @@ export async function ProductView({ data }: { data: Data }) {
                 <h2 id="product-faq" className="display-md">
                   Questions
                 </h2>
-                <ButtonLink href="/faq" variant="text" className="mt-6" arrow>
-                  All FAQs
-                </ButtonLink>
+                <IfPublic path="/faq">
+                  <ButtonLink href="/faq" variant="text" className="mt-6" arrow>
+                    All FAQs
+                  </ButtonLink>
+                </IfPublic>
               </div>
               <div className="lg:col-span-8">
                 <Accordion items={faqs.map((f) => ({ id: f.id, title: f.question, content: <Markdown className="text-[0.97rem]">{f.answer}</Markdown> }))} />

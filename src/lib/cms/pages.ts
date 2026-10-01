@@ -3,7 +3,7 @@ import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { customPageDefinition, getPageDefinition, type PageDefinition } from "./definitions";
+import { canChangeStatus, customPageDefinition, getPageDefinition, type PageDefinition } from "./definitions";
 import { getPageContent, type PageContent } from "./queries";
 import { getPreviewer } from "@/lib/preview";
 
@@ -21,16 +21,17 @@ export const resolvePageDefinition = cache(async (slug: string): Promise<PageDef
 export type VisiblePage = { def: PageDefinition; page: PageContent; preview: boolean };
 
 /**
- * A page as a visitor may see it right now. Published pages (and core pages
- * that can't be unpublished) are visible to everyone. Draft and archived
- * pages are visible only to signed-in staff with the "content" permission
- * who switched on preview (Draft Mode) — everyone else gets null → 404.
+ * A page as a visitor may see it right now. Published pages (and the
+ * homepage, which is always published) are visible to everyone. Draft and
+ * archived pages are visible only to signed-in staff with the "content"
+ * permission who switched on preview (Draft Mode) — everyone else gets
+ * null → 404.
  */
 export async function getVisiblePage(slug: string): Promise<VisiblePage | null> {
   const def = await resolvePageDefinition(slug);
   if (!def) return null;
   const page = await getPageContent(slug);
-  if (page.status === "PUBLISHED" || !def.statusControl) return { def, page, preview: false };
+  if (page.status === "PUBLISHED" || !canChangeStatus(def)) return { def, page, preview: false };
   return (await getPreviewer("content")) ? { def, page, preview: true } : null;
 }
 
@@ -41,11 +42,38 @@ export function pagePath(page: { slug: string; isCustom: boolean }): string {
 
 /**
  * Where a page is reachable as a standalone public URL (menus can link it).
- * Shared templates (product, project) and the homepage alias don't qualify.
+ * Shared templates (product, project content blocks) don't qualify.
  */
 export function isLinkablePage(page: { slug: string; isCustom: boolean }): boolean {
   if (page.isCustom) return true;
-  return !["product", "portfolio-project"].includes(page.slug);
+  const def = getPageDefinition(page.slug);
+  return Boolean(def && !def.template);
+}
+
+/** "/About/?x#y" → "/about": the form paths are compared in. */
+export function normalizePath(path: string): string {
+  const clean = path.split("#")[0]!.split("?")[0]!.replace(/\/+$/, "").toLowerCase();
+  return clean || "/";
+}
+
+/**
+ * Public paths of every page that is currently Draft or Archived. Menus,
+ * breadcrumbs, the sitemap and site CTAs use this to suppress links to
+ * pages visitors can't open. Memoized per request.
+ */
+export const unpublishedPagePaths = cache(async (): Promise<Set<string>> => {
+  const rows = await prisma.page.findMany({ where: { status: { not: "PUBLISHED" } }, select: { slug: true, title: true, isCustom: true } });
+  const paths = new Set<string>();
+  for (const row of rows) {
+    const def = row.isCustom ? customPageDefinition(row) : getPageDefinition(row.slug);
+    if (def && canChangeStatus(def)) paths.add(normalizePath(pagePath(row)));
+  }
+  return paths;
+});
+
+/** Whether an internal link points at a page visitors can currently open. */
+export async function isPathPublic(path: string): Promise<boolean> {
+  return !(await unpublishedPagePaths()).has(normalizePath(path));
 }
 
 /** For page components: the visible page, or the site's 404. */

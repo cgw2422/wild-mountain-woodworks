@@ -16,7 +16,6 @@ const validateRequest = clientValidator(clientRules.configurationQuote);
 import {
   AntiSpamFields,
   FormErrorSummary,
-  ReferenceImagesField,
   SelectField,
   SubmitButton,
   TextAreaField,
@@ -36,9 +35,11 @@ export interface ConfiguratorProps {
   mode: PurchaseMode;
   requestCopy: { heading: string | null; body: React.ReactNode };
   confirmationCopy: { heading: string | null; body: React.ReactNode };
+  /** Which linked CMS pages are published (unpublished ones aren't linked). */
+  publicLinks: { contact: boolean; privacy: boolean };
 }
 
-export function Configurator({ product, pricesVisible, priceDisclaimer, mode, requestCopy, confirmationCopy }: ConfiguratorProps) {
+export function Configurator({ product, pricesVisible, priceDisclaimer, mode, requestCopy, confirmationCopy, publicLinks }: ConfiguratorProps) {
   const [selection, setSelection] = useState<ConfigurationSelection>(() => defaultSelection(product));
   const [showErrors, setShowErrors] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -186,12 +187,16 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
         )}
 
         {mode === "contact" ? (
-          <Link
-            href={`/contact`}
-            className="flex min-h-14 w-full items-center justify-center bg-charcoal px-8 text-[0.74rem] font-semibold uppercase tracking-[0.16em] text-ivory transition-colors hover:bg-walnut"
-          >
-            Contact Us About This Piece
-          </Link>
+          publicLinks.contact ? (
+            <Link
+              href={`/contact`}
+              className="flex min-h-14 w-full items-center justify-center bg-charcoal px-8 text-[0.74rem] font-semibold uppercase tracking-[0.16em] text-ivory transition-colors hover:bg-walnut"
+            >
+              Contact Us About This Piece
+            </Link>
+          ) : (
+            <p className="text-sm text-muted">Online quote requests are paused. Please get in touch with us directly about this piece.</p>
+          )
         ) : (
           <button
             type="button"
@@ -219,6 +224,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
             showTotal={showTotal}
             copy={requestCopy}
             confirmation={confirmationCopy}
+            privacyLink={publicLinks.privacy}
             onServerErrors={(e) => {
               setServerErrors(e);
               setShowErrors(true);
@@ -583,6 +589,7 @@ function RequestPanel({
   showTotal,
   copy,
   confirmation,
+  privacyLink,
   onServerErrors,
 }: {
   product: ConfigurableProduct;
@@ -591,20 +598,20 @@ function RequestPanel({
   showTotal: boolean;
   copy: { heading: string | null; body: React.ReactNode };
   confirmation: { heading: string | null; body: React.ReactNode };
+  privacyLink: boolean;
   onServerErrors: (e: Record<string, string>) => void;
 }) {
-  const [files, setFiles] = useState<File[]>([]);
+  // A product quote is the structured configuration plus notes — no file
+  // uploads (inspiration photos belong to custom furniture requests).
   const opts = useMemo(
     () => ({
       prepare: (fd: FormData) => {
         fd.set("productId", product.id);
         fd.set("selection", JSON.stringify(selection));
-        fd.delete("attachments");
-        files.forEach((f) => fd.append("attachments", f));
       },
       validate: validateRequest,
     }),
-    [product.id, selection, files],
+    [product.id, selection],
   );
   const { state, pending, onSubmit, formRef, fieldErrors } = usePublicForm(submitConfigurationQuote, opts);
   const successRef = useRef<HTMLDivElement>(null);
@@ -701,15 +708,20 @@ function RequestPanel({
         <TextField label="Delivery address" name="address" autoComplete="street-address" error={fieldErrors.address} maxLength={300} hint="Helps us quote delivery accurately." />
         <SelectField label="Desired timeline" name="timeline" options={TIMELINE_OPTIONS.map((t) => ({ value: t, label: t }))} error={fieldErrors.timeline} />
         <TextAreaField label="Notes" name="notes" rows={4} maxLength={4000} error={fieldErrors.notes} placeholder="Anything else we should know — room size, questions, special requests." />
-        <ReferenceImagesField files={files} onChange={setFiles} error={fieldErrors.attachments} />
         <SubmitButton pending={pending} className="w-full" pendingLabel="Sending request…">
           Request Quote
         </SubmitButton>
         <p className="text-xs text-muted">
-          No payment is required now. We&apos;ll review your request and send a personal quote you can accept online. We&apos;ll use your details only to respond to this request — see our{" "}
-          <Link href="/privacy" className="link-quiet">
-            privacy policy
-          </Link>
+          No payment is required now. We&apos;ll review your request and send a personal quote you can accept online. We&apos;ll use your details only to respond to this request
+          {privacyLink ? (
+            <>
+              {" "}
+              — see our{" "}
+              <Link href="/privacy" className="link-quiet">
+                privacy policy
+              </Link>
+            </>
+          ) : null}
           .
         </p>
       </div>

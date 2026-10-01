@@ -12,6 +12,7 @@ import { Reveal } from "@/components/ui/Reveal";
 import { Breadcrumbs } from "@/components/site/Breadcrumbs";
 import { SectionHeading } from "@/components/site/SectionHeading";
 import { CustomBuildForm } from "@/components/forms/CustomBuildForm";
+import { IfPublic } from "@/components/site/IfPublic";
 
 export async function generateMetadata(): Promise<Metadata> {
   const visible = await getVisiblePage("custom-furniture");
@@ -170,9 +171,11 @@ export default async function CustomFurniturePage() {
                 <div className="border border-stone bg-ivory p-8">
                   <h3 className="display-sm">Custom requests are paused.</h3>
                   <p className="mt-3 text-muted">We&apos;re not taking new custom build requests online right now. Please get in touch and we&apos;ll let you know when we can take on new work.</p>
-                  <ButtonLink href="/contact" className="mt-6">
-                    Contact Us
-                  </ButtonLink>
+                  <IfPublic path="/contact">
+                    <ButtonLink href="/contact" className="mt-6">
+                      Contact Us
+                    </ButtonLink>
+                  </IfPublic>
                 </div>
               )}
             </div>

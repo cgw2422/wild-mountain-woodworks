@@ -4,7 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { AdminError, permittedAction, fd } from "@/lib/admin/action";
-import { CUSTOM_PAGE_SECTIONS, RESERVED_PAGE_SLUGS, type PageDefinition } from "@/lib/cms/definitions";
+import { CUSTOM_PAGE_SECTIONS, RESERVED_PAGE_SLUGS, canChangeStatus, type PageDefinition } from "@/lib/cms/definitions";
 import { resolvePageDefinition } from "@/lib/cms/pages";
 import { isValidSlug, slugify } from "@/lib/slug";
 import { revalidateSite } from "@/lib/revalidate";
@@ -278,18 +278,15 @@ export const createPage = permittedAction("content", async (admin, data: FormDat
 const STATUS_LOG = { PUBLISHED: "page.published", DRAFT: "page.drafted", ARCHIVED: "page.archived" } as const;
 const STATUS_WORD = { PUBLISHED: "published", DRAFT: "moved to draft", ARCHIVED: "archived" } as const;
 
-/**
- * Publish / move to draft / archive. Drafted and archived pages disappear
- * from the public site, menus and sitemap at once (they're resolved per
- * request) — the page and its content are kept.
- */
-export const setPageStatus = permittedAction("content", async (admin, slug: string, status: "PUBLISHED" | "DRAFT" | "ARCHIVED") => {
-  const next = z.enum(["PUBLISHED", "DRAFT", "ARCHIVED"]).parse(status);
+type PageStatusValue = "PUBLISHED" | "DRAFT" | "ARCHIVED";
+
+/** Change one page's status (shared by the page editor and bulk actions). Returns whether it changed. */
+async function applyPageStatus(admin: { id: string; name: string }, slug: string, next: PageStatusValue): Promise<boolean> {
   const def = await requireDefinition(slug);
-  if (!def.statusControl) throw new AdminError("This page is part of the site's structure and is always published.");
+  if (!canChangeStatus(def)) throw new AdminError(`“${def.title}” is ${def.siteRoot ? "the homepage, which is always published" : "a shared content block, not a standalone page"}.`);
   const current = await prisma.page.findUnique({ where: { slug }, select: { status: true, title: true } });
   const before = current?.status ?? "PUBLISHED";
-  if (before === next) return { ok: true, message: "No change." };
+  if (before === next) return false;
   await prisma.page.upsert({
     where: { slug },
     update: { status: next, updatedById: admin.id, ...(next === "PUBLISHED" ? { publishedAt: new Date() } : {}) },
@@ -301,16 +298,47 @@ export const setPageStatus = permittedAction("content", async (admin, slug: stri
     entityType: "page",
     entityId: slug,
   });
+  return true;
+}
+
+/**
+ * Publish / move to draft / archive any standalone page. Drafted and
+ * archived pages disappear from the public site, menus, breadcrumbs and
+ * sitemap at once (all resolved per request) — the page, its content and
+ * its menu items are kept, so republishing restores everything.
+ */
+export const setPageStatus = permittedAction("content", async (admin, slug: string, status: PageStatusValue) => {
+  const next = z.enum(["PUBLISHED", "DRAFT", "ARCHIVED"]).parse(status);
+  if (!(await applyPageStatus(admin, slug, next))) return { ok: true, message: "No change." };
   revalidateSite();
   return {
     ok: true,
     message:
       next === "PUBLISHED"
-        ? "Published — it's live on the site."
+        ? "Published — it's live on the site, and its menu links are back."
         : next === "DRAFT"
           ? "Moved to draft. It's no longer visible to visitors, and it's hidden from menus and the sitemap."
-          : "Archived. It's no longer visible to visitors.",
+          : "Archived. It's no longer visible to visitors, and it's hidden from menus and the sitemap.",
   };
+});
+
+/** Bulk publish / move to draft / archive from Admin → Pages. Pages that can't change (the homepage) are skipped. */
+export const bulkSetPageStatus = permittedAction("content", async (admin, slugsArg: string[], status: PageStatusValue) => {
+  const next = z.enum(["PUBLISHED", "DRAFT", "ARCHIVED"]).parse(status);
+  const slugs = z.array(z.string().min(1).max(80)).min(1, "Select at least one page.").max(200).parse([...new Set(slugsArg)]);
+  let changed = 0;
+  const skipped: string[] = [];
+  for (const slug of slugs) {
+    const def = await resolvePageDefinition(slug);
+    if (!def || !canChangeStatus(def)) {
+      skipped.push(def?.title ?? slug);
+      continue;
+    }
+    if (await applyPageStatus(admin, slug, next)) changed++;
+  }
+  revalidateSite();
+  const verb = next === "PUBLISHED" ? "published" : next === "DRAFT" ? "moved to draft" : "archived";
+  return { ok: true, message: `${changed} page${changed === 1 ? "" : "s"} ${verb}.${skipped.length ? ` Skipped: ${skipped.join(", ")}.` : ""}` };
 });
 
 /** Copy a created or policy page into a new draft page (content, SEO and matching sections). */

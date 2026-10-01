@@ -11,7 +11,8 @@ export function SiteHeader({
   contact,
 }: {
   items: NavLinkData[];
-  cta: { label: string; href: string };
+  /** Null when neither the quote page nor the contact page is published. */
+  cta: { label: string; href: string } | null;
   contact: { email: string | null; phone: string | null };
 }) {
   return (
@@ -25,11 +26,13 @@ export function SiteHeader({
           <MainNav items={items} />
         </nav>
         <div className="flex items-center gap-3">
-          <span className="hidden sm:block">
-            <ButtonLink href={cta.href} variant="primary" className="min-h-11 px-5">
-              {cta.label}
-            </ButtonLink>
-          </span>
+          {cta ? (
+            <span className="hidden sm:block">
+              <ButtonLink href={cta.href} variant="primary" className="min-h-11 px-5">
+                {cta.label}
+              </ButtonLink>
+            </span>
+          ) : null}
           <MobileMenu items={items} cta={cta} contact={contact} />
         </div>
       </div>

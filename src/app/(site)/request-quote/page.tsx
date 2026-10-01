@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { RichText } from "@/components/ui/Markdown";
-import { getPageContent } from "@/lib/cms/queries";
+import { NOT_FOUND_METADATA, getVisiblePage, requireVisiblePage, withPreviewRobots } from "@/lib/cms/pages";
 import { buildMetadata } from "@/lib/seo";
 import { getSettings } from "@/lib/settings";
 import { prisma } from "@/lib/db";
@@ -11,15 +11,18 @@ import { ButtonLink } from "@/components/ui/Button";
 import { Eyebrow } from "@/components/ui/Eyebrow";
 import { Breadcrumbs } from "@/components/site/Breadcrumbs";
 import { QuoteRequestForm } from "@/components/forms/QuoteRequestForm";
+import { IfPublic } from "@/components/site/IfPublic";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const page = await getPageContent("request-quote");
-  return buildMetadata({ title: page.seoTitle ?? "Request a Quote", description: page.seoDescription, path: "/request-quote", image: page.ogImage });
+  const visible = await getVisiblePage("request-quote");
+  if (!visible) return NOT_FOUND_METADATA;
+  const page = visible.page;
+  return withPreviewRobots(visible, buildMetadata({ title: page.seoTitle ?? "Request a Quote", description: page.seoDescription, path: "/request-quote", image: page.ogImage }));
 }
 
 export default async function RequestQuotePage({ searchParams }: { searchParams: Promise<{ product?: string }> }) {
   const [page, settings, sp, products] = await Promise.all([
-    getPageContent("request-quote"),
+    requireVisiblePage("request-quote").then((v) => v.page),
     getSettings(),
     searchParams,
     prisma.product.findMany({ where: publicProductWhere, orderBy: { displayOrder: "asc" }, select: { name: true, slug: true } }),
@@ -37,12 +40,16 @@ export default async function RequestQuotePage({ searchParams }: { searchParams:
           <h1 className="display-xl animate-reveal">{hero.heading || "Request a Quote"}</h1>
           <RichText text={hero.body} className="lede mt-6 text-muted" />
           <div className="mt-8 flex flex-wrap gap-x-8 gap-y-3">
-            <ButtonLink href="/furniture" variant="text" arrow>
-              Browse & configure
-            </ButtonLink>
-            <ButtonLink href="/custom-furniture" variant="text" arrow>
-              Custom furniture
-            </ButtonLink>
+            <IfPublic path="/furniture">
+              <ButtonLink href="/furniture" variant="text" arrow>
+                Browse & configure
+              </ButtonLink>
+            </IfPublic>
+            <IfPublic path="/custom-furniture">
+              <ButtonLink href="/custom-furniture" variant="text" arrow>
+                Custom furniture
+              </ButtonLink>
+            </IfPublic>
           </div>
           {hero.image ? <CmsImage image={hero.image} slot="feature" className="mt-12 hidden lg:block" sizes="35vw" /> : null}
         </div>
@@ -57,9 +64,11 @@ export default async function RequestQuotePage({ searchParams }: { searchParams:
             <div className="border border-stone bg-paper p-8">
               <h2 className="display-sm">Quote requests are paused.</h2>
               <p className="mt-3 text-muted">We&apos;re not accepting quote requests online right now. Please contact us directly.</p>
-              <ButtonLink href="/contact" className="mt-6">
-                Contact Us
-              </ButtonLink>
+              <IfPublic path="/contact">
+                <ButtonLink href="/contact" className="mt-6">
+                  Contact Us
+                </ButtonLink>
+              </IfPublic>
             </div>
           )}
         </div>

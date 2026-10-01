@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { prisma } from "@/lib/db";
-import { isLinkablePage, pagePath } from "@/lib/cms/pages";
+import { isLinkablePage, normalizePath, pagePath, unpublishedPagePaths } from "@/lib/cms/pages";
 import { isSafeInternalPath, safeExternalUrl, type MenuKey } from "./definitions";
 
 export interface NavLink {
@@ -34,12 +34,15 @@ function loadRows(menuId: string) {
 
 /**
  * Resolve one stored item to a public link, or null when it must not render.
- * This is the safety net for menus: a page that is Draft/Archived, a hidden
- * category, a product that isn't live, an unsafe URL or a disabled item
- * simply never renders — the stored
- * item stays, so it returns automatically when its target is live again.
+ * This is the safety net for menus: a page that is Draft/Archived (linked
+ * as a page OR by a custom link to its URL), a hidden category, a product
+ * that isn't live, an unsafe URL or a disabled item simply never renders —
+ * the stored item stays, so it returns automatically when its target is
+ * live again.
+ *
+ * `hiddenPaths`: public paths of Draft/Archived pages (unpublishedPagePaths).
  */
-export function resolveItem(row: Row): Omit<NavLink, "children"> | null {
+export function resolveItem(row: Row, hiddenPaths: ReadonlySet<string> = new Set()): Omit<NavLink, "children"> | null {
   if (!row.enabled) return null;
   const label = row.label.trim();
   const link = (fallback: string, href: string | null, external = false) => ({
@@ -58,7 +61,9 @@ export function resolveItem(row: Row): Omit<NavLink, "children"> | null {
     case "PRODUCT_CATEGORY": {
       const c = row.category;
       if (!c || !c.visible || c.archivedAt) return null;
-      return link(c.name, c.linkUrl?.trim() || `/furniture/${c.slug}`);
+      const href = c.linkUrl?.trim() || `/furniture/${c.slug}`;
+      if (href.startsWith("/") && hiddenPaths.has(normalizePath(href))) return null;
+      return link(c.name, href);
     }
     case "PRODUCT": {
       const p = row.product;
@@ -66,7 +71,8 @@ export function resolveItem(row: Row): Omit<NavLink, "children"> | null {
       return link(p.name, `/furniture/${p.slug}`);
     }
     case "CUSTOM_INTERNAL_LINK":
-      return row.url && isSafeInternalPath(row.url) && label ? link(label, row.url) : null;
+      if (!row.url || !isSafeInternalPath(row.url) || !label || hiddenPaths.has(normalizePath(row.url))) return null;
+      return link(label, row.url);
     case "EXTERNAL_LINK": {
       const url = row.url ? safeExternalUrl(row.url) : null;
       return url && label ? link(label, url, true) : null;
@@ -77,10 +83,10 @@ export function resolveItem(row: Row): Omit<NavLink, "children"> | null {
 }
 
 /** Build the visible tree (two levels). Headings without visible children are dropped. */
-export function buildTree(rows: Row[]): NavLink[] {
+export function buildTree(rows: Row[], hiddenPaths: ReadonlySet<string> = new Set()): NavLink[] {
   const resolved = new Map<string, Omit<NavLink, "children">>();
   for (const r of rows) {
-    const link = resolveItem(r);
+    const link = resolveItem(r, hiddenPaths);
     if (link) resolved.set(r.id, link);
   }
   const top = rows.filter((r) => !r.parentId && resolved.has(r.id));
@@ -96,5 +102,6 @@ export function buildTree(rows: Row[]): NavLink[] {
 export const getMenu = cache(async (key: MenuKey): Promise<ResolvedMenu> => {
   const menu = await prisma.menu.findUnique({ where: { key } });
   if (!menu) return { key, title: null, items: [] };
-  return { key, title: menu.title, items: buildTree(await loadRows(menu.id)) };
+  const [rows, hidden] = await Promise.all([loadRows(menu.id), unpublishedPagePaths()]);
+  return { key, title: menu.title, items: buildTree(rows, hidden) };
 });

@@ -125,7 +125,7 @@ export function MobileMenu({
   contact,
 }: {
   items: NavLinkData[];
-  cta: { label: string; href: string };
+  cta: { label: string; href: string } | null;
   contact: { email: string | null; phone: string | null };
 }) {
   const [open, setOpen] = useState(false);
@@ -225,13 +225,15 @@ export function MobileMenu({
             </ul>
           </nav>
           <div className="space-y-5 border-t border-white/15 pt-6">
-            <Link
-              href={cta.href}
-              onClick={() => setOpen(false)}
-              className="flex min-h-12 w-full items-center justify-center bg-ivory px-6 text-[0.74rem] font-semibold uppercase tracking-[0.16em] text-charcoal"
-            >
-              {cta.label}
-            </Link>
+            {cta ? (
+              <Link
+                href={cta.href}
+                onClick={() => setOpen(false)}
+                className="flex min-h-12 w-full items-center justify-center bg-ivory px-6 text-[0.74rem] font-semibold uppercase tracking-[0.16em] text-charcoal"
+              >
+                {cta.label}
+              </Link>
+            ) : null}
             {contact.email || contact.phone ? (
               <div className="flex flex-col gap-1 text-sm text-ivory/70">
                 {contact.email ? <a href={`mailto:${contact.email}`}>{contact.email}</a> : null}

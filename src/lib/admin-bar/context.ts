@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { can, type Role } from "@/lib/auth/permissions";
-import { getPageDefinition } from "@/lib/cms/definitions";
+import { canChangeStatus, getPageDefinition } from "@/lib/cms/definitions";
 
 export interface EditLink {
   label: string;
@@ -35,7 +35,7 @@ export async function resolveEditContext(rawPath: string, role: Role): Promise<E
     return {
       ...EMPTY,
       edit: content ? { label, href: slug === "home" ? "/admin/homepage" : `/admin/pages/${slug}` } : null,
-      page: { slug, status: row?.status ?? "PUBLISHED", canPublish: content && Boolean(def ? def.statusControl : true) },
+      page: { slug, status: row?.status ?? "PUBLISHED", canPublish: content && (def ? canChangeStatus(def) : true) },
     };
   };
 
