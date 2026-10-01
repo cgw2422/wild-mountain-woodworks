@@ -106,7 +106,7 @@ export default async function OptionGroupPage({ params }: { params: Promise<{ id
               <ul className="space-y-1.5 text-sm">
                 {group.products.map((pog) => (
                   <li key={pog.id} className="flex items-center justify-between gap-2">
-                    <Link href={`/admin/products/${pog.product.id}#options`} className="truncate text-neutral-800 hover:underline">
+                    <Link href={`/admin/products/${pog.product.id}#options`} className="block truncate py-3 text-neutral-800 hover:underline">
                       {pog.product.name}
                     </Link>
                     <StatusBadge status={pog.product.status} />

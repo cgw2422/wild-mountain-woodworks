@@ -75,7 +75,7 @@ export function OptionGroupForm({
           </div>
         </div>
         <details className="mt-5 rounded border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
-          <summary className="cursor-pointer font-medium text-neutral-800">About display styles</summary>
+          <summary className="flex min-h-11 cursor-pointer items-center font-medium text-neutral-800">About display styles</summary>
           <dl className="mt-3 grid gap-2">
             {INPUT_TYPES.map((t) => (
               <div key={t.value}>
