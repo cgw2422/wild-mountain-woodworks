@@ -46,6 +46,8 @@ const selectionSchema = z.object({
   /** Quantity-based values (e.g. chairs); the pricing engine enforces each value's min/max/step. */
   optionQuantities: z.record(z.string().max(40), z.number().int().min(0).max(999)).optional(),
   addOns: z.record(z.string().max(40), z.number().int().min(0).max(99)).default({}),
+  /** Configurable add-ons: addOnId → (option group id → value id). The pricing engine validates every choice. */
+  addOnOptions: z.record(z.string().max(40), z.record(z.string().max(40), z.string().max(40))).optional(),
   customDetails: z.record(z.string().max(40), z.string().trim().max(500)).default({}),
 });
 

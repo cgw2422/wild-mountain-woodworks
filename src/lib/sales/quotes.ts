@@ -3,7 +3,7 @@ import type { Prisma, QuoteSource, QuoteStatus } from "@/generated/prisma/client
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { formatCents } from "@/lib/money";
-import { snapshotOptionTotal, type ConfigurationSnapshot } from "@/lib/pricing/snapshot";
+import { addOnChoicesText, addOnLineDetails, parseAddOnLine, snapshotOptionTotal, type AddOnLineDetails, type ConfigurationSnapshot } from "@/lib/pricing/snapshot";
 import { adminRecipient, sendTemplateEmail, type SendResult } from "@/lib/email/send";
 import { getSettings, salesFlags } from "@/lib/settings";
 import { siteDateLong } from "@/lib/site-time";
@@ -41,6 +41,8 @@ export interface DraftLine {
   taxable: boolean;
   productId: string | null;
   configuration: ConfigurationSnapshot | null;
+  /** A configured add-on of the product line above it (e.g. Dining Chairs with their choices). */
+  addOn?: AddOnLineDetails | null;
 }
 
 /**
@@ -86,7 +88,19 @@ export function linesFromSnapshot(s: ConfigurationSnapshot, quantity = 1): Draft
     });
   }
   for (const a of s.addOns) {
-    lines.push({ kind: "ADDON", description: a.name, notes: null, quantity: a.quantity * qty, unitPriceCents: a.unitPriceCents, taxable: true, productId: null, configuration: null });
+    // Configured add-ons keep every choice (style, wood, finishes…) on their own line, grouped under the piece.
+    const details = addOnLineDetails(s, a);
+    lines.push({
+      kind: "ADDON",
+      description: a.name,
+      notes: details ? addOnChoicesText(details.choices) : null,
+      quantity: a.quantity * qty,
+      unitPriceCents: a.unitPriceCents,
+      taxable: true,
+      productId: null,
+      configuration: null,
+      addOn: details,
+    });
   }
   return lines;
 }
@@ -105,6 +119,7 @@ function lineCreates(lines: DraftLine[]) {
       taxable: l.taxable,
       productId: l.productId,
       configuration: (l.configuration ?? undefined) as Prisma.InputJsonValue | undefined,
+      addOn: (l.addOn ?? undefined) as Prisma.InputJsonValue | undefined,
     };
   });
 }
@@ -340,6 +355,8 @@ export async function saveRevision(actor: Actor, quoteId: string, input: Revisio
       taxable: l.taxable,
       productId,
       configuration: src && src.productId === productId ? (src.configuration as ConfigurationSnapshot | null) : null,
+      // A configured add-on's details stay with its line while it remains an add-on line.
+      addOn: src && l.kind === "ADDON" ? parseAddOnLine(src.addOn) : null,
     };
   });
   const deposit = { depositType: input.depositType, depositPercentBps: input.depositType === "PERCENTAGE" ? input.depositPercentBps : null, depositAmountCents: input.depositType === "FIXED_AMOUNT" ? input.depositAmountCents : null };
@@ -444,6 +461,7 @@ export async function createRevision(actor: Actor, quoteId: string) {
             taxable: l.taxable,
             productId: l.productId,
             configuration: (l.configuration ?? undefined) as Prisma.InputJsonValue | undefined,
+            addOn: (l.addOn ?? undefined) as Prisma.InputJsonValue | undefined,
           })),
         },
       },
@@ -594,7 +612,7 @@ export interface AcceptedSnapshot {
   method: "online" | "manual";
   agreements: string[];
   customer: { name: string; email: string; phone: string | null; address: string | null };
-  lines: Array<{ kind: string; description: string; notes: string | null; quantity: number; unitPriceCents: number; lineTotalCents: number }>;
+  lines: Array<{ kind: string; description: string; notes: string | null; quantity: number; unitPriceCents: number; lineTotalCents: number; addOn?: AddOnLineDetails | null }>;
   totals: Totals;
   deposit: { type: string; percentBps: number | null; amountCents: number | null; label: string };
   terms: string | null;
@@ -621,7 +639,9 @@ function acceptedSnapshot(quote: { number: string | null }, rev: RevisionWithLin
     method,
     agreements,
     customer: { name: rev.customerName, email: rev.customerEmail, phone: rev.customerPhone, address: rev.customerAddress },
-    lines: [...rev.lineItems].sort((a, b) => a.position - b.position).map((l) => ({ kind: l.kind, description: l.description, notes: l.notes, quantity: l.quantity, unitPriceCents: l.unitPriceCents, lineTotalCents: l.lineTotalCents })),
+    lines: [...rev.lineItems]
+      .sort((a, b) => a.position - b.position)
+      .map((l) => ({ kind: l.kind, description: l.description, notes: l.notes, quantity: l.quantity, unitPriceCents: l.unitPriceCents, lineTotalCents: l.lineTotalCents, ...(l.addOn ? { addOn: parseAddOnLine(l.addOn) } : {}) })),
     totals: {
       subtotalCents: rev.subtotalCents,
       discountCents: rev.discountCents,
@@ -846,6 +866,7 @@ export async function duplicateQuote(actor: Actor, quoteId: string) {
     taxable: l.taxable,
     productId: l.productId,
     configuration: l.configuration as ConfigurationSnapshot | null,
+    addOn: parseAddOnLine(l.addOn),
   }));
   const copy = await prisma.$transaction(async (tx) => {
     const q = await createQuoteRecord(tx, {

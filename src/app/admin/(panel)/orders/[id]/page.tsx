@@ -270,7 +270,7 @@ export default async function OrderDetailPage({ params }: Props) {
 
           <Card title="Items" description="Copied from the accepted quote — later catalog or quote edits never change them.">
             <RevisionLines
-              lines={order.items.map((i) => ({ id: i.id, kind: i.kind, description: i.description ?? i.productName, notes: i.notes, quantity: i.quantity, unitPriceCents: i.unitPriceCents, lineTotalCents: i.lineTotalCents }))}
+              lines={order.items.map((i) => ({ id: i.id, kind: i.kind, description: i.description ?? i.productName, notes: i.notes, quantity: i.quantity, unitPriceCents: i.unitPriceCents, lineTotalCents: i.lineTotalCents, addOn: i.addOn }))}
               totals={{ subtotalCents: order.subtotalCents, discountCents: order.discountCents, deliveryCents: order.shippingCents, otherChargesCents: 0, taxCents: order.taxCents, totalCents: order.totalCents, depositCents: order.depositCents, balanceCents: order.totalCents - order.depositCents }}
             />
           </Card>

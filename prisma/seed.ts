@@ -32,7 +32,7 @@ import {
   ensureStarterAnnouncement,
 } from "../src/lib/seed/defaults";
 import { renderScene } from "./seed-data/images";
-import { ADD_ONS, CATEGORIES, FAQS, FAQ_CATEGORIES, IMAGE_SPECS, OPTION_GROUPS, PORTFOLIO, PRODUCTS, PRODUCT_TEXT } from "./seed-data/catalog";
+import { ADD_ONS, CATEGORIES, CHAIR_OPTION_GROUPS, FAQS, FAQ_CATEGORIES, IMAGE_SPECS, OPTION_GROUPS, PORTFOLIO, PRODUCTS, PRODUCT_TEXT } from "./seed-data/catalog";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 const storage = createStorageFromEnv();
@@ -133,7 +133,7 @@ async function seedSampleCatalog() {
   // Option library
   const groupIds: Record<string, string> = {};
   const valueIds: Record<string, Record<string, string>> = {};
-  for (const [gi, g] of OPTION_GROUPS.entries()) {
+  for (const [gi, g] of [...OPTION_GROUPS, ...CHAIR_OPTION_GROUPS].entries()) {
     const group = await prisma.optionGroup.create({
       data: {
         name: g.name,
@@ -170,9 +170,14 @@ async function seedSampleCatalog() {
     const created = await prisma.addOn.create({
       data: {
         name: a.name,
+        displayName: a.displayName ?? null,
         description: a.description,
         priceCents: dollars(a.price),
+        minQuantity: a.minQuantity ?? 0,
         maxQuantity: a.maxQuantity ?? 1,
+        defaultQuantity: a.defaultQuantity ?? null,
+        // Configurable add-ons (e.g. Dining Chairs) get their own option groups.
+        optionGroups: a.groups ? { create: a.groups.map((key, j) => ({ optionGroupId: groupIds[key]!, displayOrder: j })) } : undefined,
         scope: a.scope ?? "REUSABLE",
         active: a.active ?? true,
         displayOrder: i,

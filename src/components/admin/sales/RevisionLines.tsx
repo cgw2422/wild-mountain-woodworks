@@ -1,9 +1,11 @@
 import { LINE_KIND_LABELS, type LineKind } from "@/lib/sales/totals";
+import { formatCents } from "@/lib/money";
+import { addOnChoicesText, parseAddOnLine } from "@/lib/pricing/snapshot";
 import { table } from "@/components/admin/ui";
 import { cn } from "@/lib/cn";
 import { Money } from "./Money";
 
-type Line = { id?: string; kind: string; description: string; notes: string | null; quantity: number; unitPriceCents: number; lineTotalCents: number };
+type Line = { id?: string; kind: string; description: string; notes: string | null; quantity: number; unitPriceCents: number; lineTotalCents: number; addOn?: unknown };
 type Totals = { subtotalCents: number; discountCents: number; deliveryCents: number; otherChargesCents: number; taxCents: number; totalCents: number; depositCents?: number; balanceCents?: number };
 
 /** Read-only line table + totals (sent revisions, invoices, accepted snapshots). */
@@ -33,10 +35,8 @@ export function RevisionLines({ lines, totals, extra = [] }: { lines: Line[]; to
           <tbody className={table.tbody}>
             {lines.map((l, i) => (
               <tr key={l.id ?? i}>
-                <td className={table.td}>
-                  <p className="font-medium">{l.description}</p>
-                  <p className="text-xs text-neutral-500">{LINE_KIND_LABELS[l.kind as LineKind] ?? l.kind}</p>
-                  {l.notes ? <p className="mt-1 whitespace-pre-line text-xs text-neutral-600">{l.notes}</p> : null}
+                <td className={cn(table.td, parseAddOnLine(l.addOn) && "pl-8")}>
+                  <AdminLineDescription line={l} />
                 </td>
                 <td className={cn(table.td, "text-right tabular-nums")}>{l.quantity}</td>
                 <td className={cn(table.td, "text-right")}>
@@ -61,5 +61,29 @@ export function RevisionLines({ lines, totals, extra = [] }: { lines: Line[]; to
         ))}
       </dl>
     </>
+  );
+}
+
+/** Description cell: a configured add-on shows as "Add-on of <product>" with its choices, grouped under that product. */
+function AdminLineDescription({ line: l }: { line: Line }) {
+  const addOn = parseAddOnLine(l.addOn);
+  return (
+    <div className={cn(addOn && "border-l-2 border-amber-300 pl-3")}>
+      <p className="font-medium">{l.description}</p>
+      <p className="text-xs text-neutral-500">{addOn ? `Add-on of ${addOn.parentProduct.name}` : (LINE_KIND_LABELS[l.kind as LineKind] ?? l.kind)}</p>
+      {addOn ? (
+        <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-xs text-neutral-700">
+          {addOn.choices.map((c) => (
+            <div key={c.label} className="contents">
+              <dt className="text-neutral-500">{c.label}</dt>
+              <dd>{c.value}</dd>
+            </div>
+          ))}
+          <dt className="text-neutral-500">Price per unit</dt>
+          <dd>{formatCents(addOn.unitPriceCents)} (base {formatCents(addOn.basePriceCents)})</dd>
+        </dl>
+      ) : null}
+      {l.notes && !(addOn && l.notes.trim() === addOnChoicesText(addOn.choices)) ? <p className="mt-1 whitespace-pre-line text-xs text-neutral-600">{l.notes}</p> : null}
+    </div>
   );
 }

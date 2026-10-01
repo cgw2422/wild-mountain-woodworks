@@ -15,7 +15,7 @@ export default async function OptionsPage() {
   await requireAdmin();
   const groups = await prisma.optionGroup.findMany({
     orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    include: { _count: { select: { values: true, products: true } } },
+    include: { _count: { select: { values: true, products: true, addOns: true } } },
   });
 
   return (
@@ -54,7 +54,7 @@ export default async function OptionsPage() {
                     {g._count.values} value{g._count.values === 1 ? "" : "s"}
                   </span>
                   <span className="w-28 text-right text-sm tabular-nums text-neutral-600">
-                    {g._count.products ? `Used by ${g._count.products}` : "Not used"}
+                    {g._count.products || g._count.addOns ? [g._count.products ? `Used by ${g._count.products}` : null, g._count.addOns ? `${g._count.addOns} add-on${g._count.addOns === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ") : "Not used"}
                   </span>
                   <RunActionButton
                     action={duplicateOptionGroup.bind(null, g.id)}

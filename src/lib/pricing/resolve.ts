@@ -1,5 +1,5 @@
 import { activeSale } from "./sale";
-import type { ConfigImage, ConfigurableProduct, OptionInputType, OptionQuantitySpec } from "./types";
+import type { ConfigImage, ConfigOptionGroup, ConfigOptionValue, ConfigurableProduct, OptionInputType, OptionQuantitySpec } from "./types";
 
 /**
  * Structural shapes of the database records needed to build a configurable
@@ -85,6 +85,17 @@ export interface ProductConfigRecord {
       active: boolean;
       archivedAt: Date | null;
       image: MediaLike | null;
+      displayName?: string | null;
+      quantityEnabled?: boolean;
+      quantityStep?: number;
+      defaultQuantity?: number | null;
+      /** Configurable add-ons: the add-on's own option groups (absent/empty for simple add-ons). */
+      optionGroups?: Array<{
+        displayOrder: number;
+        requiredOverride: boolean | null;
+        displayNameOverride: string | null;
+        optionGroup: ProductConfigRecord["optionGroups"][number]["optionGroup"];
+      }>;
     };
   }>;
 }
@@ -112,6 +123,39 @@ export function quantitySpec(v: { quantityEnabled?: boolean; quantityMin?: numbe
   // Snap the default onto the step grid (counting from the minimum).
   const def = min + Math.floor((raw - min) / step) * step;
   return { min, max, step, default: def };
+}
+
+/**
+ * An add-on's own option groups (e.g. Chair Style, Wood Species, Chair
+ * Finish, Seat Finish): active groups and values from the shared library, in
+ * order. Their adjustments are per add-on unit. "Custom" values and
+ * per-value quantities don't apply inside an add-on (the add-on has its own
+ * quantity), so they're left out / ignored here.
+ */
+function resolveAddOnGroups(groups: NonNullable<ProductConfigRecord["addOns"][number]["addOn"]["optionGroups"]>): ConfigOptionGroup[] {
+  return [...groups]
+    .filter((ag) => ag.optionGroup.active)
+    .sort((a, b) => a.displayOrder - b.displayOrder)
+    .map((ag) => {
+      const g = ag.optionGroup;
+      const values: ConfigOptionValue[] = g.values
+        .filter((v) => v.active && !v.isCustom)
+        .sort((a, b) => a.displayOrder - b.displayOrder)
+        .map((v) => ({
+          id: v.id,
+          name: v.name,
+          displayName: v.displayName,
+          description: v.description,
+          priceModifierCents: v.priceModifierCents,
+          quantity: null,
+          isCustom: false,
+          isDefault: false,
+          swatchColor: v.swatchColor,
+          image: toImage(v.image, v.displayName),
+        }));
+      return { id: g.id, name: g.name, displayName: ag.displayNameOverride?.trim() || g.displayName, description: g.description, inputType: g.inputType, required: ag.requiredOverride ?? g.required, values };
+    })
+    .filter((g) => g.values.length > 0);
 }
 
 /**
@@ -169,17 +213,29 @@ export function resolveConfigurableProduct(record: ProductConfigRecord, now: Dat
     .sort((a, b) => a.displayOrder - b.displayOrder)
     .map((pa) => {
       const a = pa.addOn;
-      const maxQuantity = Math.max(1, pa.maxQuantityOverride ?? a.maxQuantity);
-      const minQuantity = Math.min(maxQuantity, Math.max(0, pa.minQuantityOverride ?? a.minQuantity));
+      const quantityEnabled = a.quantityEnabled ?? true;
+      const required = pa.requiredOverride ?? a.required;
+      // A yes/no add-on (quantity off) is always exactly 1 when added.
+      const maxQuantity = quantityEnabled ? Math.max(1, pa.maxQuantityOverride ?? a.maxQuantity) : 1;
+      const minQuantity = quantityEnabled ? Math.min(maxQuantity, Math.max(0, pa.minQuantityOverride ?? a.minQuantity)) : required ? 1 : 0;
+      const step = quantityEnabled ? Math.max(1, Math.trunc(a.quantityStep ?? 1)) : 1;
+      const lowest = Math.max(1, minQuantity);
+      const rawDefault = Math.min(maxQuantity, Math.max(lowest, Math.trunc(a.defaultQuantity ?? lowest)));
+      const name = a.displayName?.trim() || a.name;
       return {
         id: a.id,
-        name: a.name,
+        name,
         description: a.description,
         priceCents: pa.priceOverrideCents ?? a.priceCents,
-        required: pa.requiredOverride ?? a.required,
+        required,
         minQuantity,
         maxQuantity,
-        image: toImage(a.image, a.name),
+        quantityStep: step,
+        // Snap onto the step grid (counting from the minimum) without going below 1.
+        defaultQuantity: Math.max(lowest, minQuantity + Math.floor((rawDefault - minQuantity) / step) * step),
+        quantityEnabled,
+        image: toImage(a.image, name),
+        optionGroups: resolveAddOnGroups(a.optionGroups ?? []),
       };
     });
 

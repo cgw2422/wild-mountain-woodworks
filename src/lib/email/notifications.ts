@@ -34,7 +34,12 @@ export function describeSnapshot(s: ConfigurationSnapshot, showPrices: boolean):
   for (const o of s.options) {
     lines.push(`${o.groupDisplayName}: ${snapshotOptionLabel(o)}${o.customDetails ? ` — ${o.customDetails}` : ""}`);
   }
-  for (const a of s.addOns) lines.push(`Add-on: ${a.name}${a.quantity > 1 ? ` × ${a.quantity}` : ""}`);
+  for (const a of s.addOns) {
+    lines.push(`Add-on: ${a.name}${a.quantity > 1 || a.choices ? ` × ${a.quantity}` : ""}`);
+    // Configured add-ons keep their own choices, listed under them.
+    for (const c of a.choices ?? []) lines.push(`  ${c.label}: ${c.value}`);
+    if (a.choices && showPrices) lines.push(`  ${formatCents(a.unitPriceCents)} each · ${formatCents(a.totalCents)} total`);
+  }
   if (showPrices && s.totalCents != null) {
     lines.push(`Estimated price: ${formatCents(s.totalCents)}${s.requiresCustomQuote ? " (custom details priced separately)" : ""}`);
     if (s.sale) lines.push(`Sale price applied — ${formatCents(s.sale.savingsCents)} off the regular price.`);

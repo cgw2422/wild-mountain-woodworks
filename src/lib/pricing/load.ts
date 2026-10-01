@@ -17,7 +17,16 @@ export const configurableProductInclude = {
       valueOverrides: true,
     },
   },
-  addOns: { include: { addOn: { include: { image: mediaSelect } } } },
+  addOns: {
+    include: {
+      addOn: {
+        include: {
+          image: mediaSelect,
+          optionGroups: { include: { optionGroup: { include: { values: { include: { image: mediaSelect } } } } } },
+        },
+      },
+    },
+  },
 } satisfies Prisma.ProductInclude;
 
 /**

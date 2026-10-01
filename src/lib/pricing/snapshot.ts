@@ -38,9 +38,13 @@ export interface ConfigurationSnapshot {
   addOns: Array<{
     addOnId: string;
     name: string;
+    /** Per unit — for configurable add-ons, the configured price (base + choices). */
     unitPriceCents: number;
     quantity: number;
     totalCents: number;
+    /** Configurable add-ons only (absent on simple add-ons and older snapshots). */
+    basePriceCents?: number;
+    choices?: Array<{ groupId: string; groupName: string; label: string; valueId: string; value: string; priceModifierCents: number }>;
   }>;
   totalCents: number | null;
   requiresCustomQuote: boolean;
@@ -82,6 +86,28 @@ export function buildConfigurationSnapshot(
   for (const addOn of product.addOns) {
     const qty = Math.trunc(selection.addOns[addOn.id] ?? 0);
     if (qty <= 0) continue;
+    // Configurable add-ons: copy the priced line (configured unit price + each choice) from the engine.
+    const line = pricing.lines.find((l) => l.kind === "addon" && l.addOn?.addOnId === addOn.id);
+    if (line?.addOn) {
+      const groups = new Map(addOn.optionGroups.map((g) => [g.id, g]));
+      addOns.push({
+        addOnId: addOn.id,
+        name: addOn.name,
+        unitPriceCents: line.unitCents,
+        quantity: qty,
+        totalCents: line.amountCents,
+        basePriceCents: line.addOn.basePriceCents,
+        choices: line.addOn.choices.map((c) => ({
+          groupId: c.groupId,
+          groupName: groups.get(c.groupId)?.name ?? c.label,
+          label: c.label,
+          valueId: selection.addOnOptions?.[addOn.id]?.[c.groupId] ?? "",
+          value: c.value,
+          priceModifierCents: c.priceModifierCents,
+        })),
+      });
+      continue;
+    }
     addOns.push({
       addOnId: addOn.id,
       name: addOn.name,
@@ -126,4 +152,46 @@ export function snapshotOptionTotal(o: SnapshotOption): number {
 /** "Cross Back Chair × 4" for quantity-based values, else the value name. */
 export function snapshotOptionLabel(o: SnapshotOption): string {
   return o.quantity != null ? `${o.valueDisplayName} × ${o.quantity}` : o.valueDisplayName;
+}
+
+/**
+ * A configured add-on as it travels on quote, order and invoice lines
+ * (QuoteLineItem / OrderItem / InvoiceLineItem `addOn`), so the add-on stays
+ * grouped under its main product with every choice intact.
+ */
+export interface AddOnLineDetails {
+  version: 1;
+  addOnId: string;
+  name: string;
+  /** The main product this add-on belongs to. */
+  parentProduct: { id: string; name: string };
+  basePriceCents: number;
+  unitPriceCents: number;
+  choices: Array<{ label: string; value: string; priceModifierCents: number }>;
+}
+
+export function addOnLineDetails(s: ConfigurationSnapshot, a: ConfigurationSnapshot["addOns"][number]): AddOnLineDetails | null {
+  if (!a.choices) return null;
+  return {
+    version: 1,
+    addOnId: a.addOnId,
+    name: a.name,
+    parentProduct: { id: s.product.id, name: s.product.name },
+    basePriceCents: a.basePriceCents ?? a.unitPriceCents,
+    unitPriceCents: a.unitPriceCents,
+    choices: a.choices.map((c) => ({ label: c.label, value: c.value, priceModifierCents: c.priceModifierCents })),
+  };
+}
+
+/** Narrow unknown JSON (a line's `addOn` column) to add-on details, or null. */
+export function parseAddOnLine(value: unknown): AddOnLineDetails | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Partial<AddOnLineDetails>;
+  if (v.version !== 1 || typeof v.name !== "string" || !Array.isArray(v.choices)) return null;
+  return v as AddOnLineDetails;
+}
+
+/** "Style: X Back\nWood Species: Oak\n…" — readable notes for a configured add-on line. */
+export function addOnChoicesText(choices: Array<{ label: string; value: string }>): string {
+  return choices.map((c) => `${c.label}: ${c.value}`).join("\n");
 }

@@ -69,6 +69,7 @@ export async function createOrderFromRevision(
           kind: l.kind,
           position: l.position,
           configuration: (l.configuration ?? {}) as Prisma.InputJsonValue,
+          addOn: (l.addOn ?? undefined) as Prisma.InputJsonValue | undefined,
           unitPriceCents: l.unitPriceCents,
           quantity: l.quantity,
           lineTotalCents: l.lineTotalCents,

@@ -1,3 +1,4 @@
+import { parseAddOnLine } from "@/lib/pricing/snapshot";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -231,6 +232,7 @@ export default async function QuoteDetailPage({ params }: Props) {
                   price: centsToDollarInput(Math.abs(l.unitPriceCents)),
                   taxable: l.taxable,
                   productId: l.productId,
+                  addOnSummary: addOnSummary(l.addOn),
                 })),
               }}
             />
@@ -477,4 +479,10 @@ export default async function QuoteDetailPage({ params }: Props) {
       </div>
     </>
   );
+}
+
+/** "Add-on of The Ridge Dining Table — Style: X Back · Wood Species: Oak" */
+function addOnSummary(value: unknown): string | null {
+  const a = parseAddOnLine(value);
+  return a ? `of ${a.parentProduct.name}: ${a.choices.map((c) => `${c.label}: ${c.value}`).join(" · ") || "no options"}` : null;
 }

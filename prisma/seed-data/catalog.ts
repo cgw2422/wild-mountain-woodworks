@@ -199,9 +199,78 @@ export const OPTION_GROUPS: SeedOptionGroup[] = [
   },
 ];
 
+/*
+ * Option groups that belong to the configurable "Dining Chairs" add-on (not to
+ * the tables). Chair styles have no sample photos — upload real chair photos
+ * in Admin → Options → Chair Style and switch it to "Image cards".
+ */
+export const CHAIR_OPTION_GROUPS: SeedOptionGroup[] = [
+  {
+    key: "chair-style",
+    name: "Chair Style",
+    displayName: "Choose Your Chair Style",
+    inputType: "BUTTONS",
+    values: [
+      { name: "X Back", description: "Classic cross back", price: 0 },
+      { name: "Double X Back", description: "Two crosses, a fuller back", price: 25 },
+    ],
+  },
+  {
+    key: "chair-wood",
+    name: "Chair Wood Species",
+    displayName: "Choose Wood Species",
+    description: "The chairs' wood can match your table or complement it.",
+    inputType: "IMAGE",
+    values: [
+      { name: "Pine", price: 0, image: "wood-pine" },
+      { name: "Oak", price: 20, image: "wood-oak" },
+      { name: "Maple", price: 25, image: "wood-maple" },
+      { name: "Walnut", price: 60, image: "wood-walnut" },
+    ],
+  },
+  {
+    key: "chair-finish",
+    name: "Chair Finish",
+    displayName: "Chair Finish",
+    description: "The finish for the chair frame.",
+    inputType: "SWATCH",
+    values: [
+      { name: "Natural", price: 0, swatch: "#c9a878" },
+      { name: "Special Walnut", price: 10, swatch: "#5b3d27" },
+      { name: "Black", price: 15, swatch: "#1f1e1c" },
+      { name: "Antique White", price: 15, swatch: "#ece5d6" },
+    ],
+  },
+  {
+    key: "seat-finish",
+    name: "Seat Finish",
+    displayName: "Seat Finish",
+    description: "Finished separately from the frame.",
+    inputType: "SWATCH",
+    values: [
+      { name: "Natural", price: 0, swatch: "#c9a878" },
+      { name: "Special Walnut", price: 10, swatch: "#5b3d27" },
+      { name: "Early American", price: 10, swatch: "#7a4f2c" },
+      { name: "Black", price: 15, swatch: "#1f1e1c" },
+    ],
+  },
+];
+
 /* ------------------------------------------------------------------ add-ons */
 
 export const ADD_ONS = [
+  {
+    key: "chairs",
+    name: "Dining Chairs",
+    displayName: "Add Dining Chairs",
+    description:
+      "Add matching dining chairs to complete your table set. Choose your chair style, quantity, wood species, chair finish, and seat finish to create a coordinated look that complements your table.",
+    price: 192.5,
+    minQuantity: 2,
+    maxQuantity: 12,
+    defaultQuantity: 4,
+    groups: ["chair-style", "chair-wood", "chair-finish", "seat-finish"],
+  },
   { key: "bench", name: "Matching Bench", description: "A bench built to match your table's wood and finish.", price: 325, maxQuantity: 2, image: "addon-bench" },
   { key: "breadboard", name: "Breadboard Ends", description: "Classic end caps across the width of the top.", price: 150 },
   { key: "drawer", name: "Drawer", description: "A discreet drawer under the top.", price: 125, maxQuantity: 2 },
@@ -253,7 +322,7 @@ export const PRODUCTS: SeedProduct[] = [
     leadTime: "Estimated 8–10 weeks",
     images: ["ridge-1", "ridge-2", "ridge-3", "ridge-4"],
     groups: [{ key: "dining-size", defaults: "72 x 36" }, { key: "wood", defaults: "Oak" }, { key: "finish", defaults: "Natural" }, { key: "base", defaults: "Trestle" }],
-    addOns: [{ key: "bench" }, { key: "breadboard" }, { key: "drawer" }, { key: "premium-finish" }],
+    addOns: [{ key: "chairs" }, { key: "bench" }, { key: "breadboard" }, { key: "drawer" }, { key: "premium-finish" }],
   },
   {
     slug: "heritage-dining-table",
@@ -276,7 +345,7 @@ export const PRODUCTS: SeedProduct[] = [
       { key: "finish", defaults: "Natural" },
       { key: "edge", defaults: "Eased" },
     ],
-    addOns: [{ key: "bench" }, { key: "breadboard", price: 175 }, { key: "premium-finish" }],
+    addOns: [{ key: "chairs" }, { key: "bench" }, { key: "breadboard", price: 175 }, { key: "premium-finish" }],
   },
   {
     slug: "timberline-bench",

@@ -6,6 +6,7 @@ import { financingOffered } from "./checkout";
 import { stripePublishableKey } from "./stripe";
 import { acceptBlocker, customerRevisionOf, depositLabel, expireDueQuotes } from "./quotes";
 import type { InvoiceStatus } from "@/generated/prisma/client";
+import { parseAddOnLine } from "@/lib/pricing/snapshot";
 import { financingAmountFor, invoiceMoney, netPaid, pendingAmount } from "./ledger";
 import { PAYMENT_TYPE_LABELS, PRODUCTION_STATUS_LABELS, deliveryMethodLabel, isFinancingMethod, stripeMethodName, type PaymentTypeValue, type ProductionStatusValue } from "./status";
 import { isTokenShape } from "./tokens";
@@ -25,6 +26,20 @@ export interface CustomerLine {
   quantity: number;
   unitPriceCents: number;
   lineTotalCents: number;
+  /** A configured add-on of the product line above it (e.g. Dining Chairs and their choices). */
+  addOn?: CustomerAddOn | null;
+}
+
+export interface CustomerAddOn {
+  name: string;
+  forProduct: string;
+  choices: Array<{ label: string; value: string }>;
+}
+
+/** Customer-safe add-on details: names and choices only (no ids). */
+export function customerAddOn(value: unknown): CustomerAddOn | null {
+  const a = parseAddOnLine(value);
+  return a ? { name: a.name, forProduct: a.parentProduct.name, choices: a.choices.map((c) => ({ label: c.label, value: c.value })) } : null;
 }
 
 export interface CustomerTotals {
@@ -36,10 +51,10 @@ export interface CustomerTotals {
   totalCents: number;
 }
 
-function lines(rows: Array<CustomerLine & { position: number }>): CustomerLine[] {
+function lines(rows: Array<Omit<CustomerLine, "addOn"> & { position: number; addOn?: unknown }>): CustomerLine[] {
   return [...rows]
     .sort((a, b) => a.position - b.position)
-    .map((l) => ({ kind: l.kind, description: l.description, notes: l.notes, quantity: l.quantity, unitPriceCents: l.unitPriceCents, lineTotalCents: l.lineTotalCents }));
+    .map((l) => ({ kind: l.kind, description: l.description, notes: l.notes, quantity: l.quantity, unitPriceCents: l.unitPriceCents, lineTotalCents: l.lineTotalCents, addOn: customerAddOn(l.addOn) }));
 }
 
 async function business() {
@@ -83,7 +98,7 @@ export async function loadCustomerQuote(token: string) {
           sentAt: rev.sentAt,
           expiresAt: rev.expiresAt,
           customer: { name: rev.customerName, email: rev.customerEmail, phone: rev.customerPhone, address: rev.customerAddress },
-          lines: lines(rev.lineItems as Array<CustomerLine & { position: number }>),
+          lines: lines(rev.lineItems as Array<Omit<CustomerLine, "addOn"> & { position: number; addOn?: unknown }>),
           totals: { subtotalCents: rev.subtotalCents, discountCents: rev.discountCents, deliveryCents: rev.deliveryCents, otherChargesCents: rev.otherChargesCents, taxCents: rev.taxCents, totalCents: rev.totalCents } satisfies CustomerTotals,
           depositCents: rev.depositCents,
           balanceCents: rev.balanceCents,
@@ -243,7 +258,7 @@ export async function customerInvoiceView(token: string) {
     delivery: order
       ? { address: order.deliveryAddress, date: order.deliveryDate, window: order.deliveryWindow, method: deliveryMethodLabel(order.deliveryMethod), notes: order.deliveryNotes, estimatedCompletion: order.estimatedCompletion }
       : null,
-    lines: lines(invoice.lineItems as Array<CustomerLine & { position: number }>),
+    lines: lines(invoice.lineItems as Array<Omit<CustomerLine, "addOn"> & { position: number; addOn?: unknown }>),
     totals: { subtotalCents: invoice.subtotalCents, discountCents: invoice.discountCents, deliveryCents: invoice.deliveryCents, otherChargesCents: invoice.otherChargesCents, taxCents: invoice.taxCents, totalCents: invoice.totalCents } satisfies CustomerTotals,
     customerNotes: invoice.customerNotes,
     terms: invoice.revision?.terms ?? null,
@@ -340,7 +355,9 @@ export async function customerOrderView(token: string) {
     customerNotes: order.customerNotes,
     customer: { name: order.customerName, address: order.deliveryAddress },
     quote: order.quote?.customerToken ? { number: order.quote.number, href: `/quote/${order.quote.customerToken}` } : null,
-    items: [...order.items].sort((a, b) => a.position - b.position).map((i) => ({ kind: i.kind, description: i.description ?? i.productName, notes: i.notes, quantity: i.quantity, lineTotalCents: i.lineTotalCents })),
+    items: [...order.items]
+      .sort((a, b) => a.position - b.position)
+      .map((i) => ({ kind: i.kind, description: i.description ?? i.productName, notes: i.notes, quantity: i.quantity, unitPriceCents: i.unitPriceCents, lineTotalCents: i.lineTotalCents, addOn: customerAddOn(i.addOn) })),
     totalCents: order.totalCents,
     depositCents: order.depositCents,
     paidCents: paid,

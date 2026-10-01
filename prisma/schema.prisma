@@ -369,6 +369,7 @@ model OptionGroup {
 
   values   OptionValue[]
   products ProductOptionGroup[]
+  addOns   AddOnOptionGroup[]
 }
 
 model OptionValue {
@@ -450,7 +451,10 @@ enum AddOnScope {
 
 model AddOn {
   id           String     @id @default(cuid())
+  /// Internal name (admin).
   name         String
+  /// Customer-facing name, e.g. "Add Dining Chairs" (null = use `name`).
+  displayName  String?
   description  String?
   priceCents   Int        @default(0)
   imageId      String?
@@ -459,15 +463,40 @@ model AddOn {
   required     Boolean    @default(false)
   minQuantity  Int        @default(0)
   maxQuantity  Int        @default(1)
+  /// Off = a simple yes/no add-on (quantity 1). On (the default, as before) = − / + quantity within min–max.
+  quantityEnabled Boolean @default(true)
+  quantityStep    Int     @default(1)
+  /// Quantity pre-filled when the customer adds it (null = the minimum, at least 1).
+  defaultQuantity Int?
   displayOrder Int        @default(0)
   active       Boolean    @default(true)
   archivedAt   DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  products ProductAddOn[]
+  products     ProductAddOn[]
+  /// Configurable add-ons (e.g. Dining Chairs: style, wood, chair finish, seat finish) — option groups from the shared library.
+  optionGroups AddOnOptionGroup[]
 
   @@index([active, displayOrder])
+}
+
+/// An option group (from the shared option library) that belongs to an add-on's
+/// own configuration — e.g. "Chair Style" on Dining Chairs — not to the main product.
+model AddOnOptionGroup {
+  id                  String      @id @default(cuid())
+  addOnId             String
+  addOn               AddOn       @relation(fields: [addOnId], references: [id], onDelete: Cascade)
+  optionGroupId       String
+  optionGroup         OptionGroup @relation(fields: [optionGroupId], references: [id], onDelete: Restrict)
+  displayOrder        Int         @default(0)
+  /// null = inherit from the group
+  requiredOverride    Boolean?
+  displayNameOverride String?
+  createdAt           DateTime    @default(now())
+
+  @@unique([addOnId, optionGroupId])
+  @@index([addOnId, displayOrder])
 }
 
 model ProductAddOn {
@@ -737,6 +766,8 @@ model QuoteLineItem {
   product        Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
   /// ConfigurationSnapshot of the configured piece (optional).
   configuration  Json?
+  /// Configured add-on details (AddOnLineDetails) when this line is an add-on of the product above it.
+  addOn          Json?
 
   @@index([revisionId, position])
 }
@@ -1201,6 +1232,8 @@ model OrderItem {
   notes          String?
   kind           LineItemKind @default(PRODUCT)
   position       Int          @default(0)
+  /// Configured add-on details (AddOnLineDetails), copied from the accepted quote line.
+  addOn          Json?
   unitPriceCents Int
   quantity       Int      @default(1)
   lineTotalCents Int
@@ -1532,6 +1565,8 @@ model InvoiceLineItem {
   unitPriceCents Int
   lineTotalCents Int
   taxable        Boolean      @default(true)
+  /// Configured add-on details (AddOnLineDetails), copied from the order's quote line.
+  addOn          Json?
 
   @@index([invoiceId, position])
 }

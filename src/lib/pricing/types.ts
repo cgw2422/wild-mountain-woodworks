@@ -61,13 +61,27 @@ export interface ConfigOptionGroup {
 
 export interface ConfigAddOn {
   id: string; // AddOn.id
+  /** Customer-facing name (display name, else internal name). */
   name: string;
   description: string | null;
+  /** Base price per unit (before the add-on's own option adjustments). */
   priceCents: number;
   required: boolean;
   minQuantity: number;
   maxQuantity: number;
+  /** Quantity step (e.g. 2 for pairs); counts from the minimum. */
+  quantityStep: number;
+  /** Quantity pre-filled when the customer adds it. */
+  defaultQuantity: number;
+  /** False = a yes/no add-on (quantity fixed at 1). */
+  quantityEnabled: boolean;
   image: ConfigImage | null;
+  /**
+   * Configurable add-ons (e.g. Dining Chairs): the add-on's OWN option groups
+   * (style, wood, chair finish, seat finish…). Empty for simple add-ons.
+   * Their value adjustments are per unit: unit = priceCents + Σ adjustments.
+   */
+  optionGroups: ConfigOptionGroup[];
 }
 
 export interface ConfigurableProduct {
@@ -93,6 +107,8 @@ export interface ConfigurationSelection {
   /** How many of the chosen value, for quantity-based values (keyed by OptionGroup id). Missing → the value's default. */
   optionQuantities?: Record<string, number>;
   addOns: Record<string, number>;
+  /** Choices for configurable add-ons: addOnId → (option group id → value id). */
+  addOnOptions?: Record<string, Record<string, string>>;
   /** Free-text details for "custom" option values, keyed by OptionGroup id. */
   customDetails?: Record<string, string>;
 }
@@ -106,6 +122,8 @@ export interface PriceLine {
   quantity: number;
   unitCents: number;
   amountCents: number;
+  /** Configurable add-ons: the choices that make up `unitCents` (base + adjustments). */
+  addOn?: { addOnId: string; basePriceCents: number; choices: Array<{ groupId: string; label: string; value: string; priceModifierCents: number }> };
 }
 
 export interface PricingResult {

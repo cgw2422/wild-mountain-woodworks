@@ -1,7 +1,7 @@
 import { cn } from "@/lib/cn";
 import { formatCents } from "@/lib/money";
 import { statusLabel } from "@/lib/sales/status";
-import type { CustomerLine, CustomerTotals } from "@/lib/sales/views";
+import type { CustomerAddOn, CustomerLine, CustomerTotals } from "@/lib/sales/views";
 
 /** Server-rendered building blocks for customer quote / invoice / order pages. */
 
@@ -64,6 +64,30 @@ export function Facts({
   );
 }
 
+/** "Add-on" marker for a configured add-on line, shown under its main product. */
+function AddOnEyebrow() {
+  return <p className="mb-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-bronze-text">Add-on</p>;
+}
+
+/** The add-on's own choices (e.g. Style · Wood Species · Chair Finish · Seat Finish). */
+export function AddOnChoices({ addOn, className }: { addOn: CustomerAddOn; className?: string }) {
+  if (!addOn.choices.length) return null;
+  return (
+    <dl className={cn("mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm", className)}>
+      {addOn.choices.map((c) => (
+        <div key={c.label} className="contents">
+          <dt className="text-muted">{c.label}</dt>
+          <dd>{c.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function sameAsChoices(notes: string, addOn: CustomerAddOn) {
+  return notes.trim() === addOn.choices.map((c) => `${c.label}: ${c.value}`).join("\n");
+}
+
 export function LinesTable({
   lines,
   showUnit = true,
@@ -76,7 +100,8 @@ export function LinesTable({
       {/* Phones: stacked lines, so amounts are never cut off. */}
       <ul className="divide-y divide-stone border-y border-stone sm:hidden print:hidden">
         {lines.map((l, i) => (
-          <li key={i} className="py-4">
+          <li key={i} className={cn("py-4", l.addOn && "border-l-2 border-bronze/50 pl-4")}>
+            {l.addOn ? <AddOnEyebrow /> : null}
             <div className="flex justify-between gap-4">
               <p
                 className={cn(
@@ -95,12 +120,13 @@ export function LinesTable({
                 {formatMoney(l.lineTotalCents)}
               </p>
             </div>
-            {l.quantity > 1 ? (
+            {l.quantity > 1 || l.addOn ? (
               <p className="mt-0.5 text-sm text-muted tabular-nums">
-                {l.quantity} × {formatMoney(l.unitPriceCents)}
+                {l.quantity} × {formatMoney(l.unitPriceCents)}{l.addOn ? " each" : ""}
               </p>
             ) : null}
-            {l.notes ? (
+            {l.addOn ? <AddOnChoices addOn={l.addOn} /> : null}
+            {l.notes && !(l.addOn && sameAsChoices(l.notes, l.addOn)) ? (
               <p className="mt-1 whitespace-pre-line text-sm text-muted">
                 {l.notes}
               </p>
@@ -138,20 +164,24 @@ export function LinesTable({
           <tbody>
             {lines.map((l, i) => (
               <tr key={i} className="border-b border-stone align-top">
-                <td className="py-4 pr-4">
-                  <p
-                    className={cn(
-                      "font-medium",
-                      l.kind === "DISCOUNT" && "text-success",
-                    )}
-                  >
-                    {l.description}
-                  </p>
-                  {l.notes ? (
-                    <p className="mt-1 whitespace-pre-line text-sm text-muted">
-                      {l.notes}
+                <td className={cn("py-4 pr-4", l.addOn && "pl-5")}>
+                  <div className={cn(l.addOn && "border-l-2 border-bronze/50 pl-4")}>
+                    {l.addOn ? <AddOnEyebrow /> : null}
+                    <p
+                      className={cn(
+                        "font-medium",
+                        l.kind === "DISCOUNT" && "text-success",
+                      )}
+                    >
+                      {l.description}
                     </p>
-                  ) : null}
+                    {l.addOn ? <AddOnChoices addOn={l.addOn} /> : null}
+                    {l.notes && !(l.addOn && sameAsChoices(l.notes, l.addOn)) ? (
+                      <p className="mt-1 whitespace-pre-line text-sm text-muted">
+                        {l.notes}
+                      </p>
+                    ) : null}
+                  </div>
                 </td>
                 <td className="py-4 pr-4 text-right tabular-nums">
                   {l.quantity}

@@ -10,6 +10,7 @@ import { idList, intText, moneyText, optionalText, requiredText } from "../produ
 const addOnSchema = z
   .object({
     name: requiredText(120, "Enter a name."),
+    displayName: optionalText(120),
     description: optionalText(1000),
     price: moneyText({ required: true }),
     imageId: optionalText(64),
@@ -17,17 +18,29 @@ const addOnSchema = z
     required: z.boolean(),
     minQuantity: intText({ min: 0, max: 100 }),
     maxQuantity: intText({ min: 1, max: 100 }),
+    quantityEnabled: z.boolean(),
+    quantityStep: intText({ min: 1, max: 100 }),
+    defaultQuantity: intText({ min: 1, max: 100 }),
     active: z.boolean(),
   })
   .superRefine((v, ctx) => {
     if (v.minQuantity != null && v.maxQuantity != null && v.minQuantity > v.maxQuantity) {
       ctx.addIssue({ code: "custom", path: ["minQuantity"], message: "Minimum can't be more than the maximum." });
     }
+    const min = v.minQuantity ?? 0;
+    const max = v.maxQuantity ?? 1;
+    const step = v.quantityStep ?? 1;
+    if (v.defaultQuantity != null && (v.defaultQuantity < Math.max(1, min) || v.defaultQuantity > max)) {
+      ctx.addIssue({ code: "custom", path: ["defaultQuantity"], message: `Between ${Math.max(1, min)} and ${max}.` });
+    } else if (v.defaultQuantity != null && step > 1 && (v.defaultQuantity - min) % step !== 0) {
+      ctx.addIssue({ code: "custom", path: ["defaultQuantity"], message: `The minimum plus a multiple of the step (${step}).` });
+    }
   });
 
 function readAddOn(data: FormData) {
   const v = addOnSchema.parse({
     name: fd.str(data, "name"),
+    displayName: fd.str(data, "displayName"),
     description: fd.str(data, "description"),
     price: fd.str(data, "price"),
     imageId: fd.str(data, "imageId"),
@@ -35,10 +48,14 @@ function readAddOn(data: FormData) {
     required: fd.bool(data, "required"),
     minQuantity: fd.str(data, "minQuantity"),
     maxQuantity: fd.str(data, "maxQuantity"),
+    quantityEnabled: fd.bool(data, "quantityEnabled"),
+    quantityStep: fd.str(data, "quantityStep"),
+    defaultQuantity: fd.str(data, "defaultQuantity"),
     active: fd.bool(data, "active"),
   });
   return {
     name: v.name,
+    displayName: v.displayName,
     description: v.description,
     priceCents: v.price ?? 0,
     imageId: v.imageId,
@@ -46,6 +63,9 @@ function readAddOn(data: FormData) {
     required: v.required,
     minQuantity: v.minQuantity ?? 0,
     maxQuantity: v.maxQuantity ?? 1,
+    quantityEnabled: v.quantityEnabled,
+    quantityStep: v.quantityStep ?? 1,
+    defaultQuantity: v.defaultQuantity,
     active: v.active,
   };
 }
@@ -144,4 +164,60 @@ export const removeAddOnFromProduct = adminAction(async (admin, addOnId: string,
   await logActivity("addon.updated", `${admin.name} removed add-on "${row.addOn.name}" from "${row.product.name}"`, { actorId: admin.id, entityType: "addOn", entityId: addOnId });
   revalidateSite();
   return { ok: true, message: `Removed from ${row.product.name}.` };
+});
+
+/* ------------------------------------------------------------------------ */
+/* Configurable add-ons: the add-on's own option groups                      */
+/* ------------------------------------------------------------------------ */
+
+/** Attach a library option group (e.g. "Chair Style") to an add-on's own configuration. */
+export const attachAddOnOptionGroup = adminAction(async (admin, addOnId: string, data: FormData) => {
+  const optionGroupId = fd.str(data, "optionGroupId");
+  if (!optionGroupId) throw new AdminError("Choose an option group.", { optionGroupId: "Choose an option group." });
+  const [addOn, group] = await Promise.all([
+    prisma.addOn.findUnique({ where: { id: addOnId }, select: { name: true } }),
+    prisma.optionGroup.findUnique({ where: { id: optionGroupId }, select: { name: true } }),
+  ]);
+  if (!addOn || !group) throw new AdminError("That add-on or option group no longer exists.");
+  if (await prisma.addOnOptionGroup.findUnique({ where: { addOnId_optionGroupId: { addOnId, optionGroupId } } })) {
+    throw new AdminError("That group is already part of this add-on.", { optionGroupId: "Already attached." });
+  }
+  const last = await prisma.addOnOptionGroup.aggregate({ where: { addOnId }, _max: { displayOrder: true } });
+  await prisma.addOnOptionGroup.create({ data: { addOnId, optionGroupId, displayOrder: (last._max.displayOrder ?? -1) + 1 } });
+  await logActivity("addon.updated", `${admin.name} added option group "${group.name}" to add-on "${addOn.name}"`, { actorId: admin.id, entityType: "addOn", entityId: addOnId });
+  revalidateSite();
+  return { ok: true, message: `“${group.name}” added.` };
+});
+
+/** Per-add-on label and required override for an attached group. */
+export const updateAddOnOptionGroup = adminAction(async (admin, addOnId: string, optionGroupId: string, data: FormData) => {
+  const label = optionalText(120).parse(fd.str(data, "displayNameOverride"));
+  const req = fd.str(data, "requiredOverride");
+  const requiredOverride = req === "required" ? true : req === "optional" ? false : null;
+  const row = await prisma.addOnOptionGroup.update({
+    where: { addOnId_optionGroupId: { addOnId, optionGroupId } },
+    data: { displayNameOverride: label, requiredOverride },
+    include: { addOn: { select: { name: true } }, optionGroup: { select: { name: true } } },
+  });
+  await logActivity("addon.updated", `${admin.name} updated "${row.optionGroup.name}" on add-on "${row.addOn.name}"`, { actorId: admin.id, entityType: "addOn", entityId: addOnId });
+  revalidateSite();
+  return { ok: true, message: "Saved." };
+});
+
+export const detachAddOnOptionGroup = adminAction(async (admin, addOnId: string, optionGroupId: string) => {
+  const row = await prisma.addOnOptionGroup.delete({
+    where: { addOnId_optionGroupId: { addOnId, optionGroupId } },
+    include: { addOn: { select: { name: true } }, optionGroup: { select: { name: true } } },
+  });
+  await logActivity("addon.updated", `${admin.name} removed option group "${row.optionGroup.name}" from add-on "${row.addOn.name}"`, { actorId: admin.id, entityType: "addOn", entityId: addOnId });
+  revalidateSite();
+  return { ok: true, message: `“${row.optionGroup.name}” removed from this add-on. Saved quotes keep their configuration.` };
+});
+
+export const reorderAddOnOptionGroups = adminAction(async (admin, addOnId: string, ids: string[]) => {
+  const list = idList.parse(ids);
+  await prisma.$transaction(list.map((optionGroupId, i) => prisma.addOnOptionGroup.update({ where: { addOnId_optionGroupId: { addOnId, optionGroupId } }, data: { displayOrder: i } })));
+  await logActivity("addon.updated", `${admin.name} reordered an add-on's option groups`, { actorId: admin.id, entityType: "addOn", entityId: addOnId });
+  revalidateSite();
+  return { ok: true, message: "Order saved." };
 });

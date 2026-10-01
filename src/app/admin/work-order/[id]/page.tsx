@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
-import { parseSnapshot, snapshotOptionLabel } from "@/lib/pricing/snapshot";
+import { addOnChoicesText, parseAddOnLine, parseSnapshot, snapshotOptionLabel } from "@/lib/pricing/snapshot";
 import { siteDateLong } from "@/lib/site-time";
 import { PRODUCTION_STATUS_LABELS, deliveryMethodLabel } from "@/lib/sales/status";
 import { Logo } from "@/components/brand/Logo";
@@ -60,11 +60,27 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       <ol className="mt-3 space-y-5">
         {pieces.map((i) => {
           const snap = parseSnapshot(i.configuration);
+          const addOn = parseAddOnLine(i.addOn);
           return (
-            <li key={i.id} className="break-inside-avoid">
+            <li key={i.id} className={addOn ? "break-inside-avoid border-l-4 border-neutral-400 pl-4" : "break-inside-avoid"}>
+              {addOn ? <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">Add-on for {addOn.parentProduct.name}</p> : null}
               <p className="text-base font-semibold">
                 {i.quantity} × {i.description ?? i.productName}
               </p>
+              {addOn ? (
+                <table className="mt-2 w-full text-sm">
+                  <tbody>
+                    {addOn.choices.map((c) => (
+                      <tr key={c.label} className="border-b border-neutral-200">
+                        <th scope="row" className="w-1/3 py-1 pr-4 text-left font-medium text-neutral-600">
+                          {c.label}
+                        </th>
+                        <td className="py-1">{c.value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
               {snap ? (
                 <table className="mt-2 w-full text-sm">
                   <tbody>
@@ -82,7 +98,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
                   </tbody>
                 </table>
               ) : null}
-              {i.notes ? <p className="mt-2 whitespace-pre-line text-sm">{i.notes}</p> : null}
+              {i.notes && !(addOn && i.notes.trim() === addOnChoicesText(addOn.choices)) ? <p className="mt-2 whitespace-pre-line text-sm">{i.notes}</p> : null}
             </li>
           );
         })}

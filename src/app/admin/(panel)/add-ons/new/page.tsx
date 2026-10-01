@@ -14,7 +14,7 @@ export default async function NewAddOnPage() {
       <AddOnForm
         mode="create"
         action={createAddOn}
-        values={{ name: "", description: "", price: "", image: null, scope: "REUSABLE", required: false, minQuantity: "0", maxQuantity: "1", active: true }}
+        values={{ name: "", displayName: "", description: "", price: "", image: null, scope: "REUSABLE", required: false, minQuantity: "0", maxQuantity: "1", quantityEnabled: true, quantityStep: "1", defaultQuantity: "", active: true }}
       />
     </div>
   );

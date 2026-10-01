@@ -16,6 +16,8 @@ export interface EditableLine {
   price: string;
   taxable: boolean;
   productId: string | null;
+  /** Read-only summary of a configured add-on carried by this line (e.g. "Add-on of Ridge Table — Style: X Back · Wood: Oak"). */
+  addOnSummary?: string | null;
 }
 
 let counter = 0;
@@ -197,6 +199,12 @@ function LineRow({
         </label>
       ) : null}
       {l.productId ? <p className="mt-1 text-xs text-neutral-500">Linked to a catalog product{l.sourceId ? " (configuration snapshot kept)" : ""}.</p> : null}
+      {l.addOnSummary && l.sourceId ? (
+        <p className="mt-1 text-xs text-neutral-600">
+          <span className="font-medium">Configured add-on</span> — {l.addOnSummary}
+          {l.kind === "ADDON" ? " (kept with this line)" : " (dropped unless the line stays an add-on)"}
+        </p>
+      ) : null}
       {issue ? (
         <p id={`${id}-issue`} className="mt-2 text-xs font-medium text-red-600">
           {issue}

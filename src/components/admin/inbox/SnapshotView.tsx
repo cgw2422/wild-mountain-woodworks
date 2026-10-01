@@ -87,7 +87,22 @@ export function SnapshotView({
             <tbody className="divide-y divide-neutral-100">
               {s.addOns.map((a) => (
                 <tr key={a.addOnId}>
-                  <th scope="row" className="py-2 pr-4 text-left font-normal text-neutral-900">{a.name}</th>
+                  <th scope="row" className="py-2 pr-4 text-left font-normal text-neutral-900">
+                    {a.name}
+                    {a.choices?.length ? (
+                      <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-xs text-neutral-600">
+                        {a.choices.map((c) => (
+                          <div key={c.groupId} className="contents">
+                            <dt className="text-neutral-500">{c.label}</dt>
+                            <dd>
+                              {c.value}
+                              {c.priceModifierCents ? ` (${formatModifier(c.priceModifierCents)})` : ""}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : null}
+                  </th>
                   <td className="py-2 pr-4 tabular-nums text-neutral-700">× {a.quantity}</td>
                   <td className="py-2 pr-4 tabular-nums text-neutral-500">{formatCents(a.unitPriceCents)} each</td>
                   <td className="py-2 text-right tabular-nums text-neutral-900">{formatCents(a.totalCents)}</td>

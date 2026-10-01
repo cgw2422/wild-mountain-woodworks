@@ -1,4 +1,5 @@
 import "server-only";
+import { parseAddOnLine } from "@/lib/pricing/snapshot";
 import type { InvoiceStatus, Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
@@ -37,6 +38,8 @@ export interface InvoiceLineInput {
   quantity: number;
   unitPriceCents: number;
   taxable?: boolean;
+  /** Configured add-on details copied from the quote/order line (server-side only). */
+  addOn?: unknown;
 }
 
 function totalsData(lines: InvoiceLineInput[], taxCents = 0) {
@@ -63,6 +66,7 @@ function lineRows(lines: InvoiceLineInput[]) {
       unitPriceCents: unit,
       lineTotalCents: lineTotal({ kind: l.kind, quantity: l.quantity, unitPriceCents: unit }),
       taxable: l.taxable ?? true,
+      addOn: (parseAddOnLine(l.addOn) ?? undefined) as Prisma.InputJsonValue | undefined,
     };
   });
 }
@@ -110,8 +114,8 @@ export async function createOrderInvoice(db: Db, orderId: string, actorId: strin
   if (live.length === 0) {
     const rev = order.acceptedRevision;
     const lines: InvoiceLineInput[] = rev
-      ? rev.lineItems.map((l) => ({ kind: l.kind as LineKind, description: l.description, notes: l.notes, quantity: l.quantity, unitPriceCents: l.unitPriceCents, taxable: l.taxable }))
-      : order.items.map((l) => ({ kind: l.kind as LineKind, description: l.description ?? l.productName, notes: l.notes, quantity: l.quantity, unitPriceCents: l.unitPriceCents, taxable: false }));
+      ? rev.lineItems.map((l) => ({ kind: l.kind as LineKind, description: l.description, notes: l.notes, quantity: l.quantity, unitPriceCents: l.unitPriceCents, taxable: l.taxable, addOn: l.addOn }))
+      : order.items.map((l) => ({ kind: l.kind as LineKind, description: l.description ?? l.productName, notes: l.notes, quantity: l.quantity, unitPriceCents: l.unitPriceCents, taxable: false, addOn: l.addOn }));
     const totals = totalsData(lines, rev?.taxCents ?? order.taxCents);
     if (totals.totalCents !== order.totalCents) logger.warn("Order invoice total differs from the order total", { orderId, invoice: totals.totalCents, order: order.totalCents });
     data = {

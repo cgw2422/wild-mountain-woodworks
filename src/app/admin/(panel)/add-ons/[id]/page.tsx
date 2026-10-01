@@ -6,7 +6,20 @@ import { centsToDollarInput } from "@/lib/money";
 import { Badge, Card, PageHeader, formatDate } from "@/components/admin/ui";
 import { ActionButton, ConfirmAction } from "@/components/admin/forms";
 import { toImageValue } from "../../products/_lib/media";
-import { archiveAddOn, assignAddOnToProduct, deleteAddOn, removeAddOnFromProduct, restoreAddOn, updateAddOn, updateAddOnAssignment } from "../actions";
+import {
+  archiveAddOn,
+  assignAddOnToProduct,
+  attachAddOnOptionGroup,
+  deleteAddOn,
+  detachAddOnOptionGroup,
+  removeAddOnFromProduct,
+  reorderAddOnOptionGroups,
+  restoreAddOn,
+  updateAddOn,
+  updateAddOnAssignment,
+  updateAddOnOptionGroup,
+} from "../actions";
+import { AddOnOptionGroups } from "./AddOnOptionGroups";
 import { AddOnForm } from "../AddOnForm";
 import { AssignedProducts } from "./AssignedProducts";
 
@@ -21,12 +34,15 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
     include: {
       image: true,
       products: { include: { product: { select: { id: true, name: true, status: true } } }, orderBy: { product: { name: "asc" } } },
+      optionGroups: { orderBy: { displayOrder: "asc" }, include: { optionGroup: { include: { _count: { select: { values: true } } } } } },
     },
   });
   if (!addOn) notFound();
   const assignedIds = new Set(addOn.products.map((p) => p.productId));
   const allProducts = await prisma.product.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, status: true } });
   const archived = Boolean(addOn.archivedAt);
+  const attachedGroupIds = new Set(addOn.optionGroups.map((g) => g.optionGroupId));
+  const libraryGroups = await prisma.optionGroup.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, displayName: true, active: true } });
   const count = addOn.products.length;
 
   return (
@@ -52,6 +68,7 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
             action={updateAddOn.bind(null, addOn.id)}
             values={{
               name: addOn.name,
+              displayName: addOn.displayName ?? "",
               description: addOn.description ?? "",
               price: centsToDollarInput(addOn.priceCents),
               image: toImageValue(addOn.image),
@@ -59,9 +76,36 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
               required: addOn.required,
               minQuantity: String(addOn.minQuantity),
               maxQuantity: String(addOn.maxQuantity),
+              quantityEnabled: addOn.quantityEnabled,
+              quantityStep: String(addOn.quantityStep),
+              defaultQuantity: addOn.defaultQuantity != null ? String(addOn.defaultQuantity) : "",
               active: addOn.active,
             }}
           />
+          <Card
+            id="option-groups"
+            title={`Configuration (${addOn.optionGroups.length} option group${addOn.optionGroups.length === 1 ? "" : "s"})`}
+            description="Make this a configurable add-on (e.g. Dining Chairs: Chair Style, Wood Species, Chair Finish, Seat Finish). Groups come from the option library (Options), where you manage each value's name, price adjustment, image or swatch, order and active state. They belong to this add-on only — not to the main product."
+          >
+            <AddOnOptionGroups
+              groups={addOn.optionGroups.map((g) => ({
+                optionGroupId: g.optionGroupId,
+                name: g.optionGroup.name,
+                displayName: g.optionGroup.displayName,
+                inputType: g.optionGroup.inputType,
+                active: g.optionGroup.active,
+                required: g.optionGroup.required,
+                valueCount: g.optionGroup._count.values,
+                displayNameOverride: g.displayNameOverride ?? "",
+                requiredOverride: g.requiredOverride == null ? "inherit" : g.requiredOverride ? "required" : "optional",
+              }))}
+              available={libraryGroups.filter((g) => !attachedGroupIds.has(g.id))}
+              attach={attachAddOnOptionGroup.bind(null, addOn.id)}
+              update={updateAddOnOptionGroup.bind(null, addOn.id)}
+              detach={detachAddOnOptionGroup.bind(null, addOn.id)}
+              reorder={reorderAddOnOptionGroups.bind(null, addOn.id)}
+            />
+          </Card>
           <Card id="assigned-products" title={`Assigned products (${count})`} description="Assign this add-on to products and optionally set a different price per product.">
             <AssignedProducts
               addOnName={addOn.name}

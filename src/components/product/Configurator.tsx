@@ -6,8 +6,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { formatCents, formatModifier } from "@/lib/money";
-import { chosenQuantity, defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
-import type { ConfigAddOn, ConfigOptionGroup, ConfigOptionValue, ConfigurableProduct, ConfigurationSelection, OptionQuantitySpec } from "@/lib/pricing/types";
+import { addOnFieldKey, chosenQuantity, defaultAddOnChoices, defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
+import type { ConfigAddOn, ConfigOptionGroup, ConfigOptionValue, ConfigurableProduct, ConfigurationSelection, OptionQuantitySpec, PriceLine } from "@/lib/pricing/types";
 import { TIMELINE_OPTIONS, clientRules } from "@/lib/validation/shared";
 import { submitConfigurationQuote } from "@/app/(site)/actions";
 import { clientValidator, usePublicForm } from "@/components/forms/usePublicForm";
@@ -91,6 +91,24 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
     update((s) => ({ ...s, addOns: { ...s.addOns, [addOnId]: qty } }));
   }
 
+  /** Configurable add-on (e.g. Dining Chairs): Yes adds it at its default quantity with first choices filled in; No sets 0. */
+  function toggleConfigurableAddOn(addOn: ConfigAddOn, on: boolean) {
+    update((s) => ({
+      ...s,
+      addOns: { ...s.addOns, [addOn.id]: on ? Math.max(addOn.defaultQuantity, 1) : 0 },
+      addOnOptions: on ? { ...s.addOnOptions, [addOn.id]: { ...defaultAddOnChoices(addOn), ...s.addOnOptions?.[addOn.id] } } : s.addOnOptions,
+    }));
+  }
+
+  function setAddOnChoice(addOnId: string, groupId: string, valueId: string | null) {
+    update((s) => {
+      const picks = { ...s.addOnOptions?.[addOnId] };
+      if (valueId) picks[groupId] = valueId;
+      else delete picks[groupId];
+      return { ...s, addOnOptions: { ...s.addOnOptions, [addOnId]: picks } };
+    });
+  }
+
   function setCustom(groupId: string, text: string) {
     update((s) => ({ ...s, customDetails: { ...s.customDetails, [groupId]: text } }));
   }
@@ -135,10 +153,28 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
         />
       ))}
 
-      {product.addOns.length ? (
+      {product.addOns
+        .filter((a) => a.optionGroups.length)
+        .map((a) => (
+          <ConfigurableAddOnField
+            key={a.id}
+            addOn={a}
+            quantity={selection.addOns[a.id] ?? 0}
+            picks={selection.addOnOptions?.[a.id] ?? {}}
+            line={pricing.lines.find((l) => l.kind === "addon" && l.addOn?.addOnId === a.id)}
+            onToggle={(on) => toggleConfigurableAddOn(a, on)}
+            onQuantity={(q) => setAddOn(a.id, q)}
+            onChoice={(g, v) => setAddOnChoice(a.id, g, v)}
+            errors={errors}
+            pricesVisible={pricesVisible}
+            productTotal={showTotal ? total : null}
+          />
+        ))}
+
+      {product.addOns.some((a) => !a.optionGroups.length) ? (
         <fieldset id="cfg-addons" className="space-y-3">
           <legend className="mb-4 text-[0.78rem] font-semibold uppercase tracking-[0.14em] text-charcoal">Add-ons</legend>
-          {product.addOns.map((a) => (
+          {product.addOns.filter((a) => !a.optionGroups.length).map((a) => (
             <AddOnField
               key={a.id}
               addOn={a}
@@ -186,7 +222,15 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
                 {pricing.lines.map((l, i) => (
                   <div key={i} className="flex justify-between gap-4">
                     <dt className="text-muted">
-                      {l.kind === "base" ? (pricing.savingsCents > 0 ? "Base price (sale)" : "Base price") : l.kind === "option" ? `${l.label}: ${l.detail}${l.quantity !== 1 ? ` × ${l.quantity}` : ""}` : `${l.label}${l.quantity > 1 ? ` × ${l.quantity}` : ""}`}
+                      {l.kind === "base"
+                        ? pricing.savingsCents > 0
+                          ? "Base price (sale)"
+                          : "Base price"
+                        : l.kind === "option"
+                          ? `${l.label}: ${l.detail}${l.quantity !== 1 ? ` × ${l.quantity}` : ""}`
+                          : l.addOn
+                            ? `${l.label} × ${l.quantity} (${formatCents(l.unitCents)} each)`
+                            : `${l.label}${l.quantity > 1 ? ` × ${l.quantity}` : ""}`}
                     </dt>
                     <dd className="nums">{l.kind === "base" ? formatCents(l.amountCents) : l.amountCents === 0 ? "Included" : formatModifier(l.amountCents)}</dd>
                   </div>
@@ -302,6 +346,7 @@ function GroupLegend({ group, selectedLabel, error }: { group: ConfigOptionGroup
 
 function OptionGroupField({
   group,
+  fieldId,
   selectedId,
   customText,
   quantity,
@@ -312,6 +357,8 @@ function OptionGroupField({
   pricesVisible,
 }: {
   group: ConfigOptionGroup;
+  /** Element/error key when the group belongs to an add-on (defaults to the group id). */
+  fieldId?: string;
   selectedId: string | null;
   customText: string;
   /** Chosen quantity for a quantity-based value (undefined → the value's default). */
@@ -475,7 +522,7 @@ function OptionGroupField({
   }
 
   return (
-    <fieldset id={`cfg-${group.id}`} className="scroll-mt-32" aria-invalid={error ? true : undefined}>
+    <fieldset id={`cfg-${fieldId ?? group.id}`} className="scroll-mt-32" aria-invalid={error ? true : undefined}>
       <GroupLegend
         group={group}
         error={error}
@@ -525,6 +572,172 @@ function OptionGroupField({
         </p>
       ) : null}
     </fieldset>
+  );
+}
+
+/**
+ * A configurable add-on (e.g. "Add Dining Chairs"): its own mini
+ * configuration, grouped in one panel so it's clear these choices belong to
+ * the add-on and not to the main piece. Yes/No first (when optional); then
+ * the add-on's option groups — the first one (e.g. chair style), the
+ * quantity, then the rest (wood, chair finish, seat finish…) — with the
+ * selected images shown prominently and a live price summary.
+ */
+function ConfigurableAddOnField({
+  addOn,
+  quantity,
+  picks,
+  line,
+  onToggle,
+  onQuantity,
+  onChoice,
+  errors,
+  pricesVisible,
+  productTotal,
+}: {
+  addOn: ConfigAddOn;
+  quantity: number;
+  picks: Record<string, string>;
+  line: PriceLine | undefined;
+  onToggle: (on: boolean) => void;
+  onQuantity: (q: number) => void;
+  onChoice: (groupId: string, valueId: string | null) => void;
+  errors: Record<string, string>;
+  pricesVisible: boolean;
+  productTotal: number | null;
+}) {
+  const id = useId();
+  const added = addOn.required || quantity > 0;
+  const lowest = Math.max(1, addOn.minQuantity);
+  const [first, ...rest] = addOn.optionGroups;
+  const selectedValues = addOn.optionGroups
+    .map((g) => ({ group: g, value: g.values.find((v) => v.id === picks[g.id]) }))
+    .filter((x): x is { group: ConfigOptionGroup; value: ConfigOptionValue } => Boolean(x.value));
+  const pictures = selectedValues.filter((x) => x.value.image);
+  const group = (g: ConfigOptionGroup) => (
+    <OptionGroupField
+      key={g.id}
+      group={g}
+      fieldId={addOnFieldKey(addOn.id, g.id)}
+      selectedId={picks[g.id] ?? null}
+      customText=""
+      quantity={undefined}
+      onQuantity={() => undefined}
+      onSelect={(v) => onChoice(g.id, v)}
+      onCustomText={() => undefined}
+      error={errors[addOnFieldKey(addOn.id, g.id)]}
+      pricesVisible={pricesVisible}
+    />
+  );
+
+  return (
+    <section id={`cfg-${addOn.id}`} aria-labelledby={`${id}-h`} className={cn("scroll-mt-32 border bg-paper", added ? "border-charcoal" : "border-stone")}>
+      <div className="flex gap-4 p-5 sm:p-6">
+        {addOn.image ? (
+          <span className="relative hidden h-20 w-20 shrink-0 overflow-hidden bg-stone-light sm:block">
+            <Image src={addOn.image.url} alt="" fill sizes="80px" className="object-cover" style={{ objectPosition: `${addOn.image.focalX ?? 50}% ${addOn.image.focalY ?? 50}%` }} />
+          </span>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <h3 id={`${id}-h`} className="text-[0.78rem] font-semibold uppercase tracking-[0.14em] text-charcoal">
+            {addOn.name}
+            {!addOn.required ? <span className="ml-2 font-normal normal-case tracking-normal text-muted">(optional)</span> : null}
+          </h3>
+          {addOn.description ? <p className="mt-2 text-sm leading-relaxed text-muted">{addOn.description}</p> : null}
+          {pricesVisible && addOn.priceCents ? (
+            <p className="mt-1 text-sm text-muted">
+              From <span className="nums">{formatCents(addOn.priceCents)}</span> each
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {!addOn.required ? (
+        <div role="radiogroup" aria-labelledby={`${id}-h`} className="grid grid-cols-2 gap-2.5 px-5 pb-5 sm:px-6">
+          {[
+            { on: false, label: "No thanks" },
+            { on: true, label: `Yes, ${addOn.name.replace(/^add\s+/i, "add ").replace(/^(?!add )/i, "add ")}` },
+          ].map((o) => (
+            <label key={String(o.on)} className="cursor-pointer">
+              <input type="radio" name={`${id}-yn`} className="peer sr-only" checked={added === o.on} onChange={() => onToggle(o.on)} />
+              <span className="flex min-h-12 items-center justify-center border border-stone bg-paper px-3 text-center text-[0.9rem] font-medium transition hover:border-stone-dark peer-checked:border-charcoal peer-checked:bg-charcoal peer-checked:text-ivory peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-bronze-text">
+                {o.label}
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+
+      {added ? (
+        <div className="space-y-8 border-t border-stone px-5 py-6 sm:px-6">
+          {first ? group(first) : null}
+          {addOn.quantityEnabled && addOn.maxQuantity > lowest ? (
+            <QuantityStepper
+              id={`${id}-qty`}
+              label={`How many — ${addOn.name}`}
+              spec={{ min: lowest, max: addOn.maxQuantity, step: addOn.quantityStep, default: addOn.defaultQuantity }}
+              value={Math.max(lowest, quantity)}
+              onChange={onQuantity}
+              unitCents={null}
+              invalid={Boolean(errors[addOn.id])}
+            />
+          ) : null}
+          {rest.map(group)}
+
+          {pictures.length ? (
+            <div aria-label="Your selection" role="group">
+              <p className="mb-3 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-muted">Your selection</p>
+              <div className={cn("grid gap-3", pictures.length > 1 ? "grid-cols-2 sm:max-w-md" : "max-w-[14rem] grid-cols-1")}>
+                {pictures.map(({ group: g, value: v }) => (
+                  <figure key={g.id} className="border border-stone bg-ivory p-1.5">
+                    <span className="relative block aspect-[4/3] overflow-hidden bg-stone-light">
+                      <Image src={v.image!.url} alt={v.image!.alt || v.displayName} fill sizes="(min-width: 1024px) 220px, 45vw" className="object-cover" style={{ objectPosition: `${v.image!.focalX ?? 50}% ${v.image!.focalY ?? 50}%` }} />
+                    </span>
+                    <figcaption className="px-1 pb-0.5 pt-2 text-[0.8rem] leading-tight">
+                      <span className="block text-muted">{g.displayName}</span>
+                      <span className="font-medium">{v.displayName}</span>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="bg-ivory p-4" aria-live="polite">
+            <p className="text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-charcoal">{addOn.name}</p>
+            {selectedValues.length ? (
+              <ul className="mt-2 space-y-0.5 text-sm">
+                {selectedValues.map(({ group: g, value: v }) => (
+                  <li key={g.id}>
+                    <span className="text-muted">{g.displayName}: </span>
+                    {v.displayName}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {pricesVisible && line ? (
+              <dl className="mt-3 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 border-t border-stone pt-3 text-sm">
+                <dt className="text-muted">Price each</dt>
+                <dd className="text-right nums">{formatCents(line.unitCents)}</dd>
+                <dt className="text-muted">Quantity</dt>
+                <dd className="text-right nums">{line.quantity}</dd>
+                <dt className="font-semibold">{addOn.name.replace(/^add\s+/i, "")} total</dt>
+                <dd className="text-right font-semibold nums">{formatCents(line.amountCents)}</dd>
+                {productTotal != null ? (
+                  <>
+                    <dt className="text-muted">Updated estimated total</dt>
+                    <dd className="text-right nums">{formatCents(productTotal)}</dd>
+                  </>
+                ) : null}
+              </dl>
+            ) : errors[addOn.id] ? (
+              <p className="mt-2 text-sm font-medium text-error">{errors[addOn.id]}</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {!added && errors[addOn.id] ? <p className="px-5 pb-4 text-sm font-medium text-error sm:px-6">{errors[addOn.id]}</p> : null}
+    </section>
   );
 }
 
@@ -754,7 +967,7 @@ function RequestPanel({
   useEffect(() => {
     if (state.status !== "error" || !state.fieldErrors) return;
     const cfgErrors = Object.fromEntries(
-      Object.entries(state.fieldErrors).filter(([k]) => product.optionGroups.some((g) => g.id === k) || product.addOns.some((a) => a.id === k)),
+      Object.entries(state.fieldErrors).filter(([k]) => product.optionGroups.some((g) => g.id === k) || product.addOns.some((a) => a.id === k || k.startsWith(`${a.id}.`))),
     );
     if (Object.keys(cfgErrors).length) onServerErrors(cfgErrors);
   }, [state, product, onServerErrors]);
@@ -782,15 +995,19 @@ function RequestPanel({
       })}
       {product.addOns
         .filter((a) => (selection.addOns[a.id] ?? 0) > 0)
-        .map((a) => (
-          <div key={a.id} className="contents">
-            <dt className="text-muted">Add-on</dt>
-            <dd>
-              {a.name}
-              {(selection.addOns[a.id] ?? 0) > 1 ? ` × ${selection.addOns[a.id]}` : ""}
-            </dd>
-          </div>
-        ))}
+        .map((a) => {
+          const line = pricing.lines.find((l) => l.kind === "addon" && l.addOn?.addOnId === a.id);
+          return (
+            <div key={a.id} className="contents">
+              <dt className="text-muted">Add-on</dt>
+              <dd>
+                {a.name}
+                {(selection.addOns[a.id] ?? 0) > 1 || line ? ` × ${selection.addOns[a.id]}` : ""}
+                {line?.addOn?.choices.length ? <span className="block text-muted">{line.addOn.choices.map((c) => c.value).join(" · ")}</span> : null}
+              </dd>
+            </div>
+          );
+        })}
       {showTotal && pricing.totalCents != null ? (
         <div className="contents">
           <dt className="text-muted">Estimate</dt>

@@ -8,7 +8,7 @@ import { customerOrderView } from "@/lib/sales/views";
 import { siteDateLong } from "@/lib/site-time";
 import { buttonClasses } from "@/components/ui/Button";
 import { AutoRefresh } from "@/components/documents/AutoRefresh";
-import { DocHeading, Facts, Files, Prose, Section, statusPill } from "@/components/documents/parts";
+import { AddOnChoices, DocHeading, Facts, Files, Prose, Section, statusPill } from "@/components/documents/parts";
 import { DepositMethodsNote, FinanceFullPurchase } from "@/components/payments/PaymentOptions";
 
 type Props = { params: Promise<{ token: string }>; searchParams: Promise<{ payment?: string }> };
@@ -168,13 +168,23 @@ export default async function CustomerOrderPage({ params, searchParams }: Props)
       <Section title="Your piece">
         <ul className="divide-y divide-stone border-y border-stone">
           {o.items.map((i, n) => (
-            <li key={n} className="flex flex-wrap justify-between gap-3 py-4">
+            <li key={n} className={cn("flex flex-wrap justify-between gap-3 py-4", i.addOn && "ml-4 border-l-2 border-bronze/50 pl-4")}>
               <div>
+                {i.addOn ? <p className="mb-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-bronze-text">Add-on</p> : null}
                 <p className="font-medium">
                   {i.description}
-                  {i.quantity > 1 ? ` × ${i.quantity}` : ""}
+                  {i.quantity > 1 && !i.addOn ? ` × ${i.quantity}` : ""}
                 </p>
-                {i.notes ? <p className="mt-1 whitespace-pre-line text-sm text-muted">{i.notes}</p> : null}
+                {i.addOn ? (
+                  <>
+                    <AddOnChoices addOn={i.addOn} />
+                    <p className="mt-1 text-sm tabular-nums text-muted">
+                      {i.quantity} × {formatCents(i.unitPriceCents)} each
+                    </p>
+                  </>
+                ) : i.notes ? (
+                  <p className="mt-1 whitespace-pre-line text-sm text-muted">{i.notes}</p>
+                ) : null}
               </div>
               <p className="tabular-nums">{i.lineTotalCents < 0 ? `−${formatCents(-i.lineTotalCents)}` : formatCents(i.lineTotalCents)}</p>
             </li>

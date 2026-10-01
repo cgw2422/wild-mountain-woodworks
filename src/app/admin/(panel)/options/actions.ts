@@ -71,12 +71,15 @@ export const setOptionGroupActive = adminAction(async (admin, id: string, active
 });
 
 export const deleteOptionGroup = adminAction(async (admin, id: string) => {
-  const group = await prisma.optionGroup.findUnique({ where: { id }, include: { _count: { select: { products: true } } } });
+  const group = await prisma.optionGroup.findUnique({ where: { id }, include: { _count: { select: { products: true, addOns: true } } } });
   if (!group) throw new AdminError("That option group no longer exists.");
   if (group._count.products > 0) {
     throw new AdminError(
       `“${group.name}” is attached to ${group._count.products} product${group._count.products === 1 ? "" : "s"}. Detach it from those products first, or deactivate it instead.`,
     );
+  }
+  if (group._count.addOns > 0) {
+    throw new AdminError(`“${group.name}” is part of ${group._count.addOns} configurable add-on${group._count.addOns === 1 ? "" : "s"}. Remove it from those add-ons first, or deactivate it instead.`);
   }
   await prisma.optionGroup.delete({ where: { id } });
   await logActivity("option.updated", `${admin.name} deleted option group "${group.name}"`, { actorId: admin.id, entityType: "optionGroup", entityId: id });
