@@ -125,9 +125,9 @@ export default async function CustomerOrderPage({ params, searchParams }: Props)
               <>
                 {/* A plain link: the server opens a fresh, correctly priced Stripe Checkout each time (no Affirm/Klarna for a deposit or balance). */}
                 <a href={due.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
-                  Pay {formatCents(due.amountCents, { showZeroCents: true })} {dueLabel}
+                  Pay {formatCents(due.amountCents)} {dueLabel}
                 </a>
-                {due.type === "DEPOSIT" ? <p className="mt-2 max-w-xl text-sm text-charcoal">Pay the required deposit today. The remaining {formatCents(Math.max(0, o.totalCents - due.amountCents - o.paidCents), { showZeroCents: true })} will be due later.</p> : null}
+                {due.type === "DEPOSIT" ? <p className="mt-2 max-w-xl text-sm text-charcoal">Pay the required deposit today. The remaining {formatCents(Math.max(0, o.totalCents - due.amountCents - o.paidCents))} will be due later.</p> : null}
                 <DepositMethodsNote messaging={o.paymentMessaging} className="mt-3 max-w-xl" />
               </>
             ) : null}

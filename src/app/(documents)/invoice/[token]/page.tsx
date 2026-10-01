@@ -99,7 +99,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: Prop
                 <>
                   {/* A plain link: the server opens a Stripe Checkout for exactly what's due (Affirm/Klarna aren't offered for it). */}
                   <a href={inv.payHref} rel="nofollow" className={buttonClasses("primary", "lg", "mt-6")}>
-                    {inv.dueNowType === "FINAL_BALANCE" ? "Pay Remaining Balance" : `Pay ${formatCents(inv.dueNowCents, { showZeroCents: true })} ${dueLabel}`}
+                    {inv.dueNowType === "FINAL_BALANCE" ? "Pay Remaining Balance" : `Pay ${formatCents(inv.dueNowCents)} ${dueLabel}`}
                   </a>
                   {inv.dueNowType === "FINAL_BALANCE" ? <p className="mt-2 text-sm tabular-nums">{formatCents(inv.dueNowCents, { showZeroCents: true })} due now</p> : null}
                   <DepositMethodsNote messaging={inv.paymentMessaging} className="mt-3 max-w-xl" />
