@@ -5,7 +5,7 @@ import { verifyStripeWebhook } from "@/lib/sales/stripe";
 export const dynamic = "force-dynamic";
 
 /**
- * Stripe invoicing webhook. Inert (404) until STRIPE_WEBHOOK_SECRET is set.
+ * Stripe webhook (Checkout, Terminal PaymentIntents, refunds, legacy invoices). Inert (404) until STRIPE_WEBHOOK_SECRET is set.
  * The signature is verified before anything is read; invoices and payments
  * are only ever marked paid here — never from a browser redirect. Events are
  * idempotent (see processStripeEvent), so Stripe's retries are safe.
