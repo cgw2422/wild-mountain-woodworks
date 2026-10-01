@@ -194,7 +194,7 @@ export default async function OrderDetailPage({ params }: Props) {
             {primary && primaryMoney ? (
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center gap-3">
-                  <Link href={`/admin/invoices/${primary.id}`} className="font-mono text-sm underline underline-offset-2">
+                  <Link href={`/admin/invoices/${primary.id}`} className="inline-flex min-h-11 items-center font-mono text-sm underline underline-offset-2">
                     {primary.number}
                   </Link>
                   <SalesBadge status={primary.status} />
@@ -222,7 +222,7 @@ export default async function OrderDetailPage({ params }: Props) {
                 <ul className="space-y-1.5 text-sm">
                   {order.invoices.map((i) => (
                     <li key={i.id} className="flex flex-wrap items-center gap-2">
-                      <Link href={`/admin/invoices/${i.id}`} className="font-mono underline underline-offset-2">
+                      <Link href={`/admin/invoices/${i.id}`} className="inline-flex min-h-11 items-center font-mono underline underline-offset-2">
                         {i.number}
                       </Link>
                       <span className="text-neutral-600">{INVOICE_KIND_LABELS[i.kind]}</span>
