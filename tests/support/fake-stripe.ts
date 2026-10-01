@@ -1,4 +1,4 @@
-import type { CheckoutSessionInfo, CreateCheckoutInput, InvoicingProvider } from "@/lib/sales/stripe";
+import { terminalPaymentIntentParams, type CheckoutSessionInfo, type CreateCheckoutInput, type InvoicingProvider, type PaymentIntentInfo, type TerminalReaderInfo } from "@/lib/sales/stripe";
 
 /**
  * In-memory stand-in for Stripe (invoices + Checkout Sessions). Sessions are
@@ -11,6 +11,13 @@ export function fakeStripe(overrides: Partial<InvoicingProvider> = {}) {
   const byKey = new Map<string, string>();
   let invoiceSeq = 0;
   let sessionSeq = 0;
+  let intentSeq = 0;
+  const intents = new Map<string, PaymentIntentInfo & { params: Record<string, string>; key: string }>();
+  const intentByKey = new Map<string, string>();
+  const readers = new Map<string, TerminalReaderInfo>([
+    ["tmr_shop", { id: "tmr_shop", label: "Shop counter", status: "online", deviceType: "stripe_s700", serialNumber: "S700-1", locationId: "tml_1", action: null }],
+    ["tmr_truck", { id: "tmr_truck", label: "Delivery truck", status: "offline", deviceType: "bbpos_wisepos_e", serialNumber: "WPE-2", locationId: "tml_1", action: null }],
+  ]);
 
   const provider: InvoicingProvider = {
     name: "fake",
@@ -44,6 +51,55 @@ export function fakeStripe(overrides: Partial<InvoicingProvider> = {}) {
       calls.push(`expire:${id}`);
       s.status = "expired";
     },
+    listTerminalReaders: async () => [...readers.values()],
+    retrieveTerminalReader: async (id) => {
+      const r = readers.get(id);
+      if (!r) throw new Error(`No such reader: ${id}`);
+      return r;
+    },
+    createTerminalPaymentIntent: async (c) => {
+      const existing = intentByKey.get(c.idempotencyKey);
+      if (existing) return intents.get(existing)!;
+      const id = `pi_term_${++intentSeq}`;
+      const params = terminalPaymentIntentParams(c);
+      calls.push(`terminal_intent:${c.amountCents}`);
+      const pi = { id, status: "requires_payment_method", amount: c.amountCents, failureMessage: null, latestChargeId: null, params, key: c.idempotencyKey };
+      intents.set(id, pi);
+      intentByKey.set(c.idempotencyKey, id);
+      return pi;
+    },
+    processOnReader: async (readerId, paymentIntentId) => {
+      const r = readers.get(readerId);
+      if (!r) throw new Error(`No such reader: ${readerId}`);
+      if (r.status === "offline") throw new Error("Reader is offline");
+      calls.push(`process:${readerId}:${paymentIntentId}`);
+      r.action = { type: "process_payment_intent", status: "in_progress", failureMessage: null, paymentIntentId };
+      return r;
+    },
+    cancelReaderAction: async (readerId) => {
+      calls.push(`reader_cancel:${readerId}`);
+      const r = readers.get(readerId);
+      if (r) r.action = null;
+    },
+    retrievePaymentIntent: async (id) => {
+      const pi = intents.get(id);
+      if (!pi) throw new Error(`No such payment_intent: ${id}`);
+      return pi;
+    },
+    cancelPaymentIntent: async (id) => {
+      const pi = intents.get(id);
+      if (pi && pi.status !== "succeeded") pi.status = "canceled";
+      calls.push(`pi_cancel:${id}`);
+    },
+    simulateReaderPayment: async (readerId) => {
+      const r = readers.get(readerId);
+      const pi = r?.action?.paymentIntentId ? intents.get(r.action.paymentIntentId) : null;
+      if (pi) {
+        pi.status = "succeeded";
+        pi.latestChargeId = `ch_${pi.id}`;
+        r!.action = { ...r!.action!, status: "succeeded" };
+      }
+    },
     ...overrides,
   };
 
@@ -69,10 +125,32 @@ export function fakeStripe(overrides: Partial<InvoicingProvider> = {}) {
     };
   }
 
+  /** The webhook Stripe sends for a Terminal PaymentIntent. */
+  function intentEvent(eventId: string, type: "payment_intent.succeeded" | "payment_intent.payment_failed" | "payment_intent.canceled", id: string) {
+    const pi = intents.get(id)!;
+    return { id: eventId, type, data: { object: { id: pi.id, object: "payment_intent", status: pi.status, amount: pi.amount, amount_received: pi.status === "succeeded" ? pi.amount : 0, latest_charge: pi.latestChargeId, last_payment_error: pi.failureMessage ? { message: pi.failureMessage } : null } } };
+  }
+
   return {
     provider,
     calls,
     sessions,
+    intents,
+    readers,
+    intentEvent,
+    /** The card was approved on the reader. */
+    succeedIntent(id: string) {
+      const pi = intents.get(id)!;
+      pi.status = "succeeded";
+      pi.latestChargeId = `ch_${id}`;
+      return pi;
+    },
+    /** The card was declined on the reader. */
+    declineIntent(id: string, message = "Your card was declined.") {
+      const pi = intents.get(id)!;
+      pi.failureMessage = message;
+      return pi;
+    },
     /** The customer finished paying on Stripe's page (not yet confirmed to us). */
     complete(id: string, paymentStatus: "paid" | "unpaid" = "paid") {
       const s = sessions.get(id)!;

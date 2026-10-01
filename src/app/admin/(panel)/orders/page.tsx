@@ -15,10 +15,11 @@ export const metadata: Metadata = { title: "Orders" };
 const BASE = "/admin/orders";
 const TABS: Array<{ key: string; label: string; where?: Prisma.OrderWhereInput }> = [
   { key: "", label: "All", where: { productionStatus: { not: "CANCELED" } } },
-  { key: "deposit", label: "Awaiting deposit", where: { productionStatus: { in: ["QUOTE_ACCEPTED", "AWAITING_DEPOSIT"] as ProductionStatus[] } } },
+  { key: "deposit", label: "Awaiting deposit", where: { productionStatus: "AWAITING_DEPOSIT" } },
   { key: "production", label: "In the shop", where: { productionStatus: { in: PRODUCTION_ACTIVE } } },
   { key: "delivery", label: "Ready / delivery", where: { productionStatus: { in: ["READY_FOR_DELIVERY", "DELIVERY_SCHEDULED"] as ProductionStatus[] } } },
-  { key: "balance", label: "Balance due", where: { paymentStatus: { in: ["PARTIALLY_PAID", "DEPOSIT_DUE", "UNPAID"] as OrderPaymentStatus[] }, productionStatus: { notIn: ["CANCELED"] } } },
+  { key: "balance", label: "Balance due", where: { paymentStatus: "BALANCE_DUE", productionStatus: { notIn: ["CANCELED"] } } },
+  { key: "unpaid", label: "Not yet paid in full", where: { paymentStatus: { in: ["PARTIALLY_PAID", "DEPOSIT_DUE", "UNPAID", "BALANCE_DUE"] as OrderPaymentStatus[] }, productionStatus: { notIn: ["CANCELED"] } } },
   { key: "completed", label: "Completed", where: { productionStatus: "COMPLETED" } },
   { key: "canceled", label: "Canceled", where: { productionStatus: "CANCELED" } },
 ];

@@ -57,7 +57,7 @@ async function sentQuote(email?: string, name?: string) {
   return prisma.quoteRequest.findUniqueOrThrow({ where: { id: q.id } });
 }
 
-const cancelOrder: OrderUpdateInput = { productionStatus: "CANCELED", deliveryStatus: "NOT_SCHEDULED", deliveryDate: null, deliveryAddress: null, deliveryNotes: null, estimatedCompletion: null, productionNotes: null, customerNotes: null, notifyCustomer: false };
+const cancelOrder: OrderUpdateInput = { productionStatus: "CANCELED", deliveryDate: null, deliveryAddress: null, deliveryNotes: null, estimatedCompletion: null, productionNotes: null, customerNotes: null, notifyCustomer: false };
 
 describe("void reasons", () => {
   it("accepts the listed reasons and needs details for Other", () => {
@@ -180,7 +180,8 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     const { order } = await quotes.acceptQuote(q.customerToken!, { ...accept, revisionNumber: 1 }, meta);
     // Even if a quote were voided behind an open order, invoicing refuses it.
     await prisma.quoteRequest.update({ where: { id: q.id }, data: { status: "VOIDED" } });
-    await expect(prisma.$transaction((tx) => invoices.createInvoiceForOrder(tx, order.id, "BALANCE", actor.id))).rejects.toThrow(/voided/);
+    await expect(prisma.$transaction((tx) => invoices.createOrderInvoice(tx, order.id, actor.id))).rejects.toThrow(/voided/);
+    expect(await prisma.invoice.count()).toBe(1);
     await expect(invoices.createCustomInvoice(actor, { customerId: order.customerId!, orderId: order.id, lines: [{ kind: "CUSTOM", description: "Extra", quantity: 1, unitPriceCents: 1000, taxable: false }], dueDate: null, customerNotes: null })).rejects.toThrow(/voided/);
   });
 
@@ -229,7 +230,7 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     const deposit = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
 
     // Paid → can't be voided (would make the history inconsistent).
-    const p = await payments.recordManualPayment(actor, { invoiceId: deposit.id, amountCents: 20000, method: "CHECK", receivedAt: new Date(), reference: "1042", notes: null, sendReceipt: false });
+    const p = await payments.recordManualPayment(actor, { invoiceId: deposit.id, amountCents: 20000, method: "CHECK", checkStatus: "SUCCEEDED", receivedAt: new Date(), reference: "1042", notes: null, sendReceipt: false });
     await expect(invoices.voidInvoice(actor, deposit.id, "Created in error")).rejects.toThrow(/has payments/);
     // After a full refund it can be voided — the payment and refund stay on record.
     await payments.recordRefund(actor, p.id, 20000, "Customer canceled");
@@ -237,8 +238,8 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     const boss = await prisma.adminUser.findUniqueOrThrow({ where: { email: "boss@example.com" } });
     expect(await sales.voidInvoiceAction(deposit.id, form({ reason: "Customer canceled" }))).toMatchObject({ ok: true });
     const v = await prisma.invoice.findUniqueOrThrow({ where: { id: deposit.id }, include: { payments: true, lineItems: true } });
-    expect(v).toMatchObject({ status: "VOID", number: "WMI-1001", voidedById: boss.id, voidReason: "Customer canceled", voidedAt: expect.any(Date), orderId: order.id, quoteId: q.id });
-    expect(v.lineItems).toHaveLength(1);
+    expect(v).toMatchObject({ status: "VOIDED", number: "WMI-1001", voidedById: boss.id, voidReason: "Customer canceled", voidedAt: expect.any(Date), orderId: order.id, quoteId: q.id });
+    expect(v.lineItems.length).toBeGreaterThan(0);
     expect(v.payments).toEqual([expect.objectContaining({ id: p.id, amountCents: 20000, refundedCents: 20000, status: "REFUNDED", reference: "1042" })]);
     expect(await prisma.activityLog.findFirstOrThrow({ where: { type: "invoice.voided" } })).toMatchObject({ actorId: boss.id, message: expect.stringContaining("Reason: Customer canceled") });
 
@@ -246,13 +247,13 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     await expect(payments.recordManualPayment(actor, { invoiceId: deposit.id, amountCents: 100, method: "CASH", receivedAt: new Date(), reference: null, notes: null, sendReceipt: false })).rejects.toThrow(/void/);
     expect(await startDepositCheckout(order.customerToken!)).toEqual({ kind: "nothing_due" });
     expect(await sales.resendDepositLinkAction(deposit.id)).toMatchObject({ ok: false });
-    expect((await customerInvoiceView(deposit.publicToken!))!).toMatchObject({ voided: true, payUrl: null, paymentInstructions: null });
+    expect((await customerInvoiceView(deposit.publicToken!))!).toMatchObject({ voided: true, payHref: null, paymentInstructions: null });
     expect(stripe.calls.filter((c) => c.startsWith("checkout:"))).toEqual([]);
     // It stays in the customer's history on the quote page, marked void with nothing to pay.
-    expect((await loadCustomerQuote(q.customerToken!))!.view.invoices).toEqual([expect.objectContaining({ number: "WMI-1001", status: "VOID", payUrl: null })]);
+    expect((await loadCustomerQuote(q.customerToken!))!.view.invoices).toEqual([expect.objectContaining({ number: "WMI-1001", status: "VOIDED", payUrl: null })]);
   });
 
-  it("voiding a Stripe-backed invoice voids it in Stripe too", async () => {
+  it("voiding an older Stripe-backed invoice voids it in Stripe too; a replacement gets a new number", async () => {
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
     vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_x");
     const stripe = fakeStripe();
@@ -260,18 +261,16 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     const q = await sentQuote();
     const { order } = await quotes.acceptQuote(q.customerToken!, { ...accept, revisionNumber: 1 }, meta);
     await prisma.siteSetting.update({ where: { id: "default" }, data: { stripeInvoicingEnabled: true } });
-    const deposit = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
-    await payments.recordManualPayment(actor, { invoiceId: deposit.id, amountCents: deposit.totalCents, method: "CHECK", receivedAt: new Date(), reference: null, notes: null, sendReceipt: false });
-    const balance = await prisma.$transaction((tx) => invoices.createInvoiceForOrder(tx, order.id, "BALANCE", actor.id));
-    await invoices.sendInvoice(actor, balance.id);
-    await invoices.voidInvoice(actor, balance.id, "Pricing mistake");
-    expect(stripe.calls).toContain("void:in_1");
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: balance.id } })).toMatchObject({ status: "VOID", stripeInvoiceId: "in_1", stripeHostedInvoiceUrl: expect.any(String) });
-    expect((await customerInvoiceView(balance.publicToken!))!.payUrl).toBeNull();
-    // A replacement gets a new number; the voided one keeps its own.
-    const replacement = await prisma.$transaction((tx) => invoices.createInvoiceForOrder(tx, order.id, "BALANCE", actor.id));
-    expect(replacement.number).toBe("WMI-1003");
-    expect(replacement.totalCents).toBe(balance.totalCents);
+    const invoice = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
+    // As if it had been mirrored to Stripe Invoicing before the one-invoice change.
+    await prisma.invoice.update({ where: { id: invoice.id }, data: { stripeInvoiceId: "in_old", stripeHostedInvoiceUrl: "https://invoice.stripe.com/i/in_old" } });
+    await invoices.voidInvoice(actor, invoice.id, "Pricing mistake");
+    expect(stripe.calls).toContain("void:in_old");
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "VOIDED", stripeInvoiceId: "in_old", stripeHostedInvoiceUrl: expect.any(String) });
+    expect((await customerInvoiceView(invoice.publicToken!))!.payHref).toBeNull();
+    const replacement = await prisma.$transaction((tx) => invoices.createOrderInvoice(tx, order.id, actor.id));
+    expect(replacement.number).toBe("WMI-1002");
+    expect(replacement.totalCents).toBe(invoice.totalCents);
   });
 
   it("numbers are never reused after voiding", async () => {
@@ -283,7 +282,7 @@ describe.skipIf(!hasTestDb)("quotes and invoices are voided, never deleted", () 
     const { order } = await quotes.acceptQuote(b.customerToken!, { ...accept, revisionNumber: 1 }, meta);
     const deposit = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
     await invoices.voidInvoice(actor, deposit.id, "Created in error");
-    const again = await prisma.$transaction((tx) => invoices.createInvoiceForOrder(tx, order.id, "DEPOSIT", actor.id));
+    const again = await prisma.$transaction((tx) => invoices.createOrderInvoice(tx, order.id, actor.id));
     expect([deposit.number, again.number]).toEqual(["WMI-1001", "WMI-1002"]);
 
     await orders.updateOrder(actor, order.id, cancelOrder);

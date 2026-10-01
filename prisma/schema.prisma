@@ -1024,6 +1024,9 @@ model SiteSetting {
   /// Also needs STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET. Formerly
   /// "ecommerceEnabled" (cart/checkout, never launched).
   stripeInvoicingEnabled       Boolean  @default(false)
+  /// Stripe Terminal reader used for in-person card payments (tmr_…).
+  terminalReaderId             String?
+  terminalReaderLabel          String?
   /// Taxes stay off until the business configures them.
   taxEnabled                   Boolean  @default(false)
   /// WILD_MOUNTAIN: branded email with the payment link; STRIPE: Stripe emails the invoice.
@@ -1075,17 +1078,13 @@ model SiteSetting {
 // ---------------------------------------------------------------------------
 
 /// Shop progress, separate from payment and delivery.
+/// Customer-facing production stage (payment state is separate). Detailed
+/// shop steps (materials, sanding, finishing, curing…) live in internal notes.
+/// Older detailed statuses were mapped on migration; their history is kept.
 enum ProductionStatus {
-  QUOTE_ACCEPTED
   AWAITING_DEPOSIT
-  DEPOSIT_PAID
-  DESIGN_CONFIRMATION
-  MATERIALS_ORDERED
-  MATERIALS_READY
+  ORDER_CONFIRMED
   IN_PRODUCTION
-  SANDING
-  FINISHING
-  CURING
   READY_FOR_DELIVERY
   DELIVERY_SCHEDULED
   COMPLETED
@@ -1097,7 +1096,10 @@ enum OrderPaymentStatus {
   UNPAID
   DEPOSIT_DUE
   PARTIALLY_PAID
+  /// The admin requested the final balance (Mark balance due).
+  BALANCE_DUE
   PAID
+  VOIDED
   REFUNDED
   CANCELED
 }
@@ -1116,7 +1118,7 @@ model Order {
   id                      String             @id @default(cuid())
   /// Customer-facing number, e.g. WMO-1001.
   number                  String             @unique
-  productionStatus        ProductionStatus   @default(QUOTE_ACCEPTED)
+  productionStatus        ProductionStatus   @default(AWAITING_DEPOSIT)
   paymentStatus           OrderPaymentStatus @default(UNPAID)
   deliveryStatus          DeliveryStatus     @default(NOT_SCHEDULED)
   customerId              String?
@@ -1133,6 +1135,10 @@ model Order {
   shippingAddress         Json?
   deliveryAddress         String?
   deliveryDate            DateTime?
+  /// e.g. "9am–12pm" (optional).
+  deliveryWindow          String?
+  /// WHITE_GLOVE | PICKUP | OTHER (see DELIVERY_METHODS).
+  deliveryMethod          String?
   deliveryNotes           String?
   estimatedCompletion     String?
   subtotalCents           Int
@@ -1164,6 +1170,7 @@ model Order {
   activities    CustomerActivity[]
   emails        EmailLog[]
   files         SalesAttachment[]
+  notifications StatusNotification[]
 
   @@index([productionStatus, createdAt])
   @@index([paymentStatus])
@@ -1402,14 +1409,18 @@ model CustomerActivity {
   @@index([customerId, createdAt])
 }
 
+/// Derived from the invoice's payments (see ledger.ts). SENT, PAST_DUE and
+/// CANCELED remain only for older records.
 enum InvoiceStatus {
   DRAFT
   SENT
   OPEN
+  DEPOSIT_DUE
   PARTIALLY_PAID
+  BALANCE_DUE
   PAID
   PAST_DUE
-  VOID
+  VOIDED
   CANCELED
 }
 
@@ -1445,8 +1456,16 @@ model Invoice {
   otherChargesCents      Int            @default(0)
   taxCents               Int            @default(0)
   totalCents             Int            @default(0)
-  /// Sum of successful payments minus refunds (recomputed, never typed in).
+  /// Sum of settled payments minus refunds (recomputed, never typed in).
   amountPaidCents        Int            @default(0)
+  /// Payments not yet settled (e.g. a check waiting to clear, a card on the
+  /// Terminal reader). Recomputed; they don't count as paid.
+  pendingCents           Int            @default(0)
+  /// Deposit required before work starts (from the accepted quote).
+  depositCents           Int            @default(0)
+  /// When the admin requested the final balance (Mark balance due).
+  balanceDueAt           DateTime?
+  balanceRequestedById   String?
   dueDate                DateTime?
   customerNotes          String?
   /// Unguessable token for /invoice/[token] (offline invoices, print view).
@@ -1506,7 +1525,10 @@ model InvoiceLineItem {
 }
 
 enum PaymentMethod {
-  STRIPE
+  /// Stripe Checkout (card, bank, wallets, Affirm, Klarna… as Stripe offers).
+  STRIPE_ONLINE
+  /// In person on a Stripe Terminal reader (card_present).
+  STRIPE_TERMINAL
   CASH
   CHECK
   BANK_TRANSFER
@@ -1518,6 +1540,7 @@ enum PaymentSource {
   MANUAL
 }
 
+/// SUCCEEDED is shown as "Cleared" for checks. PENDING never counts as paid.
 enum PaymentRecordStatus {
   SUCCEEDED
   PENDING
@@ -1525,6 +1548,17 @@ enum PaymentRecordStatus {
   REFUNDED
   PARTIALLY_REFUNDED
   VOIDED
+  /// A check that bounced.
+  RETURNED
+}
+
+/// What a payment was for (separate from how it was paid).
+enum PaymentType {
+  DEPOSIT
+  FINAL_BALANCE
+  PARTIAL_PAYMENT
+  ADDITIONAL_PAYMENT
+  OTHER
 }
 
 /// Money received. Stripe payments come only from verified webhooks; manual
@@ -1542,16 +1576,29 @@ model Payment {
   amountCents           Int
   refundedCents         Int                 @default(0)
   method                PaymentMethod
+  type                  PaymentType         @default(OTHER)
   source                PaymentSource
   status                PaymentRecordStatus @default(SUCCEEDED)
   stripePaymentIntentId String?             @unique
   stripeChargeId        String?
   stripeInvoiceId       String?
   stripeCheckoutSessionId String?
+  /// Check number, transfer reference… (never card data).
   reference             String?
+  /// Bank / payer on a check (optional).
+  payerName             String?
+  /// Internal only — never shown to the customer.
   notes                 String?
   receivedAt            DateTime
+  /// Who physically received the money (free text; may differ from the admin recording it).
+  receivedBy            String?
   recordedById          String?
+  clearedAt             DateTime?
+  returnedAt            DateTime?
+  stripeTerminalReaderId String?
+  failureMessage        String?
+  /// Set when an owner allowed this payment to exceed the balance.
+  overpaymentApprovedById String?
   voidedAt              DateTime?
   voidedById            String?
   voidReason            String?
@@ -1561,6 +1608,27 @@ model Payment {
   @@index([orderId])
   @@index([customerId])
   @@index([receivedAt])
+}
+
+/// Customer emails triggered by a production-status change (sent, failed,
+/// suppressed by the admin, or skipped because another email covered it).
+model StatusNotification {
+  id            String    @id @default(cuid())
+  orderId       String
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus    String?
+  toStatus      String
+  customerId    String?
+  email         String
+  /// SENT | FAILED | SUPPRESSED | SKIPPED
+  status        String
+  error         String?
+  emailLogId    String?
+  initiatedById String?
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([orderId, createdAt])
 }
 
 /// Stripe webhook events already processed (idempotency).

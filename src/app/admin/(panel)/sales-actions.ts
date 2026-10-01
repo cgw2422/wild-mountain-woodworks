@@ -11,10 +11,10 @@ import { siteDateTime, siteDayStart } from "@/lib/site-time";
 import { resendLoggedEmail, type SendResult } from "@/lib/email/send";
 import { EMAIL_TEMPLATE_KEYS } from "@/lib/email/template-definitions";
 import { recordCustomerActivity } from "@/lib/sales/customers";
-import { createCustomInvoice, createInvoiceForOrder, resendInvoice, saveInvoiceDraft, sendInvoice, voidInvoice, type InvoiceLineInput } from "@/lib/sales/invoices";
-import { recordManualPayment, recordRefund, sendDepositPaymentRequest, voidManualPayment } from "@/lib/sales/payments";
-import { getSettings, salesFlags } from "@/lib/settings";
-import { updateOrder } from "@/lib/sales/orders";
+import { createCustomInvoice, createOrderInvoice, markBalanceDue, resendInvoice, saveInvoiceDraft, sendInvoice, voidInvoice, type InvoiceLineInput } from "@/lib/sales/invoices";
+import { markCheckCleared, markCheckReturned, recordManualPayment, recordRefund, sendDepositPaymentRequest, voidManualPayment } from "@/lib/sales/payments";
+import { resendStatusEmail, updateOrder } from "@/lib/sales/orders";
+import { cancelTerminalPayment, refreshTerminalPayment, setTerminalReader, simulateTerminalPayment, startTerminalPayment, terminalTestMode } from "@/lib/sales/terminal";
 import {
   MANUAL_QUOTE_STATUSES,
   acceptQuoteManually,
@@ -31,7 +31,7 @@ import {
   voidQuote,
 } from "@/lib/sales/quotes";
 import { voidReasonText } from "@/lib/sales/voiding";
-import { DELIVERY_STATUSES, PRODUCTION_STATUSES } from "@/lib/sales/status";
+import { DELIVERY_METHODS, PRODUCTION_STATUSES } from "@/lib/sales/status";
 import { DEPOSIT_TYPES, LINE_KINDS, MAX_LINES, MAX_LINE_QUANTITY, MAX_UNIT_PRICE_CENTS, parsePercentToBps } from "@/lib/sales/totals";
 import { emailSchema, nameSchema, phoneSchema } from "@/lib/validation/forms";
 
@@ -283,8 +283,9 @@ export const removeSalesAttachmentAction = permittedAction("sales", async (_admi
 
 const orderSchema = z.object({
   productionStatus: z.enum(PRODUCTION_STATUSES),
-  deliveryStatus: z.enum(DELIVERY_STATUSES),
   deliveryDate: z.string().trim().max(20).optional(),
+  deliveryWindow: optText(60),
+  deliveryMethod: z.enum([...DELIVERY_METHODS, ""]).optional(),
   deliveryAddress: optText(300),
   deliveryNotes: optText(1000),
   estimatedCompletion: optText(120),
@@ -292,12 +293,14 @@ const orderSchema = z.object({
   customerNotes: optText(5000),
 });
 
+/** Production stage, delivery details and notes. A status change emails the customer unless "Send email notification" is unticked. */
 export const updateOrderAction = permittedAction("sales", async (admin, orderIdArg: string, data: FormData) => {
   const orderId = idSchema.parse(orderIdArg);
   const input = orderSchema.parse({
     productionStatus: fd.str(data, "productionStatus"),
-    deliveryStatus: fd.str(data, "deliveryStatus"),
     deliveryDate: fd.str(data, "deliveryDate"),
+    deliveryWindow: fd.str(data, "deliveryWindow"),
+    deliveryMethod: fd.str(data, "deliveryMethod"),
     deliveryAddress: fd.str(data, "deliveryAddress"),
     deliveryNotes: fd.str(data, "deliveryNotes"),
     estimatedCompletion: fd.str(data, "estimatedCompletion"),
@@ -309,30 +312,50 @@ export const updateOrderAction = permittedAction("sales", async (admin, orderIdA
     deliveryDate = siteDateTime(input.deliveryDate.length === 10 ? `${input.deliveryDate}T09:00` : input.deliveryDate);
     if (!deliveryDate) throw new AdminError("Enter a valid delivery date.", { deliveryDate: "Enter a valid date." });
   }
-  await updateOrder(admin, orderId, { ...input, deliveryDate, notifyCustomer: fd.bool(data, "notifyCustomer") });
+  const r = await updateOrder(admin, orderId, { ...input, deliveryMethod: input.deliveryMethod || null, deliveryDate, notifyCustomer: fd.bool(data, "notifyCustomer") });
   refreshSales("/admin/orders", `/admin/orders/${orderId}`);
-  return { ok: true, message: fd.bool(data, "notifyCustomer") ? "Order updated and the customer was emailed." : "Order updated." };
+  if (!r.productionChanged) return { ok: true, message: "Order updated." };
+  if (r.notification === "SENT") return { ok: true, message: "Status updated and the customer was emailed." };
+  if (r.notification === "FAILED") return { ok: true, message: `Status updated — but the customer email failed${r.error ? ` (${r.error})` : ""}. Use “Resend status email”.` };
+  if (r.notification === "SUPPRESSED") return { ok: true, message: "Status updated (no email sent, as requested)." };
+  if (r.notification === "SKIPPED") return { ok: true, message: "Status updated (the email template is switched off, so nothing was sent)." };
+  return { ok: true, message: "Status updated." };
 });
 
-export const createOrderInvoiceAction = permittedAction("finance", async (admin, orderIdArg: string, kind: "DEPOSIT" | "BALANCE" | "FULL") => {
+export const resendStatusEmailAction = permittedAction("sales", async (admin, orderIdArg: string) => {
   const orderId = idSchema.parse(orderIdArg);
-  if (!["DEPOSIT", "BALANCE", "FULL"].includes(kind)) throw new AdminError("Unknown invoice type.");
-  // With online payments on, a deposit is a ready-to-pay Checkout request (no
-  // Stripe invoice); balances and other invoices start as drafts to review and send.
-  const onlineDeposit = kind === "DEPOSIT" && salesFlags(await getSettings()).onlinePayments;
-  const invoice = await prisma.$transaction((tx) => createInvoiceForOrder(tx, orderId, kind, admin.id, onlineDeposit ? { issue: true, online: true } : {}));
-  await logActivity("invoice.created", `${admin.name} created ${kind.toLowerCase()} invoice ${invoice.number}`, { actorId: admin.id, entityType: "invoice", entityId: invoice.id });
-  refreshSales(`/admin/orders/${orderId}`, "/admin/invoices");
-  return { ok: true, id: invoice.id, message: onlineDeposit ? `Deposit payment request ${invoice.number} created — use “Resend payment link” to email it.` : `Draft invoice ${invoice.number} created.` };
+  const r = await resendStatusEmail(admin, orderId);
+  refreshSales(`/admin/orders/${orderId}`);
+  if (r.status === "SENT") return { ok: true, message: "Status email sent." };
+  if (r.status === "SKIPPED") return { ok: true, message: "The email template is switched off — nothing was sent." };
+  return { ok: false, message: `The email failed${r.result?.error ? `: ${r.result.error}` : ""}. Try again in a moment.` };
 });
 
-/** Email the customer the secure deposit payment link (opens a fresh Stripe Checkout each time). */
+/** The order's one invoice (only when it has none, e.g. after voiding one). Older orders get a remaining-balance invoice. */
+export const createOrderInvoiceAction = permittedAction("finance", async (admin, orderIdArg: string) => {
+  const orderId = idSchema.parse(orderIdArg);
+  const invoice = await prisma.$transaction((tx) => createOrderInvoice(tx, orderId, admin.id));
+  await logActivity("invoice.created", `${admin.name} created invoice ${invoice.number} for the order (${invoice.kind === "FULL" ? "order invoice" : "remaining balance"})`, { actorId: admin.id, entityType: "invoice", entityId: invoice.id });
+  refreshSales(`/admin/orders/${orderId}`, "/admin/invoices");
+  return { ok: true, id: invoice.id, message: `Invoice ${invoice.number} created.` };
+});
+
+/** Request the final balance on the same invoice and email the customer the Wild Mountain invoice link. */
+export const markBalanceDueAction = permittedAction("finance", async (admin, invoiceIdArg: string) => {
+  const invoiceId = idSchema.parse(invoiceIdArg);
+  const r = await markBalanceDue(admin, invoiceId);
+  const inv = await prisma.invoice.findUnique({ where: { id: invoiceId }, select: { orderId: true } });
+  refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`, ...(inv?.orderId ? [`/admin/orders/${inv.orderId}`] : []));
+  return emailOutcome(r, "Balance marked due — the customer was emailed a link to their invoice.");
+});
+
+/** Email the customer the stable link to pay what's due now (deposit or balance). */
 export const resendDepositLinkAction = permittedAction("finance", async (admin, invoiceIdArg: string) => {
   const invoiceId = idSchema.parse(invoiceIdArg);
-  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId }, select: { kind: true, status: true, number: true, orderId: true } });
-  if (!invoice || invoice.kind !== "DEPOSIT" || ["VOID", "CANCELED", "PAID", "DRAFT"].includes(invoice.status)) throw new AdminError("There's no open deposit request to send.");
+  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId }, select: { status: true, number: true, orderId: true } });
+  if (!invoice || ["VOIDED", "CANCELED", "PAID", "DRAFT"].includes(invoice.status)) throw new AdminError("There's nothing to pay on this invoice.");
   const r = await sendDepositPaymentRequest(invoiceId);
-  await logActivity("payment.link_sent", `${admin.name} emailed the deposit payment link for ${invoice.number}`, { actorId: admin.id, entityType: "invoice", entityId: invoiceId });
+  await logActivity("payment.link_sent", `${admin.name} emailed the payment link for ${invoice.number}`, { actorId: admin.id, entityType: "invoice", entityId: invoiceId });
   refreshSales(`/admin/invoices/${invoiceId}`, ...(invoice.orderId ? [`/admin/orders/${invoice.orderId}`] : []));
   return emailOutcome(r, "Payment link emailed to the customer.");
 });
@@ -369,14 +392,14 @@ export const sendInvoiceAction = permittedAction("finance", async (admin, invoic
   const invoiceId = idSchema.parse(invoiceIdArg);
   const r = await sendInvoice(admin, invoiceId);
   refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`);
-  return emailOutcome(r.email, r.via === "stripe" ? "Invoice created in Stripe and emailed by Stripe." : "Invoice sent.");
+  return emailOutcome(r.email, "Invoice sent — the customer was emailed a link to their invoice.");
 });
 
 export const resendInvoiceAction = permittedAction("finance", async (admin, invoiceIdArg: string, reminder: boolean) => {
   const invoiceId = idSchema.parse(invoiceIdArg);
   const r = await resendInvoice(admin, invoiceId, Boolean(reminder));
   refreshSales(`/admin/invoices/${invoiceId}`);
-  return emailOutcome(r, reminder ? "Reminder sent." : "Invoice sent again.");
+  return emailOutcome(r, reminder ? "Reminder sent." : "Invoice link sent again.");
 });
 
 /** Never deleted: voided with who/when/why. Paid invoices must be refunded first. */
@@ -391,30 +414,56 @@ export const voidInvoiceAction = permittedAction("finance", async (admin, invoic
 
 /* ================================================================ payments */
 
+function paymentRefresh(invoiceId: string) {
+  refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`, "/admin/payments", "/admin/orders");
+}
+
+/** Cash, check, bank transfer or other — recorded here, never created in Stripe. */
 export const recordPaymentAction = permittedAction("finance", async (admin, invoiceIdArg: string, data: FormData) => {
   const invoiceId = idSchema.parse(invoiceIdArg);
   const amountCents = parseDollarsToCents(fd.str(data, "amount"));
   if (amountCents == null || Number.isNaN(amountCents)) throw new AdminError("Enter the amount received.", { amount: "Enter an amount." });
   const receivedAt = siteDateTime(`${fd.str(data, "receivedOn")}T12:00`);
   if (!receivedAt) throw new AdminError("Enter the date received.", { receivedOn: "Enter a date." });
-  await recordManualPayment(admin, {
+  const method = fd.str(data, "method");
+  const type = fd.opt(data, "type");
+  const p = await recordManualPayment(admin, {
     invoiceId,
     amountCents,
-    method: fd.str(data, "method"),
+    method,
+    type: type || null,
     receivedAt,
     reference: fd.opt(data, "reference")?.slice(0, 120) ?? null,
+    payerName: fd.opt(data, "payerName")?.slice(0, 120) ?? null,
+    receivedBy: fd.opt(data, "receivedBy")?.slice(0, 120) ?? admin.name,
     notes: fd.opt(data, "notes")?.slice(0, 1000) ?? null,
     sendReceipt: fd.bool(data, "sendReceipt"),
+    checkStatus: fd.str(data, "checkStatus") === "SUCCEEDED" ? "SUCCEEDED" : "PENDING",
+    allowOverpayment: fd.bool(data, "allowOverpayment"),
   });
-  refreshSales("/admin/invoices", `/admin/invoices/${invoiceId}`, "/admin/payments", "/admin/orders");
-  return { ok: true, message: "Payment recorded." };
+  paymentRefresh(invoiceId);
+  return { ok: true, message: p.status === "PENDING" ? "Check recorded as pending — mark it cleared when it clears." : "Payment recorded." };
+});
+
+export const markCheckClearedAction = permittedAction("finance", async (admin, paymentIdArg: string) => {
+  const paymentId = idSchema.parse(paymentIdArg);
+  await markCheckCleared(admin, paymentId, true);
+  refreshSales("/admin/invoices", "/admin/payments", "/admin/orders");
+  return { ok: true, message: "Check marked cleared." };
+});
+
+export const markCheckReturnedAction = permittedAction("finance", async (admin, paymentIdArg: string, data: FormData) => {
+  const reason = z.string().trim().min(3, "Give a short reason.").max(300).parse(fd.str(data, "reason"));
+  await markCheckReturned(admin, idSchema.parse(paymentIdArg), reason);
+  refreshSales("/admin/invoices", "/admin/payments", "/admin/orders");
+  return { ok: true, message: "Check marked returned — it no longer counts toward the balance." };
 });
 
 export const voidPaymentAction = permittedAction("finance", async (admin, paymentIdArg: string, data: FormData) => {
   const reason = z.string().trim().min(3, "Give a short reason.").max(300).parse(fd.str(data, "reason"));
   await voidManualPayment(admin, idSchema.parse(paymentIdArg), reason);
   refreshSales("/admin/invoices", "/admin/payments", "/admin/orders");
-  return { ok: true, message: "Payment voided (kept in the history)." };
+  return { ok: true, message: "Payment voided (kept in the history). Record the correct amount if needed." };
 });
 
 export const recordRefundAction = permittedAction("finance", async (admin, paymentIdArg: string, data: FormData) => {
@@ -424,6 +473,51 @@ export const recordRefundAction = permittedAction("finance", async (admin, payme
   await recordRefund(admin, idSchema.parse(paymentIdArg), amountCents, reason);
   refreshSales("/admin/invoices", "/admin/payments", "/admin/orders");
   return { ok: true, message: "Refund recorded." };
+});
+
+/* ---------------------------------------------------------------- Stripe Terminal */
+
+/** Send an in-person card payment to the reader. Recorded as pending until Stripe confirms it. */
+export const startTerminalPaymentAction = permittedAction("finance", async (admin, invoiceIdArg: string, data: FormData) => {
+  const invoiceId = idSchema.parse(invoiceIdArg);
+  const raw = fd.str(data, "amount");
+  const amountCents = raw ? parseDollarsToCents(raw) : null;
+  if (raw && (amountCents == null || Number.isNaN(amountCents))) throw new AdminError("Enter a valid amount.", { amount: "Enter an amount." });
+  await startTerminalPayment(admin, invoiceId, { amountCents, readerId: fd.opt(data, "readerId") });
+  paymentRefresh(invoiceId);
+  return { ok: true, message: "Sent to the reader — ask the customer to tap, insert or swipe their card. The payment is recorded once Stripe confirms it." };
+});
+
+export const refreshTerminalPaymentAction = permittedAction("finance", async (_admin, paymentIdArg: string) => {
+  const p = await refreshTerminalPayment(idSchema.parse(paymentIdArg));
+  if (p.invoiceId) paymentRefresh(p.invoiceId);
+  return { ok: true, message: p.status === "SUCCEEDED" ? "Stripe confirmed the payment." : p.status === "FAILED" ? `The payment didn't go through${p.failureMessage ? `: ${p.failureMessage}` : ""}.` : `Still waiting on the reader${p.failureMessage ? ` (last attempt: ${p.failureMessage})` : ""}.` };
+});
+
+export const cancelTerminalPaymentAction = permittedAction("finance", async (admin, paymentIdArg: string) => {
+  const paymentId = idSchema.parse(paymentIdArg);
+  const p = await prisma.payment.findUnique({ where: { id: paymentId }, select: { invoiceId: true } });
+  await cancelTerminalPayment(admin, paymentId);
+  if (p?.invoiceId) paymentRefresh(p.invoiceId);
+  return { ok: true, message: "In-person payment canceled." };
+});
+
+/** Test mode only. */
+export const simulateTerminalPaymentAction = permittedAction("finance", async (_admin, paymentIdArg: string) => {
+  if (!terminalTestMode()) throw new AdminError("Simulated payments are only available with a Stripe test-mode key.");
+  const p = await simulateTerminalPayment(idSchema.parse(paymentIdArg));
+  if (p.invoiceId) paymentRefresh(p.invoiceId);
+  return { ok: true, message: p.status === "SUCCEEDED" ? "Simulated card accepted — Stripe confirmed the payment." : "Simulated card presented; refresh in a moment." };
+});
+
+/** Owner/Admin: which reader in-person payments go to. */
+export const setTerminalReaderAction = adminAction(async (admin, data: FormData) => {
+  const readerId = fd.opt(data, "readerId");
+  if (readerId && !/^tmr_[A-Za-z0-9]+$/.test(readerId)) throw new AdminError("Choose a reader.", { readerId: "Choose a reader." });
+  await setTerminalReader(admin, readerId || null);
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin", "layout");
+  return { ok: true, message: readerId ? "Reader saved." : "Reader cleared." };
 });
 
 /* ================================================================ customers */

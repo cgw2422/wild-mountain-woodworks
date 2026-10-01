@@ -69,12 +69,12 @@ async function salesOverview(alertDays: number, finance: boolean) {
   const monthStart = siteDayStart(`${siteDateInput(now).slice(0, 7)}-01`) ?? now;
   const [awaiting, awaitingDeposit, inProduction, readyForDelivery, staleNew, expiring, pastDue, draftInvoices, undated, failedEmails, unpaid, received] = await Promise.all([
     prisma.quoteRequest.count({ where: { status: { in: QUOTE_AWAITING_STATUSES }, archivedAt: null } }),
-    prisma.order.count({ where: { productionStatus: { in: ["QUOTE_ACCEPTED", "AWAITING_DEPOSIT"] } } }),
+    prisma.order.count({ where: { productionStatus: "AWAITING_DEPOSIT" } }),
     prisma.order.count({ where: { productionStatus: { in: PRODUCTION_ACTIVE } } }),
     prisma.order.count({ where: { productionStatus: "READY_FOR_DELIVERY" } }),
     prisma.quoteRequest.count({ where: { status: "NEW", archivedAt: null, createdAt: { lt: staleBefore } } }),
     prisma.quoteRequest.count({ where: { status: { in: QUOTE_AWAITING_STATUSES }, archivedAt: null, revisions: { some: { status: "SENT", expiresAt: { gt: now, lt: soon } } } } }),
-    finance ? prisma.invoice.count({ where: { status: "PAST_DUE" } }) : 0,
+    finance ? prisma.invoice.count({ where: { status: "BALANCE_DUE", balanceDueAt: { lt: new Date(now.getTime() - 14 * 86_400_000) } } }) : 0,
     finance ? prisma.invoice.count({ where: { status: "DRAFT", createdAt: { lt: new Date(now.getTime() - 86_400_000) } } }) : 0,
     prisma.order.count({ where: { productionStatus: "READY_FOR_DELIVERY", deliveryDate: null } }),
     prisma.emailLog.count({ where: { status: "FAILED", createdAt: { gt: new Date(now.getTime() - 14 * 86_400_000) } } }),
@@ -85,7 +85,7 @@ async function salesOverview(alertDays: number, finance: boolean) {
   const alerts = [
     staleNew ? { label: `${plural(staleNew, "quote request")} waiting more than ${plural(alertDays, "day")}`, href: "/admin/quotes?status=action" } : null,
     expiring ? { label: `${plural(expiring, "sent quote")} expiring in the next 3 days`, href: "/admin/quotes?status=waiting" } : null,
-    pastDue ? { label: `${plural(pastDue, "invoice")} past due`, href: "/admin/invoices?status=pastdue" } : null,
+    pastDue ? { label: `${plural(pastDue, "balance")} requested over 2 weeks ago and still unpaid`, href: "/admin/invoices?status=balance" } : null,
     draftInvoices ? { label: `${plural(draftInvoices, "draft invoice")} not sent yet`, href: "/admin/invoices?status=draft" } : null,
     undated ? { label: `${plural(undated, "order")} ready for delivery without a delivery date`, href: "/admin/orders?status=delivery" } : null,
     failedEmails ? { label: `${plural(failedEmails, "email")} failed to send recently`, href: "/admin/settings/emails#log" } : null,

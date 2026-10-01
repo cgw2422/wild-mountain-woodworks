@@ -55,12 +55,13 @@ export function quoteListWhere(tabKey: string, q: string): Prisma.QuoteRequestWh
 }
 
 export const INVOICE_TABS: ListTab<Prisma.InvoiceWhereInput>[] = [
-  { key: "", label: "Active", where: { status: { notIn: ["VOID", "CANCELED"] } } },
+  { key: "", label: "Active", where: { status: { notIn: ["VOIDED", "CANCELED"] } } },
   { key: "draft", label: "Drafts", where: { status: "DRAFT" } },
-  { key: "unpaid", label: "Unpaid", where: { status: { in: ["SENT", "OPEN", "PARTIALLY_PAID", "PAST_DUE"] as InvoiceStatus[] } } },
-  { key: "pastdue", label: "Past due", where: { status: "PAST_DUE" } },
+  { key: "deposit", label: "Deposit due", where: { status: "DEPOSIT_DUE" } },
+  { key: "balance", label: "Balance due", where: { status: "BALANCE_DUE" } },
+  { key: "unpaid", label: "Unpaid", where: { status: { in: ["SENT", "OPEN", "DEPOSIT_DUE", "PARTIALLY_PAID", "BALANCE_DUE", "PAST_DUE"] as InvoiceStatus[] } } },
   { key: "paid", label: "Paid", where: { status: "PAID" } },
-  { key: "void", label: "Voided", where: { status: { in: ["VOID", "CANCELED"] } } },
+  { key: "void", label: "Voided", where: { status: { in: ["VOIDED", "CANCELED"] as InvoiceStatus[] } } },
   { key: "all", label: "All", where: {} },
 ];
 

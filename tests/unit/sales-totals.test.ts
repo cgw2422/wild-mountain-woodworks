@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeTotals, depositFor, formatBps, lineTotal, parsePercentToBps } from "@/lib/sales/totals";
 import { renderEmail, fill } from "@/lib/email/render";
 import { isTokenShape, newCustomerToken } from "@/lib/sales/tokens";
-import { invoiceStatusFor, netPaid, orderPaymentStatusFor } from "@/lib/sales/ledger";
+import { invoiceMoney, invoiceStatusFor, netPaid, orderPaymentStatusFor } from "@/lib/sales/ledger";
 import { EMAIL_TEMPLATES } from "@/lib/email/template-definitions";
 
 describe("quote totals (integer cents)", () => {
@@ -62,20 +62,33 @@ describe("payment state is derived, not typed", () => {
     expect(netPaid({ amountCents: 1000, refundedCents: 0, status: "VOIDED" })).toBe(0);
     expect(netPaid({ amountCents: 1000, refundedCents: 0, status: "PENDING" })).toBe(0);
   });
-  it("derives invoice and order status", () => {
-    const inv = { status: "SENT" as const, totalCents: 1000, dueDate: new Date("2026-01-01"), sentAt: new Date(), stripeInvoiceId: null };
-    expect(invoiceStatusFor(inv, 1000)).toBe("PAID");
-    expect(invoiceStatusFor(inv, 10)).toBe("PARTIALLY_PAID");
-    expect(invoiceStatusFor(inv, 0, new Date("2026-02-01"))).toBe("PAST_DUE");
-    expect(invoiceStatusFor({ ...inv, dueDate: null, stripeInvoiceId: "in_1" }, 0)).toBe("OPEN");
-    expect(invoiceStatusFor({ ...inv, status: "VOID" }, 0)).toBe("VOID");
+  it("derives invoice and order status from the balance", () => {
+    const inv = { status: "OPEN" as const, totalCents: 1000, depositCents: 500, balanceDueAt: null };
+    expect(invoiceStatusFor(inv, 0)).toBe("DEPOSIT_DUE");
+    expect(invoiceStatusFor(inv, 499)).toBe("DEPOSIT_DUE");
+    expect(invoiceStatusFor(inv, 500)).toBe("PARTIALLY_PAID");
+    expect(invoiceStatusFor({ ...inv, balanceDueAt: new Date() }, 500)).toBe("BALANCE_DUE");
+    expect(invoiceStatusFor({ ...inv, balanceDueAt: new Date() }, 1000)).toBe("PAID");
+    expect(invoiceStatusFor({ ...inv, depositCents: 0 }, 0)).toBe("OPEN");
+    expect(invoiceStatusFor({ ...inv, status: "VOIDED" }, 0)).toBe("VOIDED");
+    expect(invoiceStatusFor({ ...inv, status: "DRAFT" }, 0)).toBe("DRAFT");
     const order = { productionStatus: "AWAITING_DEPOSIT" as const, totalCents: 1000, depositCents: 500 };
-    expect(orderPaymentStatusFor(order, 0, false)).toBe("DEPOSIT_DUE");
-    expect(orderPaymentStatusFor(order, 500, false)).toBe("PARTIALLY_PAID");
-    expect(orderPaymentStatusFor(order, 1000, false)).toBe("PAID");
-    expect(orderPaymentStatusFor({ ...order, depositCents: 0 }, 0, false)).toBe("UNPAID");
-    expect(orderPaymentStatusFor(order, 0, true)).toBe("REFUNDED");
-    expect(orderPaymentStatusFor({ ...order, productionStatus: "CANCELED" }, 0, false)).toBe("CANCELED");
+    expect(orderPaymentStatusFor(order, 0, false, false)).toBe("DEPOSIT_DUE");
+    expect(orderPaymentStatusFor(order, 500, false, false)).toBe("PARTIALLY_PAID");
+    expect(orderPaymentStatusFor(order, 500, false, true)).toBe("BALANCE_DUE");
+    expect(orderPaymentStatusFor(order, 1000, false, true)).toBe("PAID");
+    expect(orderPaymentStatusFor({ ...order, depositCents: 0 }, 0, false, false)).toBe("UNPAID");
+    expect(orderPaymentStatusFor(order, 0, true, false)).toBe("REFUNDED");
+    expect(orderPaymentStatusFor({ ...order, productionStatus: "CANCELED" }, 0, false, false)).toBe("CANCELED");
+  });
+  it("computes what's due now, holding pending payments against the balance", () => {
+    const inv = { status: "OPEN" as const, totalCents: 200000, depositCents: 100000, balanceDueAt: null, amountPaidCents: 0, pendingCents: 0 };
+    expect(invoiceMoney(inv)).toMatchObject({ remainingCents: 200000, collectibleCents: 200000, dueNowCents: 100000, dueNowType: "DEPOSIT" });
+    expect(invoiceMoney({ ...inv, amountPaidCents: 100000 })).toMatchObject({ remainingCents: 100000, dueNowCents: 0, dueNowType: null });
+    expect(invoiceMoney({ ...inv, amountPaidCents: 100000, balanceDueAt: new Date() })).toMatchObject({ dueNowCents: 100000, dueNowType: "FINAL_BALANCE" });
+    // A $50,000 check waiting to clear: still owed, but not collectible twice.
+    expect(invoiceMoney({ ...inv, amountPaidCents: 100000, pendingCents: 50000, balanceDueAt: new Date() })).toMatchObject({ remainingCents: 100000, collectibleCents: 50000, dueNowCents: 50000 });
+    expect(invoiceMoney({ ...inv, amountPaidCents: 200000, balanceDueAt: new Date() })).toMatchObject({ remainingCents: 0, dueNowCents: 0 });
   });
 });
 

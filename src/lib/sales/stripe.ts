@@ -49,6 +49,35 @@ export interface CreateCheckoutInput {
   metadata: Record<string, string>;
 }
 
+/** A Stripe Terminal reader (smart reader driven from the server). */
+export interface TerminalReaderInfo {
+  id: string;
+  label: string;
+  /** online | offline (null if Stripe didn't say) */
+  status: string | null;
+  deviceType: string | null;
+  serialNumber: string | null;
+  locationId: string | null;
+  /** The reader's current action, e.g. processing our PaymentIntent. */
+  action: { type: string | null; status: string | null; failureMessage: string | null; paymentIntentId: string | null } | null;
+}
+
+export interface PaymentIntentInfo {
+  id: string;
+  /** requires_payment_method | requires_confirmation | requires_capture | processing | succeeded | canceled … */
+  status: string;
+  amount: number;
+  failureMessage: string | null;
+  latestChargeId: string | null;
+}
+
+export interface CreateTerminalPaymentInput {
+  idempotencyKey: string;
+  amountCents: number;
+  description: string;
+  metadata: Record<string, string>;
+}
+
 export interface InvoicingProvider {
   readonly name: string;
   ensureCustomer(c: { customerId: string; name: string; email: string; stripeCustomerId: string | null }): Promise<string>;
@@ -71,6 +100,66 @@ export interface InvoicingProvider {
   retrieveCheckoutSession(id: string): Promise<CheckoutSessionInfo>;
   /** Close an open session so it can't be paid (e.g. paid another way). */
   expireCheckoutSession(id: string): Promise<void>;
+  /* Stripe Terminal (in-person card, card_present). Never saves the card. */
+  listTerminalReaders(): Promise<TerminalReaderInfo[]>;
+  retrieveTerminalReader(id: string): Promise<TerminalReaderInfo>;
+  createTerminalPaymentIntent(c: CreateTerminalPaymentInput): Promise<PaymentIntentInfo>;
+  /** Hand the PaymentIntent to the reader; the customer taps/inserts their card there. */
+  processOnReader(readerId: string, paymentIntentId: string, idempotencyKey: string): Promise<TerminalReaderInfo>;
+  cancelReaderAction(readerId: string): Promise<void>;
+  retrievePaymentIntent(id: string): Promise<PaymentIntentInfo>;
+  cancelPaymentIntent(id: string): Promise<void>;
+  /** Test mode only: simulate the customer presenting a card on a simulated reader. */
+  simulateReaderPayment(readerId: string): Promise<void>;
+}
+
+/**
+ * PaymentIntent parameters for an in-person (Terminal) payment: card_present,
+ * captured automatically once the reader approves. Never sets
+ * setup_future_usage or a customer — the card is not saved.
+ */
+export function terminalPaymentIntentParams(c: CreateTerminalPaymentInput): Record<string, string> {
+  const params: Record<string, string> = {
+    amount: String(c.amountCents),
+    currency: "usd",
+    "payment_method_types[0]": "card_present",
+    capture_method: "automatic",
+    description: c.description.slice(0, 500),
+  };
+  for (const [k, v] of Object.entries(c.metadata)) params[`metadata[${k}]`] = v;
+  return params;
+}
+
+function toReaderInfo(o: StripeObject): TerminalReaderInfo {
+  const action = (o.action ?? null) as (Record<string, unknown> & { process_payment_intent?: { payment_intent?: unknown } }) | null;
+  const pi = action?.process_payment_intent?.payment_intent;
+  return {
+    id: String(o.id),
+    label: typeof o.label === "string" && o.label ? o.label : String(o.id),
+    status: typeof o.status === "string" ? o.status : null,
+    deviceType: typeof o.device_type === "string" ? o.device_type : null,
+    serialNumber: typeof o.serial_number === "string" ? o.serial_number : null,
+    locationId: typeof o.location === "string" ? o.location : null,
+    action: action
+      ? {
+          type: typeof action.type === "string" ? action.type : null,
+          status: typeof action.status === "string" ? action.status : null,
+          failureMessage: typeof action.failure_message === "string" ? action.failure_message : null,
+          paymentIntentId: typeof pi === "string" ? pi : pi && typeof pi === "object" && "id" in pi ? String((pi as { id: unknown }).id) : null,
+        }
+      : null,
+  };
+}
+
+function toPaymentIntentInfo(o: StripeObject): PaymentIntentInfo {
+  const err = (o.last_payment_error ?? null) as { message?: string } | null;
+  return {
+    id: String(o.id),
+    status: String(o.status ?? ""),
+    amount: Number(o.amount ?? 0),
+    failureMessage: err?.message ?? null,
+    latestChargeId: typeof o.latest_charge === "string" ? o.latest_charge : null,
+  };
 }
 
 function toSessionInfo(o: StripeObject): CheckoutSessionInfo {
@@ -195,6 +284,47 @@ class StripeInvoicingProvider implements InvoicingProvider {
 
   async expireCheckoutSession(id: string) {
     await this.call(`checkout/sessions/${encodeURIComponent(id)}/expire`, {}, `wm-checkout-expire-${id}`);
+  }
+
+  private async get(path: string): Promise<StripeObject> {
+    const res = await fetch(`https://api.stripe.com/v1/${path}`, { headers: { Authorization: `Bearer ${this.secretKey}` } });
+    const json = (await res.json().catch(() => ({}))) as StripeObject;
+    if (!res.ok) throw new Error(`Stripe: ${json.error?.message ?? `HTTP ${res.status}`}`);
+    return json;
+  }
+
+  async listTerminalReaders() {
+    const list = (await this.get("terminal/readers?limit=100")) as StripeObject & { data?: StripeObject[] };
+    return (list.data ?? []).map(toReaderInfo);
+  }
+
+  async retrieveTerminalReader(id: string) {
+    return toReaderInfo(await this.get(`terminal/readers/${encodeURIComponent(id)}`));
+  }
+
+  async createTerminalPaymentIntent(c: CreateTerminalPaymentInput) {
+    return toPaymentIntentInfo(await this.call("payment_intents", terminalPaymentIntentParams(c), c.idempotencyKey));
+  }
+
+  async processOnReader(readerId: string, paymentIntentId: string, idempotencyKey: string) {
+    return toReaderInfo(await this.call(`terminal/readers/${encodeURIComponent(readerId)}/process_payment_intent`, { payment_intent: paymentIntentId }, idempotencyKey));
+  }
+
+  async cancelReaderAction(readerId: string) {
+    await this.call(`terminal/readers/${encodeURIComponent(readerId)}/cancel_action`, {}, `wm-reader-cancel-${readerId}-${Date.now()}`);
+  }
+
+  async retrievePaymentIntent(id: string) {
+    return toPaymentIntentInfo(await this.get(`payment_intents/${encodeURIComponent(id)}`));
+  }
+
+  async cancelPaymentIntent(id: string) {
+    await this.call(`payment_intents/${encodeURIComponent(id)}/cancel`, {}, `wm-pi-cancel-${id}`);
+  }
+
+  async simulateReaderPayment(readerId: string) {
+    if (!this.secretKey.startsWith("sk_test_") && !this.secretKey.startsWith("rk_test_")) throw new Error("Simulated payments are only available with a test-mode key.");
+    await this.call(`test_helpers/terminal/readers/${encodeURIComponent(readerId)}/present_payment_method`, {}, `wm-reader-sim-${readerId}-${Date.now()}`);
   }
 }
 

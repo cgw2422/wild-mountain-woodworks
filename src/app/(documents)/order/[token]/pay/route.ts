@@ -1,6 +1,6 @@
 import { clientIpFromHeaders } from "@/lib/auth/client-ip";
 import { rateLimit } from "@/lib/rate-limit";
-import { startDepositCheckout } from "@/lib/sales/checkout";
+import { startOrderCheckout } from "@/lib/sales/checkout";
 import { isTokenShape } from "@/lib/sales/tokens";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
   const ip = clientIpFromHeaders(request.headers);
   if (!(await rateLimit(`deposit-pay:${ip}`, 20, 600)).allowed) return back(`/order/${token}?payment=limited`);
 
-  const result = await startDepositCheckout(token);
+  const result = await startOrderCheckout(token);
   switch (result.kind) {
     case "redirect":
       // Only ever hand the visitor to Stripe's own HTTPS page.

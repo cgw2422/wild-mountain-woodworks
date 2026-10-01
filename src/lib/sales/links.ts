@@ -7,6 +7,8 @@ export const customerLinks = {
   order: (token: string) => siteUrl(`/order/${token}`),
   /** Opens (or reuses) a Stripe Checkout for the unpaid deposit. */
   depositPay: (token: string) => siteUrl(`/order/${token}/pay`),
+  /** Opens (or reuses) a Stripe Checkout for whatever is due on the invoice. */
+  invoicePay: (token: string) => siteUrl(`/invoice/${token}/pay`),
 };
 
 export const adminLinks = {

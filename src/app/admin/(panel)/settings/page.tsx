@@ -18,6 +18,8 @@ import { AdminLinkButton, Badge, Card, PageHeader, formatDate } from "@/componen
 import { editorMediaSelect } from "../pages/data";
 import { defaultFinancingText } from "@/lib/payments/messaging";
 import { stripePublishableKey } from "@/lib/sales/stripe";
+import { listTerminalReaders } from "@/lib/sales/terminal";
+import { setTerminalReaderAction } from "../sales-actions";
 import { saveSettings } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -48,6 +50,7 @@ export default async function SettingsPage() {
   await getSettings(); // ensures the row exists
   const settings = await prisma.siteSetting.findUniqueOrThrow({ where: { id: "default" }, include: { defaultOgImage: { select: editorMediaSelect } } });
   const flags = salesFlags(settings);
+  const terminal = flags.stripeConfigured ? await listTerminalReaders() : { readers: [], error: null };
   const storage = storageStatus();
   const email = emailStatus();
   const s = (v: string | null) => v ?? "";
@@ -68,6 +71,7 @@ export default async function SettingsPage() {
           ["quotes", "Pricing & quotes"],
           ["sales", "Quotes & invoices"],
           ["payments", "Payments"],
+          ["terminal", "Terminal"],
           ["features", "Features"],
           ["security", "Security"],
           ["system", "System status"],
@@ -179,16 +183,8 @@ export default async function SettingsPage() {
               <TextInput name="defaultDepositPercent" label="Deposit %" inputMode="decimal" defaultValue={formatBps(settings.defaultDepositPercentBps).replace("%", "")} help="Used when the default is a percentage." />
               <TextInput name="defaultDepositAmount" label="Deposit amount ($)" inputMode="decimal" defaultValue={centsToDollarInput(settings.defaultDepositAmountCents)} help="Used when the default is a fixed amount." />
             </div>
-            <Select
-              name="invoiceEmailMode"
-              label="Who emails Stripe invoices?"
-              defaultValue={settings.invoiceEmailMode}
-              options={[
-                { value: "WILD_MOUNTAIN", label: "Wild Mountain — our branded email with the Stripe payment link (recommended)" },
-                { value: "STRIPE", label: "Stripe — Stripe's own invoice email" },
-              ]}
-              help="Only applies when online payments (Stripe) are on. Without Stripe, Wild Mountain always sends the invoice email."
-            />
+            {/* Invoices are emailed by Wild Mountain with a link to the invoice page (Stripe Invoicing isn't used for new invoices). */}
+            <input type="hidden" name="invoiceEmailMode" value={settings.invoiceEmailMode} />
             <TextArea name="defaultQuoteTerms" label="Default quote terms" rows={7} defaultValue={s(settings.defaultQuoteTerms)} maxLength={20000} help="Copied onto every new quote; editable per quote. Customers see these." />
             <TextArea name="paymentInstructions" label="Offline payment instructions" rows={4} defaultValue={s(settings.paymentInstructions)} maxLength={2000} help="Shown on invoices and invoice emails when online payments are off, e.g. who to make checks payable to, or bank transfer details." />
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-100 pt-4">
@@ -238,6 +234,50 @@ export default async function SettingsPage() {
           </ActionForm>
         </Card>
 
+        <Card
+          id="terminal"
+          title="Payments → Terminal (in-person card)"
+          description="Take card payments in person (at the shop or on delivery) on a Stripe Terminal smart reader. Register readers in your Stripe Dashboard (Terminal → Readers); pick the one to use here. Your Stripe secret key never leaves the server."
+        >
+          {!flags.stripeConfigured ? (
+            <p className="text-sm text-neutral-600">Stripe isn&apos;t configured yet (STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET).</p>
+          ) : terminal.error ? (
+            <p className="rounded bg-amber-50 p-3 text-sm text-amber-900">Couldn&apos;t load readers from Stripe: {terminal.error}</p>
+          ) : (
+            <div className="space-y-4">
+              {terminal.readers.length ? (
+                <ul className="divide-y divide-neutral-100 rounded border border-neutral-200 text-sm">
+                  {terminal.readers.map((r) => (
+                    <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                      <span>
+                        <span className="font-medium text-neutral-900">{r.label}</span>
+                        <span className="ml-2 font-mono text-xs text-neutral-500">{r.id}</span>
+                        <span className="block text-xs text-neutral-500">{[r.deviceType, r.serialNumber, r.locationId ? `location ${r.locationId}` : null].filter(Boolean).join(" · ")}</span>
+                      </span>
+                      <span className="flex items-center gap-2">
+                        {settings.terminalReaderId === r.id ? <Badge tone="blue">Selected</Badge> : null}
+                        <Badge tone={r.status === "online" ? "green" : r.status === "offline" ? "red" : "neutral"}>{r.status ?? "unknown"}</Badge>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-neutral-600">No readers registered in this Stripe account yet.</p>
+              )}
+              <ActionForm action={setTerminalReaderAction} className="flex flex-wrap items-end gap-3">
+                <Select
+                  name="readerId"
+                  label="Reader for in-person payments"
+                  defaultValue={settings.terminalReaderId ?? ""}
+                  options={[{ value: "", label: "None" }, ...terminal.readers.map((r) => ({ value: r.id, label: `${r.label} (${r.status ?? "unknown"})` }))]}
+                  wrapperClassName="min-w-[16rem]"
+                />
+                <SubmitButton>Save reader</SubmitButton>
+              </ActionForm>
+            </div>
+          )}
+        </Card>
+
         <Card id="features" title="Features" description="Switch parts of the site on or off. Changes take effect immediately.">
           <ActionForm action={saveSettings.bind(null, "features")} className="space-y-5">
             <Toggle
@@ -269,7 +309,7 @@ export default async function SettingsPage() {
                 name="stripeInvoicingEnabled"
                 label="Online payments (Stripe)"
                 defaultChecked={settings.stripeInvoicingEnabled}
-                description="Customers pay the deposit by card through Stripe Checkout as soon as they accept a quote, and later invoices (such as the final balance) are sent through Stripe's hosted invoice page. Cards are never saved. There is no cart; manual payments (cash, check, bank transfer) always work."
+                description="Customers pay the deposit through Stripe Checkout as soon as they accept a quote, and the final balance the same way from their Wild Mountain invoice once you mark it due. Wild Mountain's invoice is the record — no separate Stripe invoices. Cards are never saved. Cash, checks, transfers and in-person card (Stripe Terminal) are recorded on the invoice."
               />
               <div className="mt-4 rounded bg-neutral-50 p-3 text-sm" role="note">
                 <p className="font-medium text-neutral-900">

@@ -125,14 +125,14 @@ describe.skipIf(!hasTestDb)("sales admin actions", () => {
     const accepted = await sales.acceptQuoteManuallyAction(quote.id, form({ note: "Accepted by phone" }));
     expect(accepted).toMatchObject({ ok: true, id: expect.any(String) });
     const invoice = await prisma.invoice.findFirstOrThrow({ where: { orderId: accepted.id } });
-    // The deposit request is issued at acceptance — there's nothing to "send"; resending emails it again.
-    expect(invoice).toMatchObject({ kind: "DEPOSIT", status: "SENT" });
+    // The order's one invoice is issued at acceptance — there's nothing to "send"; resending emails the link again.
+    expect(invoice).toMatchObject({ kind: "FULL", status: "DEPOSIT_DUE", depositCents: 60000, totalCents: 120000 });
     expect(await sales.sendInvoiceAction(invoice.id)).toMatchObject({ ok: false, message: expect.stringMatching(/already been sent/) });
     expect(await sales.resendInvoiceAction(invoice.id, false)).toMatchObject({ ok: true });
     expect(await sales.recordPaymentAction(invoice.id, form({ amount: "abc", method: "CASH", receivedOn: "2026-10-01" }))).toMatchObject({ ok: false, fieldErrors: { amount: expect.any(String) } });
-    expect(await sales.recordPaymentAction(invoice.id, form({ amount: "600", method: "CHECK", receivedOn: "2026-10-01", reference: "1042" }))).toMatchObject({ ok: true });
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "PAID" });
-    expect(await prisma.order.findUniqueOrThrow({ where: { id: accepted.id } })).toMatchObject({ productionStatus: "DEPOSIT_PAID" });
+    expect(await sales.recordPaymentAction(invoice.id, form({ amount: "600", method: "CHECK", receivedOn: "2026-10-01", reference: "1042", checkStatus: "SUCCEEDED" }))).toMatchObject({ ok: true });
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "PARTIALLY_PAID", amountPaidCents: 60000 });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: accepted.id } })).toMatchObject({ productionStatus: "ORDER_CONFIRMED" });
     // Audit trail for pricing and payments, never secrets.
     const audit = await prisma.activityLog.findMany({ select: { type: true, message: true } });
     expect(audit.map((a) => a.type)).toEqual(expect.arrayContaining(["quote.sent", "quote.accepted", "invoice.sent", "payment.recorded"]));

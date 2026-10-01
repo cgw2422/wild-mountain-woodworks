@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { parseSnapshot } from "@/lib/pricing/snapshot";
 import { siteDateLong } from "@/lib/site-time";
-import { DELIVERY_STATUS_LABELS, PRODUCTION_STATUS_LABELS } from "@/lib/sales/status";
+import { PRODUCTION_STATUS_LABELS, deliveryMethodLabel } from "@/lib/sales/status";
 import { Logo } from "@/components/brand/Logo";
 import { PrintButton } from "@/components/documents/PrintButton";
 
@@ -47,10 +47,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         </div>
         <div>
           <p className="font-semibold">Delivery</p>
-          <p>
-            {DELIVERY_STATUS_LABELS[order.deliveryStatus]}
-            {order.deliveryDate ? ` · ${siteDateLong(order.deliveryDate)}` : ""}
-          </p>
+          <p>{order.deliveryDate ? [siteDateLong(order.deliveryDate), order.deliveryWindow, deliveryMethodLabel(order.deliveryMethod)].filter(Boolean).join(" · ") : "Not scheduled"}</p>
           <p className="whitespace-pre-line">{order.deliveryAddress ?? "—"}</p>
         </div>
         <div>

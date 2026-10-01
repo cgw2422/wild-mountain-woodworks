@@ -55,6 +55,8 @@ export async function sendTemplateEmail(opts: {
   actionUrl?: string | null;
   links?: EmailLinks;
   replyTo?: string | null;
+  /** Button text used if the editable template has none — keeps a required link (e.g. "View Your Order") from being edited away. */
+  requiredButton?: string;
 }): Promise<SendResult> {
   try {
     if (!opts.to) return { status: "SKIPPED", logId: null };
@@ -69,7 +71,7 @@ export async function sendTemplateEmail(opts: {
       subject: template.subject,
       heading: template.heading,
       body: template.body,
-      buttonLabel: template.buttonLabel,
+      buttonLabel: template.buttonLabel?.trim() || (opts.actionUrl ? (opts.requiredButton ?? null) : null),
       actionUrl: opts.actionUrl,
       vars,
       brand: { businessName: settings.businessName, logoUrl: siteUrl("/brand/wild-mountain-horizontal-dark.png"), siteUrl: siteUrl("/"), footer: [settings.businessName, settings.email, settings.phone].filter(Boolean).join(" · ") },

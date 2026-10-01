@@ -38,7 +38,7 @@ export default async function CustomerDetailPage({ params }: Props) {
     },
   });
   if (!c) notFound();
-  const lifetime = c.invoices.reduce((s, i) => s + (["VOID", "CANCELED"].includes(i.status) ? 0 : i.amountPaidCents), 0);
+  const lifetime = c.invoices.reduce((s, i) => s + (["VOIDED", "CANCELED"].includes(i.status) ? 0 : i.amountPaidCents), 0);
 
   return (
     <>

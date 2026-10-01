@@ -12,7 +12,6 @@ const { prisma } = await import("@/lib/db");
 const { createSignedInAdmin, resetRequest, jar } = await import("../support/next-request");
 const { createConfigurationQuote } = await import("@/lib/services/submissions");
 const quotes = await import("@/lib/sales/quotes");
-const invoices = await import("@/lib/sales/invoices");
 const payments = await import("@/lib/sales/payments");
 const checkout = await import("@/lib/sales/checkout");
 const { customerOrderView, loadCustomerQuote } = await import("@/lib/sales/views");
@@ -85,7 +84,8 @@ async function acceptOnline(deposit: Partial<RevisionInput> = {}) {
 }
 
 const pay = (token: string, query = "") => payRoute.GET(new Request(`http://localhost/order/${token}/pay${query}`), { params: Promise.resolve({ token }) });
-const depositOf = (orderId: string) => prisma.invoice.findFirstOrThrow({ where: { orderId, kind: "DEPOSIT" } });
+/** The order's one invoice (the deposit is paid against it). */
+const depositOf = (orderId: string) => prisma.invoice.findFirstOrThrow({ where: { orderId } });
 
 function signed(event: unknown) {
   const body = JSON.stringify(event);
@@ -165,7 +165,8 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     expect(order).toMatchObject({ totalCents: 115000, depositCents: 57500, productionStatus: "AWAITING_DEPOSIT", paymentStatus: "DEPOSIT_DUE" });
     expect((await prisma.quoteRequest.findUniqueOrThrow({ where: { id: quote.id } })).status).toBe("ACCEPTED");
     const deposit = await depositOf(order.id);
-    expect(deposit).toMatchObject({ status: "OPEN", totalCents: 57500, stripeInvoiceId: null });
+    expect(deposit).toMatchObject({ kind: "FULL", status: "DEPOSIT_DUE", totalCents: 115000, depositCents: 57500, stripeInvoiceId: null });
+    expect(await prisma.invoice.count()).toBe(1);
     // Paying now: no "quote accepted" email before payment.
     expect(await prisma.emailLog.count({ where: { template: "quote_accepted" } })).toBe(0);
 
@@ -181,7 +182,8 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
       successUrl: expect.stringContaining(`/order/${order.customerToken}/payment-success?session_id={CHECKOUT_SESSION_ID}`),
       cancelUrl: expect.stringContaining(`/order/${order.customerToken}?payment=canceled`),
       metadata: {
-        payment_type: "deposit",
+        payment_type: "DEPOSIT",
+        expected_amount: "57500",
         invoice_id: deposit.id,
         invoice_number: deposit.number,
         order_id: order.id,
@@ -204,7 +206,7 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     const res = await acceptQuoteAction(quote.customerToken!, form({ revision: "1", name: "Jamie Rivers", agreeTerms: "on", agreeDeposit: "on" }));
     const order = await prisma.order.findFirstOrThrow();
     expect(res).toMatchObject({ status: "success", redirect: `/order/${order.customerToken}` });
-    expect(await prisma.invoice.count()).toBe(0);
+    expect(await prisma.invoice.findFirstOrThrow()).toMatchObject({ kind: "FULL", status: "OPEN", depositCents: 0 }); // one invoice, nothing due yet
     expect((await pay(order.customerToken!)).headers.get("location")).toBe(`/order/${order.customerToken}`);
     expect(stripe.calls).toEqual([]);
     expect(await prisma.emailLog.count({ where: { template: "quote_accepted" } })).toBe(1);
@@ -246,9 +248,9 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     const first = await signed(stripe.event("evt_paid", "checkout.session.completed", s.id));
     expect(await first.json()).toMatchObject({ result: "processed" });
     const payment = await prisma.payment.findFirstOrThrow();
-    expect(payment).toMatchObject({ source: "STRIPE", method: "STRIPE", status: "SUCCEEDED", amountCents: 57500, stripeCheckoutSessionId: s.id, stripePaymentIntentId: `pi_${s.id}` });
-    expect(await depositOf(order.id)).toMatchObject({ status: "PAID", amountPaidCents: 57500, stripeCheckoutStatus: "complete" });
-    expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ productionStatus: "DEPOSIT_PAID", paymentStatus: "PARTIALLY_PAID" });
+    expect(payment).toMatchObject({ source: "STRIPE", method: "STRIPE_ONLINE", type: "DEPOSIT", status: "SUCCEEDED", amountCents: 57500, stripeCheckoutSessionId: s.id, stripePaymentIntentId: `pi_${s.id}` });
+    expect(await depositOf(order.id)).toMatchObject({ status: "PARTIALLY_PAID", amountPaidCents: 57500, stripeCheckoutStatus: "complete" });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ productionStatus: "ORDER_CONFIRMED", paymentStatus: "PARTIALLY_PAID" });
 
     // Confirmation email, sent after payment, with the requested wording.
     const mail = await prisma.emailLog.findFirstOrThrow({ where: { template: "deposit_received" } });
@@ -265,7 +267,7 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     expect(await prisma.emailLog.count({ where: { template: "deposit_received" } })).toBe(1);
 
     // The success page now shows the paid state.
-    expect((await customerOrderView(order.customerToken!))!).toMatchObject({ deposit: { paid: true }, balanceCents: 57500, productionStatus: "DEPOSIT_PAID" });
+    expect((await customerOrderView(order.customerToken!))!).toMatchObject({ deposit: { paid: true }, balanceCents: 57500, productionStatus: "ORDER_CONFIRMED" });
   });
 
   it("abandoned checkout: order keeps waiting, the customer can retry, and an expired session is replaced automatically", async () => {
@@ -328,9 +330,9 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     await pay(order.customerToken!);
     const s = stripe.latest();
     const deposit = await depositOf(order.id);
-    await payments.recordManualPayment(actor, { invoiceId: deposit.id, amountCents: 57500, method: "CHECK", receivedAt: new Date(), reference: "1042", notes: null, sendReceipt: false });
+    await payments.recordManualPayment(actor, { invoiceId: deposit.id, amountCents: 57500, method: "CHECK", checkStatus: "SUCCEEDED", receivedAt: new Date(), reference: "1042", notes: null, sendReceipt: false });
     expect(stripe.calls).toContain(`expire:${s.id}`);
-    expect(await depositOf(order.id)).toMatchObject({ status: "PAID", stripeCheckoutStatus: "expired" });
+    expect(await depositOf(order.id)).toMatchObject({ status: "PARTIALLY_PAID", amountPaidCents: 57500, stripeCheckoutStatus: "expired" });
     expect(await checkout.startDepositCheckout(order.customerToken!)).toEqual({ kind: "nothing_due" });
     expect(stripe.sessions.size).toBe(1);
 
@@ -352,20 +354,30 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     expect(stripe.latest().amountTotal).toBe(50000);
   });
 
-  it("the final balance is correct after the deposit and is invoiced through Stripe Invoicing", async () => {
+  it("the final balance is requested on the same invoice and paid through Stripe Checkout", async () => {
     const { order } = await acceptOnline();
     await pay(order.customerToken!);
     const s = stripe.complete(stripe.latest().id);
     await payments.processStripeEvent(stripe.event("evt_paid", "checkout.session.completed", s.id));
+    const invoice = await depositOf(order.id);
+    // Nothing more is due until the balance is requested.
+    expect(await checkout.startInvoicePageCheckout(invoice.publicToken!)).toEqual({ kind: "nothing_due" });
     await createSignedInAdmin({ role: "OWNER", email: "boss@example.com" });
-    const created = await sales.createOrderInvoiceAction(order.id, "BALANCE");
-    expect(created).toMatchObject({ ok: true });
-    const balance = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id, kind: "BALANCE" } });
-    expect(balance).toMatchObject({ status: "DRAFT", totalCents: 115000 - 57500 });
-    await invoices.sendInvoice(actor, balance.id);
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: balance.id } })).toMatchObject({ status: "OPEN", stripeInvoiceId: "in_1", stripeCheckoutSessionId: null });
-    expect(stripe.calls).toContain(`invoice:${balance.number}:57500`);
-    expect((await customerOrderView(order.customerToken!))!).toMatchObject({ balanceCents: 57500, paidCents: 57500 });
+    expect(await sales.markBalanceDueAction(invoice.id)).toMatchObject({ ok: true });
+    expect(await prisma.invoice.count()).toBe(1);
+    const mail = await prisma.emailLog.findFirstOrThrow({ where: { template: "balance_due" } });
+    expect(mail.html).toContain(`/invoice/${invoice.publicToken}`);
+    expect(mail.html).not.toContain("stripe.com");
+    // Customer pays from the invoice page: exactly the remaining balance.
+    const r = await payRoute.GET(new Request("http://localhost/x"), { params: Promise.resolve({ token: order.customerToken! }) });
+    expect(r.headers.get("location")).toBe(stripe.latest().url);
+    expect(stripe.latest().input).toMatchObject({ amountCents: 57500, metadata: { payment_type: "FINAL_BALANCE", expected_amount: "57500", invoice_number: invoice.number } });
+    expect(stripe.calls.filter((c) => c.startsWith("invoice:"))).toEqual([]); // never a Stripe Invoice
+    const s2 = stripe.complete(stripe.latest().id);
+    await payments.processStripeEvent(stripe.event("evt_bal", "checkout.session.completed", s2.id));
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "PAID", amountPaidCents: 115000 });
+    expect(await prisma.payment.findMany({ where: { invoiceId: invoice.id }, orderBy: { receivedAt: "asc" } })).toEqual([expect.objectContaining({ type: "DEPOSIT" }), expect.objectContaining({ type: "FINAL_BALANCE", method: "STRIPE_ONLINE" })]);
+    expect((await customerOrderView(order.customerToken!))!).toMatchObject({ balanceCents: 0, paidCents: 115000, paymentStatus: "PAID" });
   });
 
   it("admin: resend the payment link and cancel the payment request (closing the open checkout)", async () => {
@@ -380,13 +392,13 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
 
     expect(await sales.voidInvoiceAction(deposit.id, form({ reason: "Other", details: "Customer will pay in person" }))).toMatchObject({ ok: true });
     expect(stripe.calls).toContain(`expire:${s.id}`);
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: deposit.id } })).toMatchObject({ status: "VOID", stripeCheckoutStatus: "expired" });
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: deposit.id } })).toMatchObject({ status: "VOIDED", stripeCheckoutStatus: "expired" });
     expect(await checkout.startDepositCheckout(order.customerToken!)).toEqual({ kind: "nothing_due" });
     expect(await sales.resendDepositLinkAction(deposit.id)).toMatchObject({ ok: false });
 
-    // A new request can be created; it is ready to pay online (no send step).
-    expect(await sales.createOrderInvoiceAction(order.id, "DEPOSIT")).toMatchObject({ ok: true });
-    expect(await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id, kind: "DEPOSIT", status: "OPEN" } })).toMatchObject({ totalCents: 57500 });
+    // A replacement invoice can be created (new number); it's ready to pay online (no send step).
+    expect(await sales.createOrderInvoiceAction(order.id)).toMatchObject({ ok: true });
+    expect(await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id, status: "DEPOSIT_DUE" } })).toMatchObject({ number: "WMI-1002", totalCents: 115000, depositCents: 57500 });
   });
 
   it("the finance permission is required for payment-link actions", async () => {
@@ -401,7 +413,7 @@ describe.skipIf(!hasTestDb)("accept quote & pay deposit (Stripe Checkout)", () =
     await prisma.siteSetting.update({ where: { id: "default" }, data: { stripeInvoicingEnabled: false } });
     const { order, payNow } = await acceptOnline();
     expect(payNow).toBe(false);
-    expect(await depositOf(order.id)).toMatchObject({ status: "SENT" });
+    expect(await depositOf(order.id)).toMatchObject({ status: "DEPOSIT_DUE" });
     expect((await customerOrderView(order.customerToken!))!.deposit).toMatchObject({ payHref: null, instructions: "Checks payable to Wild Mountain." });
     expect((await pay(order.customerToken!)).headers.get("location")).toBe(`/order/${order.customerToken}`);
     expect(stripe.calls).toEqual([]);

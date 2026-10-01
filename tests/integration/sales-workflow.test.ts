@@ -13,7 +13,6 @@ const quotes = await import("@/lib/sales/quotes");
 const invoices = await import("@/lib/sales/invoices");
 const payments = await import("@/lib/sales/payments");
 const orders = await import("@/lib/sales/orders");
-const { markPastDueInvoices } = await import("@/lib/sales/ledger");
 const { loadCustomerQuote, customerInvoiceView, customerOrderView } = await import("@/lib/sales/views");
 const { setInvoicingProviderForTests } = await import("@/lib/sales/stripe");
 const { SalesError } = await import("@/lib/sales/errors");
@@ -168,10 +167,11 @@ describe.skipIf(!hasTestDb)("sales workflow: quote → order → invoice → pay
     // Accepted twice? No.
     await expect(quotes.acceptQuote(quote.customerToken!, { ...accept, revisionNumber: 2 }, meta)).rejects.toThrow(/already been accepted/);
 
-    // The order copies the accepted revision; the deposit request is issued at once (no admin send step).
+    // The order copies the accepted revision; ONE invoice for the whole total is issued at once, with the deposit required.
     expect(order).toMatchObject({ number: "WMO-1001", productionStatus: "AWAITING_DEPOSIT", paymentStatus: "DEPOSIT_DUE", depositCents: 50000, totalCents: r2.totalCents });
-    const deposit = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
-    expect(deposit).toMatchObject({ number: "WMI-1001", kind: "DEPOSIT", status: "SENT", totalCents: 50000, sentAt: expect.any(Date) });
+    expect(await prisma.invoice.count()).toBe(1);
+    const invoice = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(invoice).toMatchObject({ number: "WMI-1001", kind: "FULL", status: "DEPOSIT_DUE", totalCents: r2.totalCents, depositCents: 50000, amountPaidCents: 0, sentAt: expect.any(Date) });
     // Offline: the acceptance email carries the payment instructions — no "we'll send an invoice".
     const accepted = await prisma.emailLog.findFirstOrThrow({ where: { template: "quote_accepted" } });
     expect(accepted.html).not.toMatch(/send (you )?an invoice/i);
@@ -227,157 +227,124 @@ describe.skipIf(!hasTestDb)("sales workflow: quote → order → invoice → pay
     expect(await loadCustomerQuote("A".repeat(43))).toBeNull();
   });
 
-  it("offline invoicing: deposit, partial and full manual payments, balance invoice, production advance", async () => {
+  it("offline payments on the one invoice: deposit, partial, final balance on the same invoice, production advance", async () => {
     const { quote } = await requestQuote();
     await priceDraft(quote.id);
     await quotes.sendQuote(actor, quote.id);
     const { order } = await quotes.acceptQuote(quote.customerToken!, { revisionNumber: 1, name: "Jamie Rivers", agreeTerms: true, agreeDeposit: true }, meta);
-    const deposit = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id, kind: "DEPOSIT" } });
+    const invoice = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
     const total = order.totalCents;
-    expect(deposit.totalCents).toBe(Math.floor((total * 5000 * 2 + 10000) / 20000));
+    expect(invoice.totalCents).toBe(total);
+    expect(invoice.depositCents).toBe(Math.floor((total * 5000 * 2 + 10000) / 20000));
+    await expect(invoices.sendInvoice(actor, invoice.id)).rejects.toThrow(/already been sent/);
+    await invoices.resendInvoice(actor, invoice.id);
+    expect((await prisma.emailLog.findFirstOrThrow({ where: { template: "invoice_sent" } })).html).toContain(`/invoice/${invoice.publicToken}`);
 
-    // Issued at acceptance (offline: SENT, paid by check/transfer); resending emails the invoice link.
-    expect(deposit).toMatchObject({ status: "SENT", stripeInvoiceId: null, stripeCheckoutSessionId: null });
-    await expect(invoices.sendInvoice(actor, deposit.id)).rejects.toThrow(/already been sent/);
-    await invoices.resendInvoice(actor, deposit.id);
-    expect((await prisma.emailLog.findFirstOrThrow({ where: { template: "deposit_invoice" } })).html).toContain(`/invoice/${deposit.publicToken}`);
-    expect((await prisma.quoteRequest.findUniqueOrThrow({ where: { id: quote.id } })).status).toBe("ACCEPTED");
+    const base = { invoiceId: invoice.id, receivedAt: new Date(), reference: "1042", notes: null, sendReceipt: true };
+    await expect(payments.recordManualPayment(actor, { ...base, amountCents: 100, method: "STRIPE_ONLINE" })).rejects.toBeInstanceOf(SalesError);
+    await expect(payments.recordManualPayment(actor, { ...base, amountCents: total + 1, method: "CASH" })).rejects.toThrow(/more than/);
 
-    // Guards: bad method, overpayment.
-    const base = { invoiceId: deposit.id, receivedAt: new Date(), reference: "1042", notes: null, sendReceipt: true };
-    await expect(payments.recordManualPayment(actor, { ...base, amountCents: 100, method: "STRIPE" })).rejects.toBeInstanceOf(SalesError);
-    await expect(payments.recordManualPayment(actor, { ...base, amountCents: deposit.totalCents + 1, method: "CHECK" })).rejects.toThrow(/more than/);
-
-    // Partial then full.
-    await payments.recordManualPayment(actor, { ...base, amountCents: 20000, method: "CHECK" });
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: deposit.id } })).toMatchObject({ status: "PARTIALLY_PAID", amountPaidCents: 20000 });
-    expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ paymentStatus: "PARTIALLY_PAID", productionStatus: "AWAITING_DEPOSIT" });
-    const second = await payments.recordManualPayment(actor, { ...base, amountCents: deposit.totalCents - 20000, method: "CASH" });
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: deposit.id } })).toMatchObject({ status: "PAID" });
-    expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ paymentStatus: "PARTIALLY_PAID", productionStatus: "DEPOSIT_PAID" });
+    // Part of the deposit in cash, the rest by cleared check.
+    await payments.recordManualPayment(actor, { ...base, amountCents: 20000, method: "CASH" });
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "DEPOSIT_DUE", amountPaidCents: 20000 });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ paymentStatus: "DEPOSIT_DUE", productionStatus: "AWAITING_DEPOSIT" });
+    const second = await payments.recordManualPayment(actor, { ...base, amountCents: invoice.depositCents - 20000, method: "CHECK", checkStatus: "SUCCEEDED" });
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "PARTIALLY_PAID", amountPaidCents: invoice.depositCents });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ paymentStatus: "PARTIALLY_PAID", productionStatus: "ORDER_CONFIRMED" });
     expect(await prisma.payment.count({ where: { source: "STRIPE" } })).toBe(0); // never a fake Stripe record
-    expect(await prisma.emailLog.count({ where: { template: "payment_received" } })).toBe(2);
 
-    // Voiding a mistaken payment re-opens the invoice; the record is kept.
+    // Voiding a mistaken payment re-opens the deposit; the record is kept.
     await payments.voidManualPayment(actor, second.id, "Entered twice");
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: deposit.id } })).toMatchObject({ status: "PARTIALLY_PAID", amountPaidCents: 20000 });
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "DEPOSIT_DUE", amountPaidCents: 20000 });
     expect(await prisma.payment.findUniqueOrThrow({ where: { id: second.id } })).toMatchObject({ status: "VOIDED", voidReason: "Entered twice" });
-    await payments.recordManualPayment(actor, { ...base, amountCents: deposit.totalCents - 20000, method: "BANK_TRANSFER", sendReceipt: false });
-    await expect(invoices.voidInvoice(actor, deposit.id, "oops")).rejects.toThrow(/has payments/);
+    await payments.recordManualPayment(actor, { ...base, amountCents: invoice.depositCents - 20000, method: "BANK_TRANSFER", sendReceipt: false });
+    await expect(invoices.voidInvoice(actor, invoice.id, "oops")).rejects.toThrow(/has payments/);
 
-    // Balance invoice = total − already invoiced; can't over-invoice.
-    await expect(prisma.$transaction((tx) => invoices.createInvoiceForOrder(tx, order.id, "FULL", actor.id))).rejects.toThrow(/already invoiced/);
-    const balance = await prisma.$transaction((tx) => invoices.createInvoiceForOrder(tx, order.id, "BALANCE", actor.id));
-    expect(balance.totalCents).toBe(total - deposit.totalCents);
-    await expect(prisma.$transaction((tx) => invoices.createInvoiceForOrder(tx, order.id, "BALANCE", actor.id))).rejects.toThrow(/already been invoiced/);
-    await invoices.sendInvoice(actor, balance.id);
-    await payments.recordManualPayment(actor, { ...base, invoiceId: balance.id, amountCents: balance.totalCents, method: "CHECK" });
+    // Final balance: same invoice, no second invoice.
+    await invoices.markBalanceDue(actor, invoice.id);
+    expect(await prisma.invoice.count()).toBe(1);
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "BALANCE_DUE", balanceDueAt: expect.any(Date), balanceRequestedById: actor.id });
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ paymentStatus: "BALANCE_DUE" });
+    await payments.recordManualPayment(actor, { ...base, amountCents: total - invoice.depositCents, method: "CHECK", checkStatus: "SUCCEEDED" });
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "PAID", amountPaidCents: total });
     expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ paymentStatus: "PAID" });
 
     // Refund bookkeeping (no deletion).
-    const p = await prisma.payment.findFirstOrThrow({ where: { invoiceId: balance.id } });
+    const p = await prisma.payment.findFirstOrThrow({ where: { invoiceId: invoice.id, type: "FINAL_BALANCE" } });
     await payments.recordRefund(actor, p.id, 5000, "Scratch on delivery");
     expect(await prisma.payment.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ status: "PARTIALLY_REFUNDED", refundedCents: 5000 });
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: balance.id } })).toMatchObject({ status: "PARTIALLY_PAID" });
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "BALANCE_DUE" });
 
     // Customer invoice/order pages.
-    const iv = (await customerInvoiceView(balance.publicToken!))!;
-    expect(iv).toMatchObject({ number: balance.number, amountDueCents: 5000, payUrl: null });
-    expect(JSON.stringify(iv)).not.toContain(balance.id);
+    const iv = (await customerInvoiceView(invoice.publicToken!))!;
+    expect(iv).toMatchObject({ number: invoice.number, remainingCents: 5000, payHref: null });
+    expect(JSON.stringify(iv)).not.toContain(invoice.id);
+    expect(JSON.stringify(iv)).not.toMatch(/1042|Entered twice|Scratch on delivery/); // references and internal notes never reach the customer
     const ov = (await customerOrderView(order.customerToken!))!;
-    expect(ov).toMatchObject({ number: "WMO-1001", productionStatus: "DEPOSIT_PAID", balanceCents: 5000 });
+    expect(ov).toMatchObject({ number: "WMO-1001", productionStatus: "ORDER_CONFIRMED", balanceCents: 5000 });
     expect(JSON.stringify(ov)).not.toMatch(/productionNotes|"id"/);
     expect(await customerInvoiceView((await prisma.invoice.create({ data: { number: "WMI-9", customerName: "x", customerEmail: "x@x.com", publicToken: "D".repeat(43) } })).publicToken!)).toBeNull(); // drafts hidden
   });
 
-  it("production, delivery and completion updates notify the customer only when asked", async () => {
+  it("production updates email the customer for meaningful stages, unless unticked", async () => {
     const { quote } = await requestQuote();
     await priceDraft(quote.id, undefined, { depositType: "NONE" });
     await quotes.sendQuote(actor, quote.id);
     const { order } = await quotes.acceptQuote(quote.customerToken!, { revisionNumber: 1, name: "Jamie", agreeTerms: true, agreeDeposit: true }, meta);
-    expect(order).toMatchObject({ productionStatus: "QUOTE_ACCEPTED", paymentStatus: "UNPAID" });
-    expect(await prisma.invoice.count()).toBe(0); // no deposit → no deposit invoice
-    const base: OrderUpdateInput = { productionStatus: "IN_PRODUCTION", deliveryStatus: "NOT_SCHEDULED", deliveryDate: null, deliveryAddress: null, deliveryNotes: null, estimatedCompletion: "March", productionNotes: "Use board #12", customerNotes: null, notifyCustomer: false };
-    await orders.updateOrder(actor, order.id, base);
-    expect(await prisma.emailLog.count({ where: { template: "order_update" } })).toBe(0);
-    await orders.updateOrder(actor, order.id, { ...base, productionStatus: "DELIVERY_SCHEDULED", deliveryStatus: "SCHEDULED", deliveryDate: new Date("2026-11-02T15:00:00Z"), notifyCustomer: true });
-    expect(await prisma.emailLog.count({ where: { template: "delivery_scheduled" } })).toBe(1);
-    await orders.updateOrder(actor, order.id, { ...base, productionStatus: "COMPLETED", deliveryStatus: "DELIVERED", notifyCustomer: true });
+    expect(order).toMatchObject({ productionStatus: "ORDER_CONFIRMED", paymentStatus: "UNPAID" });
+    expect(await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } })).toMatchObject({ kind: "FULL", status: "OPEN", depositCents: 0 });
+    const base: OrderUpdateInput = { productionStatus: "IN_PRODUCTION", deliveryDate: null, deliveryAddress: null, deliveryNotes: null, estimatedCompletion: "March", productionNotes: "Use board #12", customerNotes: null, notifyCustomer: false };
+    expect(await orders.updateOrder(actor, order.id, base)).toMatchObject({ productionChanged: true, notification: "SUPPRESSED" });
+    expect(await prisma.emailLog.count({ where: { template: "order_in_production" } })).toBe(0);
+    await orders.updateOrder(actor, order.id, { ...base, productionStatus: "DELIVERY_SCHEDULED", deliveryDate: new Date("2026-11-02T15:00:00Z"), deliveryWindow: "9am–12pm", deliveryMethod: "WHITE_GLOVE", notifyCustomer: true });
+    const sched = await prisma.emailLog.findFirstOrThrow({ where: { template: "delivery_scheduled" } });
+    expect(sched.html).toMatch(/November 2, 2026/);
+    expect(sched.html).toContain("9am–12pm");
+    expect(sched.html).toContain("White glove delivery");
+    await orders.updateOrder(actor, order.id, { ...base, productionStatus: "COMPLETED", notifyCustomer: true });
     expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ productionStatus: "COMPLETED", completedAt: expect.any(Date) });
     expect((await prisma.quoteRequest.findUniqueOrThrow({ where: { id: quote.id } })).status).toBe("COMPLETED");
     expect(await prisma.statusEvent.count({ where: { orderId: order.id } })).toBeGreaterThanOrEqual(4);
   });
 
-  it("Stripe invoicing (flag + keys): final balance invoice is created, finalized and paid by idempotent webhooks", async () => {
+  it("older invoices sent through Stripe Invoicing still reconcile from idempotent webhooks", async () => {
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
     vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_x");
-    const stripe = fakeStripe();
-    setInvoicingProviderForTests(stripe.provider);
-    const { quote } = await requestQuote();
-    await priceDraft(quote.id);
-    await quotes.sendQuote(actor, quote.id);
-    // Accepted while online payments are off: the deposit is settled offline.
-    const { order, payNow } = await quotes.acceptQuote(quote.customerToken!, { revisionNumber: 1, name: "Jamie", agreeTerms: true, agreeDeposit: true }, meta);
-    expect(payNow).toBe(false);
-    const deposit = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
-    await payments.recordManualPayment(actor, { invoiceId: deposit.id, amountCents: deposit.totalCents, method: "CHECK", receivedAt: new Date(), reference: null, notes: null, sendReceipt: false });
-
-    await prisma.siteSetting.update({ where: { id: "default" }, data: { stripeInvoicingEnabled: true } });
-    const balance = await prisma.$transaction((tx) => invoices.createInvoiceForOrder(tx, order.id, "BALANCE", actor.id));
-    expect(balance).toMatchObject({ status: "DRAFT", totalCents: order.totalCents - deposit.totalCents });
-    const res = await invoices.sendInvoice(actor, balance.id);
-    expect(res.via).toBe("wild_mountain"); // option B: our email with the hosted link
-    expect(stripe.calls).toEqual(["customer:" + order.customerId, `invoice:${balance.number}:${balance.totalCents}`]);
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: balance.id } })).toMatchObject({ status: "OPEN", stripeInvoiceId: "in_1", stripeHostedInvoiceUrl: "https://invoice.stripe.com/i/in_1" });
-    expect((await prisma.customer.findFirstOrThrow()).stripeCustomerId).toBe("cus_123");
-    expect((await prisma.emailLog.findFirstOrThrow({ where: { template: "balance_invoice" } })).html).toContain("https://invoice.stripe.com/i/in_1");
-    expect((await customerInvoiceView(balance.publicToken!))!.payUrl).toBe("https://invoice.stripe.com/i/in_1");
-
-    const paid = { id: "evt_1", type: "invoice.paid", data: { object: { id: "in_1", status: "paid", amount_paid: balance.totalCents, payment_intent: "pi_1", status_transitions: { paid_at: 1_790_000_000 } } } };
-    expect(await payments.processStripeEvent(paid)).toBe("processed");
-    expect(await payments.processStripeEvent(paid)).toBe("duplicate"); // same event again
-    expect(await payments.processStripeEvent({ ...paid, id: "evt_2", type: "invoice.payment_succeeded" })).toBe("processed"); // sibling event, same money
-    expect(await prisma.payment.count({ where: { source: "STRIPE" } })).toBe(1);
-    expect(await prisma.payment.findFirstOrThrow({ where: { source: "STRIPE" } })).toMatchObject({ method: "STRIPE", amountCents: balance.totalCents, stripePaymentIntentId: "pi_1" });
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: balance.id } })).toMatchObject({ status: "PAID", amountPaidCents: balance.totalCents });
-    expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).toMatchObject({ paymentStatus: "PAID", productionStatus: "DEPOSIT_PAID" });
-
-    // Refund via the Stripe dashboard.
-    expect(await payments.processStripeEvent({ id: "evt_3", type: "charge.refunded", data: { object: { id: "ch_1", payment_intent: "pi_1", amount_refunded: 1000 } } })).toBe("processed");
-    expect(await prisma.payment.findFirstOrThrow({ where: { source: "STRIPE" } })).toMatchObject({ status: "PARTIALLY_REFUNDED", refundedCents: 1000 });
-    // Events for invoices we don't know are ignored.
-    expect(await payments.processStripeEvent({ id: "evt_4", type: "invoice.paid", data: { object: { id: "in_other", amount_paid: 5 } } })).toBe("ignored");
-
-    // Option A: Stripe emails the invoice.
-    await prisma.siteSetting.update({ where: { id: "default" }, data: { invoiceEmailMode: "STRIPE" } });
-    const extra = await invoices.createCustomInvoice(actor, { customerId: order.customerId!, orderId: order.id, lines: [{ kind: "CUSTOM", description: "Extra leaf", quantity: 1, unitPriceCents: 25000, taxable: false }], dueDate: null, customerNotes: null });
-    const r2 = await invoices.sendInvoice(actor, extra.id);
-    expect(r2).toMatchObject({ via: "stripe", email: null });
-    expect(stripe.calls.at(-1)).toBe("send:in_2");
-  });
-
-  it("a Stripe failure leaves the invoice as an unsent draft", async () => {
-    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
-    vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_x");
-    setInvoicingProviderForTests(
-      fakeStripe({
-        createAndFinalizeInvoice: async () => {
-          throw new Error("card_declined? no: api down");
-        },
-      }).provider,
-    );
-    await prisma.siteSetting.update({ where: { id: "default" }, data: { stripeInvoicingEnabled: true } });
+    setInvoicingProviderForTests(fakeStripe().provider);
     const { quote } = await requestQuote();
     await priceDraft(quote.id, undefined, { depositType: "NONE" });
     await quotes.sendQuote(actor, quote.id);
     const { order } = await quotes.acceptQuote(quote.customerToken!, { revisionNumber: 1, name: "Jamie", agreeTerms: true, agreeDeposit: true }, meta);
-    const full = await prisma.$transaction((tx) => invoices.createInvoiceForOrder(tx, order.id, "FULL", actor.id));
-    await expect(invoices.sendInvoice(actor, full.id)).rejects.toThrow(/still a draft/);
-    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: full.id } })).toMatchObject({ status: "DRAFT", sentAt: null });
-    expect(await prisma.emailLog.count({ where: { invoiceId: full.id } })).toBe(0);
+    const invoice = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
+    // As if it had been mirrored to Stripe before this change.
+    await prisma.invoice.update({ where: { id: invoice.id }, data: { stripeInvoiceId: "in_old", stripeHostedInvoiceUrl: "https://invoice.stripe.com/i/in_old", balanceDueAt: new Date() } });
+    const paid = { id: "evt_1", type: "invoice.paid", data: { object: { id: "in_old", status: "paid", amount_paid: invoice.totalCents, payment_intent: "pi_1", status_transitions: { paid_at: 1_790_000_000 } } } };
+    expect(await payments.processStripeEvent(paid)).toBe("processed");
+    expect(await payments.processStripeEvent(paid)).toBe("duplicate");
+    expect(await payments.processStripeEvent({ ...paid, id: "evt_2", type: "invoice.payment_succeeded" })).toBe("processed");
+    expect(await prisma.payment.count()).toBe(1);
+    expect(await prisma.payment.findFirstOrThrow()).toMatchObject({ source: "STRIPE", method: "STRIPE_ONLINE", amountCents: invoice.totalCents, stripePaymentIntentId: "pi_1" });
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ status: "PAID" });
+    expect(await payments.processStripeEvent({ id: "evt_3", type: "charge.refunded", data: { object: { id: "ch_1", payment_intent: "pi_1", amount_refunded: 1000 } } })).toBe("processed");
+    expect(await prisma.payment.findFirstOrThrow()).toMatchObject({ status: "PARTIALLY_REFUNDED", refundedCents: 1000 });
+    expect(await payments.processStripeEvent({ id: "evt_4", type: "invoice.paid", data: { object: { id: "in_other", amount_paid: 5 } } })).toBe("ignored");
   });
 
-  it("past-due invoices, duplicate quote and manual acceptance", async () => {
+  it("sending a custom invoice emails the Wild Mountain invoice link and creates nothing in Stripe", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_x");
+    const stripe = fakeStripe();
+    setInvoicingProviderForTests(stripe.provider);
+    await prisma.siteSetting.update({ where: { id: "default" }, data: { stripeInvoicingEnabled: true } });
+    const c = await prisma.customer.create({ data: { name: "Jamie Rivers", email: "jamie@example.com" } });
+    const custom = await invoices.createCustomInvoice(actor, { customerId: c.id, lines: [{ kind: "CUSTOM", description: "Extra leaf", quantity: 1, unitPriceCents: 25000, taxable: false }], dueDate: null, customerNotes: null });
+    await invoices.sendInvoice(actor, custom.id);
+    expect(await prisma.invoice.findUniqueOrThrow({ where: { id: custom.id } })).toMatchObject({ status: "BALANCE_DUE", stripeInvoiceId: null });
+    expect((await prisma.emailLog.findFirstOrThrow({ where: { template: "invoice_sent" } })).html).toContain(`/invoice/${custom.publicToken}`);
+    expect(stripe.calls).toEqual([]);
+  });
+
+  it("duplicate quote and manual acceptance", async () => {
     const { quote } = await requestQuote();
     await priceDraft(quote.id);
     await quotes.sendQuote(actor, quote.id);
@@ -391,10 +358,6 @@ describe.skipIf(!hasTestDb)("sales workflow: quote → order → invoice → pay
     const order = await quotes.acceptQuoteManually(actor, quote.id, "Accepted by phone 10/2");
     const rev = await prisma.quoteRevision.findFirstOrThrow({ where: { quoteId: quote.id } });
     expect(rev).toMatchObject({ status: "ACCEPTED", acceptedManuallyById: actor.id, acceptedIp: null });
-    const deposit = await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } });
-    expect(deposit.status).toBe("SENT"); // issued at acceptance
-    await prisma.invoice.update({ where: { id: deposit.id }, data: { dueDate: new Date(Date.now() - 86_400_000) } });
-    expect(await markPastDueInvoices()).toBe(1);
-    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: deposit.id } })).status).toBe("PAST_DUE");
+    expect(await prisma.invoice.findFirstOrThrow({ where: { orderId: order.id } })).toMatchObject({ kind: "FULL", status: "DEPOSIT_DUE" }); // issued at acceptance
   });
 });

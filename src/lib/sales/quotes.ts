@@ -11,7 +11,7 @@ import { ACCEPT_DEPOSIT_LABEL, ACCEPT_NO_DEPOSIT_LABEL, ACCEPT_TERMS_LABEL } fro
 import { findOrCreateCustomer, recordCustomerActivity } from "./customers";
 import { SalesError } from "./errors";
 import { VOIDED_QUOTE_MESSAGE } from "./voiding";
-import { createInvoiceForOrder } from "./invoices";
+import { createOrderInvoice } from "./invoices";
 import { adminLinks, customerLinks } from "./links";
 import { nextNumber } from "./numbers";
 import { createOrderFromRevision, type Actor } from "./orders";
@@ -657,10 +657,10 @@ async function finalizeAcceptance(
     if (!accepted.count) throw new SalesError("This quote just changed. Please reload the page.");
     await tx.statusEvent.create({ data: { quoteRequestId: quoteId, fromStatus: quote.status, toStatus: "ACCEPTED", authorId: opts.actorId } });
     const order = await createOrderFromRevision(tx, quote, rev);
-    // The deposit is requested straight away (no draft for staff to send):
-    // online it's paid through Stripe Checkout right after acceptance.
-    let depositInvoice = null;
-    if (rev.depositCents > 0) depositInvoice = await createInvoiceForOrder(tx, order.id, "DEPOSIT", opts.actorId, { issue: true, online: opts.online });
+    // ONE invoice for the whole accepted total, issued straight away. The
+    // deposit (if any) is paid against it — online through Stripe Checkout
+    // right after acceptance — and later the final balance on the same invoice.
+    const invoice = await createOrderInvoice(tx, order.id, opts.actorId);
     await recordCustomerActivity(tx, {
       customerId: quote.customerId,
       type: "quote.accepted",
@@ -669,7 +669,7 @@ async function finalizeAcceptance(
       orderId: order.id,
       actorId: opts.actorId,
     });
-    return { quote, rev, order, depositInvoice };
+    return { quote, rev, order, invoice };
   });
 }
 
@@ -886,7 +886,7 @@ export async function voidQuote(actor: Actor, quoteId: string, reason: string) {
   const label = quote.number ?? quote.reference;
   const liveOrder = quote.orders.find((o) => o.productionStatus !== "CANCELED");
   if (liveOrder) throw new SalesError(`Order ${liveOrder.number} was created from this quote. Cancel the order (and void or refund its invoices) before voiding the quote.`);
-  const liveInvoice = quote.invoices.find((i) => i.status !== "VOID" && i.status !== "CANCELED");
+  const liveInvoice = quote.invoices.find((i) => i.status !== "VOIDED" && i.status !== "CANCELED");
   if (liveInvoice) throw new SalesError(`Invoice ${liveInvoice.number} is still active. Void it first${liveInvoice.amountPaidCents > 0 ? " — it has payments, so record a refund before voiding" : ""}.`);
   const now = new Date();
   await prisma.$transaction(async (tx) => {

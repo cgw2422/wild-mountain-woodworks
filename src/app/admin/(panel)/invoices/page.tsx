@@ -73,7 +73,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
                       <Money cents={i.totalCents} />
                     </td>
                     <td className={cn(table.td, "text-right")}>
-                      <Money cents={["VOID", "CANCELED"].includes(i.status) ? 0 : i.totalCents - i.amountPaidCents} />
+                      <Money cents={["VOIDED", "CANCELED"].includes(i.status) ? 0 : i.totalCents - i.amountPaidCents} />
                     </td>
                     <td className={cn(table.td, "whitespace-nowrap")}>{formatDate(i.dueDate)}</td>
                     <td className={table.td}>

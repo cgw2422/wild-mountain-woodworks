@@ -25,47 +25,56 @@ export default async function PaymentSuccessPage({ params, searchParams }: Props
   if (!(await customerOrderView(token))) notFound();
   await noteCheckoutReturn(token, typeof session_id === "string" ? session_id : undefined);
   const o = (await customerOrderView(token))!;
-  const paid = o.deposit ? o.deposit.paid : o.paidCents > 0;
-  const confirming = !paid && Boolean(o.deposit?.confirming);
-  if (!paid && !confirming) {
-    // Not paid and no completed checkout: this isn't a payment confirmation.
+  // The most recent settled payment — shown only if it just happened (this
+  // page is a return from Stripe, not a payment record).
+  const last = o.payments.filter((p) => !p.pending).at(-1);
+  const confirming = o.confirming;
+  const justPaid = !confirming && o.recentlyPaid;
+  if (!justPaid && !confirming) {
+    // Nothing recent and no completed checkout: this isn't a payment confirmation.
+    const what = o.due?.type === "FINAL_BALANCE" ? "payment" : "deposit";
     return (
       <article>
-        <DocHeading eyebrow={`Order ${o.number}`} title="Your deposit hasn't been received yet" status={{ label: "Deposit due", tone: "warn" }}>
+        <DocHeading eyebrow={`Order ${o.number}`} title={`Your ${what} hasn't been received yet`} status={{ label: o.due?.type === "FINAL_BALANCE" ? "Balance due" : "Deposit due", tone: "warn" }}>
           <p className="lede mt-4 max-w-2xl text-muted">
-            {o.deposit?.payHref ? "If you left the payment page before finishing, you can pick up where you left off." : "Please see your order page for how to pay your deposit."}
+            {o.due?.payHref ? "If you left the payment page before finishing, you can pick up where you left off." : "Please see your order page for how to pay."}
           </p>
         </DocHeading>
         <div className="mt-10 flex flex-wrap gap-3">
-          {o.deposit?.payHref ? (
-            <a href={o.deposit.payHref} rel="nofollow" className={buttonClasses("primary", "lg")}>
-              Pay {formatCents(o.deposit.dueCents)} Deposit
+          {o.due?.payHref ? (
+            <a href={o.due.payHref} rel="nofollow" className={buttonClasses("primary", "lg")}>
+              Pay {formatCents(o.due.amountCents)} {o.due.type === "FINAL_BALANCE" ? "Balance" : "Deposit"}
             </a>
           ) : null}
-          <Link href={`/order/${token}`} className={buttonClasses(o.deposit?.payHref ? "secondary" : "primary", "lg")}>
+          <Link href={`/order/${token}`} className={buttonClasses(o.due?.payHref ? "secondary" : "primary", "lg")}>
             View Your Order
           </Link>
         </div>
       </article>
     );
   }
+  const deposit = last?.label === "Deposit";
+  const title = confirming ? "Thank you — we're confirming your payment." : deposit ? "Thank you — your deposit has been received." : o.balanceCents <= 0 ? "Thank you — your order is paid in full." : "Thank you — your payment has been received.";
 
   return (
     <article>
-      <DocHeading eyebrow={`Order ${o.number}`} title={paid ? "Thank you — your deposit has been received." : "Thank you — we're confirming your payment."} status={paid ? { label: "Deposit paid", tone: "good" } : { label: "Confirming", tone: "warn" }}>
+      <DocHeading eyebrow={`Order ${o.number}`} title={title} status={confirming ? { label: "Confirming", tone: "warn" } : { label: deposit ? "Deposit paid" : o.balanceCents <= 0 ? "Paid in full" : "Payment received", tone: "good" }}>
         <p className="lede mt-4 max-w-2xl text-muted">
-          {paid
-            ? "Your piece is now ready to move into the next stage of production. We've emailed you a confirmation."
-            : "Stripe has your payment and is confirming it with us. This usually takes a few seconds — this page updates on its own."}
+          {confirming
+            ? "Stripe has your payment and is confirming it with us. This usually takes a few seconds — this page updates on its own."
+            : deposit
+              ? "Your piece is now ready to move into the next stage of production. We've emailed you a confirmation."
+              : "We've emailed you a receipt."}
         </p>
       </DocHeading>
-      {!paid ? <AutoRefresh /> : null}
+      {confirming ? <AutoRefresh /> : null}
 
       <div className="mt-10">
         <Facts
           items={[
             { label: "Order number", value: o.number },
-            { label: "Deposit paid", value: o.deposit ? formatCents(paid ? o.deposit.amountCents : 0, { showZeroCents: true }) : formatCents(o.paidCents, { showZeroCents: true }) },
+            { label: deposit ? "Deposit paid" : "This payment", value: last && !confirming ? formatCents(last.amountCents, { showZeroCents: true }) : null },
+            { label: "Paid so far", value: formatCents(o.paidCents, { showZeroCents: true }) },
             { label: "Remaining balance", value: formatCents(o.balanceCents, { showZeroCents: true }) },
             { label: "Production status", value: PRODUCTION_STATUS_LABELS[o.productionStatus] },
             { label: "Estimated completion", value: o.estimatedCompletion },
