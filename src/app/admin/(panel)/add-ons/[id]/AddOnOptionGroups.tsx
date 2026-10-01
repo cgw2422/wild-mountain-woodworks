@@ -72,7 +72,7 @@ export function AddOnOptionGroups({
                   name="requiredOverride"
                   defaultValue={g.requiredOverride}
                   options={[
-                    { value: "inherit", label: `Group default (${g.required ? "required" : "optional"})` },
+                    { value: "inherit", label: `Default (${g.required ? "required" : "optional"})` },
                     { value: "required", label: "Required" },
                     { value: "optional", label: "Optional" },
                   ]}
