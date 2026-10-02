@@ -10,6 +10,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { getSiteOrigin } from "@/lib/site-url";
 import { trustedIpHeaders } from "./client-ip";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./password";
+import { trustedDevicePlugin } from "./trusted-device-plugin";
 
 /**
  * Admin authentication, built on Better Auth (a maintained library) rather
@@ -25,6 +26,13 @@ import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./password";
  * - Two-factor: TOTP authenticator apps with one-time backup codes. Secrets
  *   and codes are encrypted at rest; failed codes lock the account after 5
  *   attempts for 15 minutes. Enrolment is mandatory (./session.ts).
+ * - Trusted devices: after password + authenticator code an admin may trust
+ *   the browser for 30 days (fixed, never extended), so later sign-ins there
+ *   need only the password. Our own hashed, revocable records
+ *   (./trusted-devices.ts) complete Better Auth's pending challenge through a
+ *   server-only plugin endpoint (./trusted-device-plugin.ts); the plugin's
+ *   built-in trustDevice is never enabled (it stores identifiers in plain text
+ *   and slides the expiry on every sign-in).
  * - No public sign-up. The HTTP handler is intentionally NOT mounted: every
  *   auth operation goes through our own server actions, which add throttling,
  *   generic errors and audit logging, so there is no /api/auth surface.
@@ -141,6 +149,7 @@ function createAuth() {
         backupCodeOptions: { amount: 10, length: 10 },
         accountLockout: { enabled: true, maxFailedAttempts: 5, durationSeconds: 15 * 60 },
       }),
+      trustedDevicePlugin(),
       nextCookies(), // must be last: lets server actions set auth cookies
     ],
   });

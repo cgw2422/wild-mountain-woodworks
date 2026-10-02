@@ -141,6 +141,18 @@ Authentication uses [Better Auth](https://better-auth.com), a maintained library
 - Enrolment shows a QR code and **10 one-time backup codes, displayed once** (they can be regenerated, which invalidates the old ones).
 - Every sign-in then needs a 6-digit code or a backup code. After 5 wrong codes the account is locked for 15 minutes.
 
+**Trusted devices ("Trust this device for 30 days"):**
+- After the password **and** an authenticator code succeed, the admin can tick **Trust this device for 30 days**. Later sign-ins in that browser still need the password but skip the code. Using a backup code never trusts a device.
+- The 30 days are fixed when the device is trusted and are never extended by signing in. After that the code is asked again (and the device can be trusted again).
+- It skips only the code: sessions still expire normally (then the password is needed again), and roles still apply.
+- Cookie: a random 256-bit token, nothing else. `HttpOnly`, `SameSite=Strict`, `Secure` with the `__Secure-` prefix in production, and sent only to `/admin/login`. The database stores only its SHA-256 hash, with the admin, the browser label ("Chrome on Windows"), user agent, created, last-used and expiry dates, and first/last IP for the audit trail. IPs are never used to decide trust, and there's no fingerprinting.
+- Valid only for the admin who trusted it, and only while the record isn't revoked or expired and the account is active with two-factor on. Anything else (missing, malformed, unknown, revoked, expired, another admin's) means the code step.
+- Revoked automatically when the password is changed or reset, two-factor is replaced or reset, the account is deactivated, or an owner signs the admin out everywhere. Database triggers repeat this for any path that changes a password, authenticator or account status (including `npm run admin:create`). Deleting an admin deletes their devices.
+- **Admin → Security → Trusted devices** lists them (never the token) with **Rename**, **Revoke** and **Revoke all trusted devices**.
+- Better Auth's built-in trust-device option isn't used: it stores the identifier unhashed, extends the 30 days on every sign-in and keeps no per-device record. Ours (`src/lib/auth/trusted-devices.ts`) finishes Better Auth's own pending two-factor challenge through a server-only plugin endpoint (`src/lib/auth/trusted-device-plugin.ts`), so sessions are still created and validated by Better Auth.
+
+**Confirm it's you (owner security changes):** adding admins, changing roles, deactivating or reactivating, resetting another admin's password or two-factor, and signing someone out everywhere need an authenticator (or backup) code proven in the last **15 minutes**. A sign-in with a code counts. A sign-in on a trusted device doesn't, so the first such change asks for a code under **Confirm it's you**. Changing your password, generating backup codes and replacing your authenticator already ask for your current password.
+
 **Roles** (`src/lib/auth/permissions.ts`, enforced server-side on every admin page, action and API route):
 
 | Role | Can |
@@ -161,11 +173,12 @@ Authentication uses [Better Auth](https://better-auth.com), a maintained library
 - Change your password (signs out your other devices).
 - Generate new backup codes, or replace your authenticator.
 - See where you're signed in and sign out other sessions.
+- See, rename and revoke your trusted devices.
 - Owners also:
   - add admins and change roles;
   - deactivate or reactivate admins;
   - reset another admin's password or two-factor;
-  - sign someone out everywhere if you suspect a compromise;
+  - sign someone out everywhere if you suspect a compromise (also revokes their trusted devices);
   - read the **audit log** (`/admin/security/audit`).
 
 **Passwords:**
@@ -650,6 +663,7 @@ npm run check          # eslint + tsc + vitest
   - **Admin security** (`tests/integration/auth.test.ts`), using real Better Auth calls and real TOTP codes:
     - two-factor enrolment is forced before any admin access;
     - sign-in requires a code; wrong codes lock the account; backup codes work once;
+    - trusted devices (`trusted-devices.test.ts`): created only after password + authenticator code (never a backup code), stored hashed, skip only the code, expire after 30 days without being extended, are per admin, are revoked on password/two-factor/account changes and by the admin, and owner security changes still need a fresh code;
     - the same generic error for wrong passwords and unknown emails, failures logged, lockout after repeated failures;
     - no public sign-up; deactivated accounts refused;
     - forged, idle, over-age and revoked sessions rejected; sign-out deletes the server session;

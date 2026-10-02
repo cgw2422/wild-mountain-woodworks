@@ -8,7 +8,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
  * Better Auth sets after a real sign-in). Used by the QA script and tests;
  * refuses to run in production.
  */
-export async function mintAdminSession(prisma: PrismaClient, userId: string, opts: { ageMs?: number; idleMs?: number } = {}) {
+export async function mintAdminSession(prisma: PrismaClient, userId: string, opts: { ageMs?: number; idleMs?: number; fresh?: boolean } = {}) {
   if (process.env.NODE_ENV === "production") throw new Error("mintAdminSession is not available in production.");
   const secret = process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_SECRET.length >= 32 ? process.env.BETTER_AUTH_SECRET : "wild-mountain-development-only-secret-change-me-0123456789";
   const token = randomBytes(24).toString("base64url");
@@ -20,6 +20,8 @@ export async function mintAdminSession(prisma: PrismaClient, userId: string, opt
       expiresAt: new Date(now + 7 * 24 * 3600 * 1000),
       createdAt: new Date(now - (opts.ageMs ?? 0)),
       updatedAt: new Date(now - (opts.idleMs ?? 0)),
+      // Like a sign-in with an authenticator code: fresh for owner security changes unless fresh: false.
+      twoFactorVerifiedAt: opts.fresh === false ? null : new Date(now),
     },
   });
   const value = encodeURIComponent(`${token}.${await makeSignature(token, secret)}`);

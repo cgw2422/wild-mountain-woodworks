@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AuthShell } from "../AuthShell";
+import { TRUSTED_DEVICE_DAYS } from "@/lib/auth/trusted-devices";
 import { VerifyForm } from "./VerifyForm";
 
 export const metadata: Metadata = { title: "Two-factor verification", robots: { index: false, follow: false } };
@@ -9,7 +10,7 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
   const { next } = await searchParams;
   return (
     <AuthShell title="Two-factor verification" intro="Enter the 6-digit code from your authenticator app.">
-      <VerifyForm next={next} />
+      <VerifyForm next={next} trustDays={TRUSTED_DEVICE_DAYS} />
     </AuthShell>
   );
 }

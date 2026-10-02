@@ -8,8 +8,10 @@ import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { logger } from "@/lib/logger";
 import { AuthConfigError, getAuth } from "@/lib/auth/auth";
-import { getClientIp, getSessionState } from "@/lib/auth/session";
+import type { TrustedSignInResult } from "@/lib/auth/trusted-device-plugin";
+import { getClientIp, getSessionState, markSecondFactorVerified } from "@/lib/auth/session";
 import { hashAdminPassword } from "@/lib/auth/password";
+import { clearTrustedDeviceCookie, markTrustedDeviceUsed, readTrustedDeviceCookie, trustThisDevice, TRUSTED_DEVICE_DAYS } from "@/lib/auth/trusted-devices";
 import { peekRateLimit, rateLimit, resetRateLimit } from "@/lib/rate-limit";
 
 export type LoginState = { error?: string; email?: string } | undefined;
@@ -65,9 +67,16 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   }
   if (failures >= 3) await sleep(Math.min(8000, 500 * 2 ** (failures - 3)));
 
+  const requestHeaders = await headers();
   let result: SignInResult | null = null;
+  let signInHeaders: Headers | null = null;
   try {
-    result = (await getAuth().api.signInEmail({ body: { email, password, rememberMe: true }, headers: await headers() })) as unknown as SignInResult;
+    const res = (await getAuth().api.signInEmail({ body: { email, password, rememberMe: true }, headers: requestHeaders, returnHeaders: true })) as unknown as {
+      headers: Headers;
+      response: SignInResult;
+    };
+    result = res.response;
+    signInHeaders = res.headers;
   } catch (error) {
     const cfg = configError(error);
     if (cfg) return { error: cfg, email };
@@ -88,6 +97,8 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   }
 
   if (result?.twoFactorRedirect) {
+    // Password verified. A trusted device skips the code; anything else goes to the code step.
+    if (user && signInHeaders && (await signInOnTrustedDevice(user, requestHeaders, signInHeaders, ip))) redirect(safeNext(next));
     redirect(`/admin/login/verify?next=${encodeURIComponent(safeNext(next))}`);
   }
   // No second factor yet: the session only grants access to enrolment.
@@ -98,11 +109,66 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   redirect("/admin/setup-mfa");
 }
 
+/**
+ * After a correct password: if this browser holds a valid trusted-device
+ * cookie for this admin, complete Better Auth's pending two-factor challenge
+ * without a code. Returns true when signed in. Any problem with the cookie
+ * (missing, malformed, unknown, revoked, expired, another admin's) means the
+ * normal code step — default deny.
+ */
+async function signInOnTrustedDevice(user: { id: string; name: string }, requestHeaders: Headers, signInHeaders: Headers, ip: string) {
+  if (!(await readTrustedDeviceCookie())) return false;
+  // Hand Better Auth the challenge cookie its sign-in just issued, as the browser would on its next request.
+  const challenge = signInHeaders
+    .getSetCookie()
+    .map((c) => c.split(";")[0]!)
+    .find((c) => /(^|\.)two_factor=/.test(c));
+  if (!challenge) return false;
+  const challengeName = challenge.slice(0, challenge.indexOf("="));
+  const cookie = (requestHeaders.get("cookie") ?? "")
+    .split(";")
+    .map((c) => c.trim())
+    .filter((c) => c && c.slice(0, c.indexOf("=")) !== challengeName);
+  const h = new Headers(requestHeaders);
+  h.set("cookie", [...cookie, challenge].join("; "));
+
+  let res: TrustedSignInResult;
+  try {
+    res = (await getAuth().api.signInWithTrustedDevice({ headers: h })) as TrustedSignInResult;
+  } catch (error) {
+    logger.error("Trusted-device sign-in failed; falling back to the code", { error });
+    return false;
+  }
+  if (!res.trusted) {
+    // Another admin's trust stays on this browser for them; anything else is dead and cleared.
+    if (res.reason !== "other_user" && res.reason !== "no_challenge") await clearTrustedDeviceCookie();
+    if (res.reason === "expired" && res.deviceId) {
+      await logActivity("admin.trusted_device_expired", `${user.name}'s trusted device expired after ${TRUSTED_DEVICE_DAYS} days; authenticator code required`, {
+        actorId: user.id,
+        entityType: "trusted_device",
+        entityId: res.deviceId,
+      });
+    }
+    return false;
+  }
+  // res.userId is the pending challenge's user — the account whose password was just verified above.
+  await markTrustedDeviceUsed(res.deviceId, ip);
+  await prisma.adminUser.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+  await logActivity("admin.trusted_device_used", `${user.name} signed in on a trusted device (authenticator code skipped)`, {
+    actorId: user.id,
+    entityType: "trusted_device",
+    entityId: res.deviceId,
+  });
+  await logActivity("admin.login", `${user.name} signed in (trusted device)`, { actorId: user.id, entityType: "admin", entityId: user.id });
+  return true;
+}
+
 const codeSchema = z
   .object({
     code: z.string().trim().max(40),
     method: z.enum(["totp", "backup"]),
     next: z.string().max(500).optional(),
+    trust: z.string().max(10).optional(),
   })
   // Authenticator codes: digits only ("123 456" → "123456"). Backup codes keep their dash.
   .transform((v) => ({ ...v, code: v.method === "totp" ? v.code.replace(/\D/g, "") : v.code.replace(/\s/g, "") }))
@@ -113,17 +179,22 @@ export async function verifyTwoFactorAction(_prev: VerifyState, formData: FormDa
   const parsed = codeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Enter the code from your authenticator app." };
   const { code, method, next } = parsed.data;
+  // Only an authenticator code can establish device trust — never a backup code (account recovery).
+  const trust = method === "totp" && parsed.data.trust === "on";
 
   const ip = await getClientIp();
   if (!(await rateLimit(`2fa:ip:${ip}`, 20, 15 * 60)).allowed) return { error: "Too many attempts. Please wait 15 minutes and try again." };
 
   const h = await headers();
   let userId: string | null = null;
+  let sessionToken: string | null = null;
   try {
+    // Better Auth's own trustDevice stays off: trusted devices are ours (src/lib/auth/trusted-devices.ts).
     const res = (method === "totp"
       ? await getAuth().api.verifyTOTP({ body: { code, trustDevice: false }, headers: h })
-      : await getAuth().api.verifyBackupCode({ body: { code, trustDevice: false }, headers: h })) as { user?: { id: string } };
+      : await getAuth().api.verifyBackupCode({ body: { code, trustDevice: false }, headers: h })) as { token?: string; user?: { id: string } };
     userId = res.user?.id ?? null;
+    sessionToken = res.token ?? null;
   } catch (error) {
     const cfg = configError(error);
     if (cfg) return { error: cfg };
@@ -139,6 +210,16 @@ export async function verifyTwoFactorAction(_prev: VerifyState, formData: FormDa
     await logActivity("admin.login", `${user.name} signed in`, { actorId: userId, entityType: "admin", entityId: userId });
     if (method === "backup") {
       await logActivity("admin.backup_code_used", `${user.name} signed in with a backup code`, { actorId: userId, entityType: "admin", entityId: userId });
+    }
+    // The second factor was just proven: this session may make owner security changes for a while.
+    if (sessionToken) await markSecondFactorVerified({ token: sessionToken }, userId);
+    if (trust) {
+      const device = await trustThisDevice(userId, { userAgent: h.get("user-agent"), ip });
+      await logActivity("admin.trusted_device_created", `${user.name} trusted this device (${device.label}) for ${TRUSTED_DEVICE_DAYS} days`, {
+        actorId: userId,
+        entityType: "trusted_device",
+        entityId: device.id,
+      });
     }
   }
   redirect(safeNext(next));

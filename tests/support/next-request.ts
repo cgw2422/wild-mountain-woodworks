@@ -66,7 +66,7 @@ export const nextNavigation = {
 export const nextCache = { revalidatePath: () => undefined, revalidateTag: () => undefined };
 
 /** Sign the test request in as an admin (session row + signed cookie). */
-export async function signInAs(userId: string, opts: { ageMs?: number; idleMs?: number } = {}) {
+export async function signInAs(userId: string, opts: { ageMs?: number; idleMs?: number; fresh?: boolean } = {}) {
   const { prisma } = await import("@/lib/db");
   const { mintAdminSession } = await import("@/lib/auth/mint-session");
   const s = await mintAdminSession(prisma, userId, opts);

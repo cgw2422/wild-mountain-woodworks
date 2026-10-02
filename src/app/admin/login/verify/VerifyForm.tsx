@@ -5,7 +5,7 @@ import { useRef, useState, useTransition } from "react";
 import { verifyTwoFactorAction, type VerifyState } from "../actions";
 import { authButton, authInput } from "../AuthShell";
 
-export function VerifyForm({ next }: { next?: string }) {
+export function VerifyForm({ next, trustDays }: { next?: string; trustDays: number }) {
   const [method, setMethod] = useState<"totp" | "backup">("totp");
   const [state, setState] = useState<VerifyState>(undefined);
   const [pending, startTransition] = useTransition();
@@ -56,6 +56,19 @@ export function VerifyForm({ next }: { next?: string }) {
           className={`${authInput} tracking-[0.2em]`}
         />
       </div>
+      {method === "totp" ? (
+        <label className="flex items-start gap-2.5 text-sm">
+          <input type="checkbox" name="trust" className="mt-0.5 size-4 shrink-0 accent-current" />
+          <span>
+            Trust this device for {trustDays} days
+            <span className="mt-0.5 block text-xs text-muted">
+              You&apos;ll still sign in with your password, but this browser won&apos;t ask for a code. Don&apos;t choose this on a shared computer.
+            </span>
+          </span>
+        </label>
+      ) : (
+        <p className="text-xs text-muted">Signing in with a backup code doesn&apos;t trust this device. Next time, use your authenticator app to choose that.</p>
+      )}
       {state?.error ? (
         <p role="alert" className="border-l-2 border-error bg-error/5 px-3 py-2 text-sm text-error">
           {state.error} {timedOut ? <Link href="/admin/login" className="underline">Sign in again</Link> : null}

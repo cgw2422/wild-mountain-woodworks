@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
-import { requirePermission } from "@/lib/auth/session";
+import { requirePermission, secondFactorFreshUntil } from "@/lib/auth/session";
+import { activeTrustedDevicesWhere, TRUSTED_DEVICE_DAYS } from "@/lib/auth/trusted-devices";
+import { describeUserAgent } from "@/lib/auth/user-agent";
 import { ROLE_DESCRIPTIONS, ROLE_LABELS } from "@/lib/auth/permissions";
 import { SESSION_IDLE_SECONDS, SESSION_MAX_AGE_SECONDS } from "@/lib/auth/auth";
 import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password-rules";
@@ -8,8 +10,12 @@ import { ActionButton, ActionForm, ConfirmAction, Select, SubmitButton, TextInpu
 import { AdminLinkButton, Badge, Card, PageHeader, formatDate, table } from "@/components/admin/ui";
 import {
   changePassword,
+  confirmIdentity,
   createAdminUser,
   regenerateBackupCodes,
+  renameMyTrustedDevice,
+  revokeAllMyTrustedDevices,
+  revokeMyTrustedDevice,
   replaceAuthenticator,
   resetAdminPassword,
   resetAdminTwoFactor,
@@ -19,25 +25,17 @@ import {
   setAdminActive,
   setAdminRole,
 } from "./actions";
-import { BackupCodesButton, PasswordActionButton, RoleSelect } from "./SecurityControls";
+import { BackupCodesButton, PasswordActionButton, RenameDeviceButton, RoleSelect } from "./SecurityControls";
 
 export const metadata: Metadata = { title: "Security" };
 export const dynamic = "force-dynamic";
-
-/** "Chrome on macOS" from a user-agent string (display only). */
-function device(ua: string | null) {
-  if (!ua) return "Unknown device";
-  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
-  const os = /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "";
-  return os ? `${browser} on ${os}` : browser;
-}
 
 const hoursLabel = (s: number) => (s % 86400 === 0 ? `${s / 86400} day${s === 86400 ? "" : "s"}` : `${Math.round(s / 3600)} hour${s === 3600 ? "" : "s"}`);
 
 export default async function SecurityPage() {
   const admin = await requirePermission("own_account");
   const isOwner = admin.role === "OWNER";
-  const [me, sessions, admins] = await Promise.all([
+  const [me, sessions, admins, devices, freshUntil] = await Promise.all([
     prisma.adminUser.findUniqueOrThrow({ where: { id: admin.id }, select: { twoFactorEnabled: true, admintwofactors: { select: { id: true } } } }),
     prisma.adminSession.findMany({ where: { userId: admin.id, expiresAt: { gt: new Date() } }, orderBy: { updatedAt: "desc" } }),
     isOwner
@@ -46,6 +44,12 @@ export default async function SecurityPage() {
           select: { id: true, name: true, email: true, role: true, active: true, twoFactorEnabled: true, lastLoginAt: true, _count: { select: { adminsessions: true } } },
         })
       : Promise.resolve([]),
+    prisma.adminTrustedDevice.findMany({
+      where: activeTrustedDevicesWhere(admin.id),
+      orderBy: { createdAt: "desc" },
+      select: { id: true, label: true, createdAt: true, lastUsedAt: true, expiresAt: true, lastSeenIp: true },
+    }),
+    isOwner ? secondFactorFreshUntil(admin) : Promise.resolve(null),
   ]);
   const activeOwners = admins.filter((a) => a.role === "OWNER" && a.active).length;
 
@@ -114,7 +118,7 @@ export default async function SecurityPage() {
             {sessions.map((s) => (
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm">
                 <span>
-                  <span className="font-medium">{device(s.userAgent)}</span>
+                  <span className="font-medium">{describeUserAgent(s.userAgent)}</span>
                   {s.id === admin.sessionId ? <Badge tone="green" className="ml-2">This device</Badge> : null}
                   <span className="block text-xs text-neutral-500">
                     {s.ipAddress || "Unknown IP"} · signed in {formatDate(s.createdAt, true)} · last active {formatDate(s.updatedAt, true)}
@@ -129,6 +133,83 @@ export default async function SecurityPage() {
             ))}
           </ul>
         </Card>
+
+        <Card
+          id="trusted-devices"
+          title="Trusted devices"
+          description={`Browsers where you chose “Trust this device”. They still need your password but skip the authenticator code until the trust expires (${TRUSTED_DEVICE_DAYS} days after you chose it). Changing your password or authenticator revokes them all.`}
+          actions={
+            devices.length ? (
+              <ConfirmAction
+                action={revokeAllMyTrustedDevices}
+                label="Revoke all trusted devices"
+                variant="small"
+                title="Revoke all trusted devices?"
+                body="Every browser you trusted will ask for an authenticator code at its next sign-in. Nobody is signed out right now — use “Sign out other sessions” for that."
+                confirmLabel="Revoke all"
+              />
+            ) : undefined
+          }
+        >
+          {devices.length ? (
+            <ul className="divide-y divide-neutral-100">
+              {devices.map((d) => (
+                <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm">
+                  <span>
+                    <span className="font-medium">{d.label}</span>
+                    <span className="block text-xs text-neutral-500">
+                      Trusted {formatDate(d.createdAt)} · {d.lastUsedAt ? `last used ${formatDate(d.lastUsedAt)}` : "not used yet"} · expires {formatDate(d.expiresAt)}
+                      {d.lastSeenIp ? ` · ${d.lastSeenIp}` : ""}
+                    </span>
+                  </span>
+                  <span className="flex gap-1.5">
+                    <RenameDeviceButton label={d.label} rename={renameMyTrustedDevice.bind(null, d.id)} />
+                    <ConfirmAction
+                      action={revokeMyTrustedDevice.bind(null, d.id)}
+                      label="Revoke"
+                      variant="small"
+                      title={`Revoke ${d.label}?`}
+                      body="This browser will ask for an authenticator code at its next sign-in."
+                      confirmLabel="Revoke"
+                    />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-neutral-500">No trusted devices. Tick “Trust this device for {TRUSTED_DEVICE_DAYS} days” when you enter your authenticator code to add one.</p>
+          )}
+        </Card>
+
+        {isOwner ? (
+          <Card
+            id="confirm-identity"
+            title="Confirm it's you"
+            description="Adding admins, changing roles, deactivating, resetting passwords or two-factor and signing others out need an authenticator code from the last 15 minutes — signing in on a trusted device skips the code."
+          >
+            {freshUntil ? (
+              <p className="text-sm text-neutral-700">
+                <Badge tone="green" className="mr-2">Confirmed</Badge>
+                You can make security changes until {formatDate(freshUntil, true)}.
+              </p>
+            ) : (
+              <ActionForm action={confirmIdentity} resetOnSuccess className="flex flex-wrap items-end gap-3" successMessage={null}>
+                <TextInput
+                  name="code"
+                  label="Authentication code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9 ]{6,7}"
+                  maxLength={7}
+                  required
+                  placeholder="123 456"
+                  wrapperClassName="w-44"
+                />
+                <SubmitButton pendingLabel="Checking…">Confirm</SubmitButton>
+              </ActionForm>
+            )}
+          </Card>
+        ) : null}
 
         {isOwner ? (
           <Card id="admins" title="Admin users" description="Only owners see this section. Editors work on pages, homepage, portfolio, FAQs, navigation and media; admins also manage products, quotes, promotions and settings; owners also manage admin users and security.">
@@ -182,7 +263,7 @@ export default async function SecurityPage() {
                                       label="Sign out everywhere"
                                       variant="small"
                                       title={`Sign ${u.name} out everywhere?`}
-                                      body="Use this if you suspect their account is compromised. They can sign in again with their password and authenticator."
+                                      body="Use this if you suspect their account is compromised. Their trusted devices are revoked too, so they'll need their password and authenticator code to sign in again."
                                       confirmLabel="Sign out"
                                     />
                                     <ConfirmAction

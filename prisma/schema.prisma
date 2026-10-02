@@ -56,6 +56,7 @@ model AdminUser {
   adminsessions   AdminSession[]
   adminaccounts   AdminAccount[]
   admintwofactors AdminTwoFactor[]
+  trustedDevices  AdminTrustedDevice[]
   activities      ActivityLog[]
   notes           InternalNote[]
   statusEvents    StatusEvent[]
@@ -79,6 +80,9 @@ model AdminSession {
   userAgent String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  /// When this session last proved the second factor (authenticator or backup code, at sign-in or "Confirm it's you").
+  /// Null for sessions opened on a trusted device. Owner security changes require it to be recent.
+  twoFactorVerifiedAt DateTime?
 
   @@index([userId])
   @@index([expiresAt])
@@ -130,6 +134,32 @@ model AdminTwoFactor {
 
   @@index([userId])
   @@index([secret])
+}
+
+/// A browser an admin chose to trust after a successful authenticator code
+/// ("Trust this device for 30 days"): sign-in on it still needs the password
+/// but skips the code until `expiresAt` (fixed, never extended). Only a
+/// SHA-256 hash of the random cookie token is stored. Revoked on password,
+/// two-factor or account changes (app code + database triggers); rows are
+/// kept for the audit trail. See src/lib/auth/trusted-devices.ts.
+model AdminTrustedDevice {
+  id            String    @id @default(cuid())
+  userId        String
+  user          AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash     String    @unique
+  label         String
+  userAgent     String?
+  /// Audit context only — never used to decide whether a device is trusted.
+  firstSeenIp   String?
+  lastSeenIp    String?
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  revokedReason String?
+  revokedById   String?
+
+  @@index([userId, revokedAt, expiresAt])
 }
 
 model ActivityLog {

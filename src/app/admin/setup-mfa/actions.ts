@@ -7,7 +7,7 @@ import { isAPIError } from "better-auth/api";
 import { logActivity } from "@/lib/activity";
 import { logger } from "@/lib/logger";
 import { getAuth } from "@/lib/auth/auth";
-import { requireSignedIn } from "@/lib/auth/session";
+import { markSecondFactorVerified, requireSignedIn } from "@/lib/auth/session";
 import { rateLimit } from "@/lib/rate-limit";
 
 export type EnrollStart = { ok: true; qr: string; secret: string; backupCodes: string[] } | { ok: false; error: string };
@@ -43,12 +43,14 @@ export async function confirmEnrollment(code: string): Promise<{ ok: boolean; er
   if (!(await rateLimit(`mfa-confirm:${admin.id}`, 10, 15 * 60)).allowed) return { ok: false, error: "Too many attempts. Please wait 15 minutes." };
   const clean = code.replace(/\s/g, "");
   if (!/^\d{6}$/.test(clean)) return { ok: false, error: "Enter the 6-digit code from your authenticator app." };
+  let token: string | undefined;
   try {
-    await getAuth().api.verifyTOTP({ body: { code: clean }, headers: await headers() });
+    token = ((await getAuth().api.verifyTOTP({ body: { code: clean }, headers: await headers() })) as { token?: string }).token;
   } catch (error) {
     if (!isAPIError(error)) logger.error("Two-factor enrolment failed to confirm", { error });
     return { ok: false, error: "That code isn't right. Make sure your phone's clock is set automatically and try the newest code." };
   }
+  await markSecondFactorVerified({ token, sessionId: token ? undefined : admin.sessionId }, admin.id);
   await logActivity("admin.mfa_enabled", `${admin.name} set up two-factor authentication`, { actorId: admin.id, entityType: "admin", entityId: admin.id });
   return { ok: true };
 }

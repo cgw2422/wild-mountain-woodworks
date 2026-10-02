@@ -114,7 +114,14 @@ export type ActivityType =
   | "admin.sessions_revoked"
   | "admin.role_changed"
   | "admin.password_reset"
-  | "admin.login_locked";
+  | "admin.login_locked"
+  | "admin.reauthenticated"
+  | "admin.trusted_device_created"
+  | "admin.trusted_device_used"
+  | "admin.trusted_device_revoked"
+  | "admin.trusted_device_renamed"
+  | "admin.trusted_devices_revoked"
+  | "admin.trusted_device_expired";
 
 /**
  * Record an event in the audit log (also shown as the dashboard's Recent

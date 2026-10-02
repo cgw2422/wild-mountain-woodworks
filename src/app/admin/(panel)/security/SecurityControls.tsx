@@ -170,3 +170,28 @@ export function RoleSelect({ name, role, change }: { name: string; role: "OWNER"
     </span>
   );
 }
+
+/** Rename a trusted device (display only — e.g. "Office PC"). */
+export function RenameDeviceButton({ label, rename }: { label: string; rename: (data: FormData) => Promise<ActionResult> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className={adminButton.small} onClick={() => setOpen(true)}>
+        Rename
+      </button>
+      <Dialog open={open} onClose={() => setOpen(false)} title="Rename trusted device">
+        {open ? (
+          <ActionForm action={rename} onSuccess={() => setOpen(false)} className="space-y-4">
+            <TextInput name="label" label="Device name" defaultValue={label} required maxLength={60} autoComplete="off" />
+            <div className="flex justify-end gap-2">
+              <button type="button" className={adminButton.secondary} onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+              <SubmitButton>Save</SubmitButton>
+            </div>
+          </ActionForm>
+        ) : null}
+      </Dialog>
+    </>
+  );
+}

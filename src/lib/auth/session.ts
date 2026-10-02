@@ -130,3 +130,24 @@ export async function requireSignedIn(): Promise<SessionState> {
 export async function getClientIp(): Promise<string> {
   return clientIpFromHeaders(await headers());
 }
+
+/**
+ * Step-up for owner security changes: how long a proven second factor counts
+ * as fresh. Sessions opened with an authenticator or backup code start fresh;
+ * sessions opened on a trusted device (code skipped) do not, so the first
+ * owner change asks for a code ("Confirm it's you" on the Security page).
+ */
+export const STEP_UP_WINDOW_SECONDS = 15 * 60;
+
+/** When the second factor stops counting as fresh for this session, or null if it isn't fresh now. */
+export async function secondFactorFreshUntil(admin: CurrentAdmin): Promise<Date | null> {
+  const s = await prisma.adminSession.findUnique({ where: { id: admin.sessionId }, select: { userId: true, twoFactorVerifiedAt: true } });
+  if (!s || s.userId !== admin.id || !s.twoFactorVerifiedAt) return null;
+  const until = new Date(s.twoFactorVerifiedAt.getTime() + STEP_UP_WINDOW_SECONDS * 1000);
+  return until.getTime() > Date.now() ? until : null;
+}
+
+export async function markSecondFactorVerified(where: { sessionId?: string; token?: string }, userId: string) {
+  if (!where.sessionId && !where.token) return;
+  await prisma.adminSession.updateMany({ where: { ...(where.sessionId ? { id: where.sessionId } : { token: where.token }), userId }, data: { twoFactorVerifiedAt: new Date() } });
+}

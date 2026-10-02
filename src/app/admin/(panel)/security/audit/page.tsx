@@ -33,6 +33,7 @@ export default async function AuditLogPage({ searchParams }: { searchParams: SP 
                 { message: { contains: q, mode: "insensitive" } },
                 { type: { contains: q, mode: "insensitive" } },
                 { ipAddress: { contains: q } },
+                { entityId: q },
                 { actor: { name: { contains: q, mode: "insensitive" } } },
               ],
             },
@@ -107,6 +108,7 @@ export default async function AuditLogPage({ searchParams }: { searchParams: SP 
                     <td className={table.td}>
                       <Badge tone={failed ? "red" : r.type.startsWith("admin.") || r.type.startsWith("account.") ? "violet" : "neutral"}>{r.type}</Badge>
                       <p className="mt-1 text-sm text-neutral-800 [overflow-wrap:anywhere]">{r.message}</p>
+                      {r.entityType === "trusted_device" && r.entityId ? <p className="mt-0.5 font-mono text-xs text-neutral-400">Device {r.entityId}</p> : null}
                     </td>
                     <td className={cn(table.td, "text-xs text-neutral-600")}>
                       {r.ipAddress ?? "—"}
