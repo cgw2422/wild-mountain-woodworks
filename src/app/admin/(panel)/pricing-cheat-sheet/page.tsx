@@ -56,7 +56,7 @@ export default async function PricingCheatSheetPage({ searchParams }: { searchPa
         title="Pricing Cheat Sheet"
         description="Live prices from the current product, options and sale — exactly what the website charges. Read-only."
         actions={
-          <Link href={`/admin/products/${product.id}#options`} className="text-sm text-neutral-600 underline">
+          <Link href={`/admin/products/${product.id}#options`} className="inline-flex min-h-11 items-center text-sm text-neutral-600 underline">
             Edit {product.name}
           </Link>
         }
