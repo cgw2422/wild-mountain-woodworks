@@ -55,6 +55,7 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Business",
     items: [
+      { href: "/admin/pricing-cheat-sheet", label: "Pricing Cheat Sheet", permission: "catalog" },
       { href: "/admin/pricing-calculator", label: "Pricing Calculator", permission: "catalog" },
       { href: "/admin/settings", label: "Settings", permission: "settings" },
       { href: "/admin/settings/emails", label: "Emails", permission: "settings" },
