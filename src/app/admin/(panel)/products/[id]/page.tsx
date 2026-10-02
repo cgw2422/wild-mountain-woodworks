@@ -190,7 +190,7 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
                   <MoneyInput label="Base material cost" name="estMaterialCost" defaultValue={centsToDollarInput(product.estMaterialCostCents)} placeholder="e.g. 420" />
                   <TextInput label="Typical labor hours" name="estLaborHours" inputMode="decimal" defaultValue={product.estLaborHours != null ? String(product.estLaborHours) : ""} placeholder="e.g. 24" />
                   <div className="sm:pt-7">
-                    <Link href={`/admin/pricing-calculator?product=${product.id}`} className="text-sm underline" target="_blank">
+                    <Link href={`/admin/pricing-calculator?product=${product.id}`} className="inline-flex min-h-11 items-center text-sm underline" target="_blank">
                       Price in calculator ↗
                     </Link>
                   </div>
