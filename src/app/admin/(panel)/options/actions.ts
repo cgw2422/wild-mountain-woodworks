@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { revalidateSite } from "@/lib/revalidate";
+import { nextFreeName } from "@/lib/admin/names";
 import { AdminError, adminAction, fd } from "@/lib/admin/action";
 import { hexColorText, idList, moneyText, optionalText, requiredText } from "../products/_lib/schemas";
 
@@ -201,17 +202,6 @@ export const reorderOptionValues = adminAction(async (admin, groupId: string, id
 /* ------------------------------------------------------------------------ */
 /* Duplicating                                                               */
 /* ------------------------------------------------------------------------ */
-
-/** First of "base", "base (2)", "base (3)"… that `taken` doesn't contain (case-insensitive). */
-function nextFreeName(base: string, taken: string[]) {
-  const used = new Set(taken.map((n) => n.toLowerCase()));
-  const trimmed = base.slice(0, 110);
-  if (!used.has(trimmed.toLowerCase())) return trimmed;
-  for (let i = 2; ; i++) {
-    const candidate = `${trimmed} (${i})`;
-    if (!used.has(candidate.toLowerCase())) return candidate;
-  }
-}
 
 /**
  * Copy a group and all of its values (prices, images, swatches, custom and

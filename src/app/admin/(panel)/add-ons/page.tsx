@@ -7,7 +7,8 @@ import { AdminLinkButton, Badge, Card, EmptyState, PageHeader, formatDate } from
 import { ActionButton } from "@/components/admin/forms";
 import { CatalogThumb } from "@/components/admin/catalog/CatalogThumb";
 import { SortableRows } from "@/components/admin/catalog/SortableRows";
-import { reorderAddOns, restoreAddOn } from "./actions";
+import { RunActionButton } from "@/components/admin/catalog/RunActionButton";
+import { duplicateAddOn, reorderAddOns, restoreAddOn } from "./actions";
 
 export const metadata: Metadata = { title: "Add-ons" };
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export default async function AddOnsPage() {
   await requireAdmin();
   const addOns = await prisma.addOn.findMany({
     orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-    include: { image: { select: { url: true, alt: true, focalX: true, focalY: true } }, _count: { select: { products: true } } },
+    include: { image: { select: { url: true, alt: true, focalX: true, focalY: true } }, _count: { select: { products: true, optionGroups: true } } },
   });
   const current = addOns.filter((a) => !a.archivedAt);
   const archived = addOns.filter((a) => a.archivedAt);
@@ -62,6 +63,19 @@ export default async function AddOnsPage() {
                       <span className="w-28 text-right text-sm tabular-nums text-neutral-600">
                         {a._count.products ? `${a._count.products} product${a._count.products === 1 ? "" : "s"}` : "Not assigned"}
                       </span>
+                      <RunActionButton
+                        action={duplicateAddOn.bind(null, a.id)}
+                        navigatePrefix="/admin/add-ons/"
+                        variant="small"
+                        confirm={{
+                          title: `Duplicate “${a.name}”?`,
+                          body: `Creates “Copy of ${a.name}” with the same settings${a._count.optionGroups ? ` and ${a._count.optionGroups} configuration group${a._count.optionGroups === 1 ? "" : "s"}` : ""}. It isn't assigned to any product until you assign it.`,
+                          confirmLabel: "Duplicate",
+                        }}
+                        pendingLabel="Duplicating…"
+                      >
+                        Duplicate
+                      </RunActionButton>
                     </div>
                   </div>
                 ),

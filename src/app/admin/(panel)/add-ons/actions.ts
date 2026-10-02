@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { revalidateSite } from "@/lib/revalidate";
 import { AdminError, adminAction, fd } from "@/lib/admin/action";
+import { nextFreeName } from "@/lib/admin/names";
 import { idList, intText, moneyText, optionalText, requiredText } from "../products/_lib/schemas";
 
 const addOnSchema = z
@@ -93,6 +94,52 @@ export const reorderAddOns = adminAction(async (admin, ids: string[]) => {
   await logActivity("addon.updated", `${admin.name} reordered add-ons`, { actorId: admin.id, entityType: "addOn" });
   revalidateSite();
   return { ok: true, message: "Order saved." };
+});
+
+/**
+ * Copy an add-on as "Copy of …": price, image, description, quantity rules,
+ * required/active flags and its configuration (the same option groups from
+ * the shared library, with their order, labels, required overrides and
+ * "sets the price per unit"). Product assignments are NOT copied, so nothing
+ * changes on the site until the copy is assigned to a product. Saved quotes,
+ * orders and invoices are untouched (they keep their own snapshots).
+ */
+export const duplicateAddOn = adminAction(async (admin, id: string) => {
+  const src = await prisma.addOn.findUnique({ where: { id }, include: { optionGroups: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }] } } });
+  if (!src) throw new AdminError("That add-on no longer exists.");
+  const similar = await prisma.addOn.findMany({ where: { name: { startsWith: `Copy of ${src.name}`.slice(0, 110), mode: "insensitive" } }, select: { name: true } });
+  const name = nextFreeName(`Copy of ${src.name}`, similar.map((a) => a.name));
+  const last = await prisma.addOn.aggregate({ _max: { displayOrder: true } });
+  const copy = await prisma.addOn.create({
+    data: {
+      name,
+      displayName: src.displayName,
+      description: src.description,
+      priceCents: src.priceCents,
+      imageId: src.imageId,
+      scope: src.scope,
+      required: src.required,
+      minQuantity: src.minQuantity,
+      maxQuantity: src.maxQuantity,
+      quantityEnabled: src.quantityEnabled,
+      quantityStep: src.quantityStep,
+      defaultQuantity: src.defaultQuantity,
+      active: src.active,
+      displayOrder: (last._max.displayOrder ?? -1) + 1,
+      optionGroups: {
+        create: src.optionGroups.map((g, i) => ({
+          optionGroupId: g.optionGroupId,
+          displayOrder: i,
+          requiredOverride: g.requiredOverride,
+          displayNameOverride: g.displayNameOverride,
+          setsUnitPrice: g.setsUnitPrice,
+        })),
+      },
+    },
+  });
+  await logActivity("addon.updated", `${admin.name} duplicated add-on "${src.name}" as "${copy.name}"`, { actorId: admin.id, entityType: "addOn", entityId: copy.id });
+  revalidateSite();
+  return { ok: true, id: copy.id, message: "Add-on duplicated." };
 });
 
 export const archiveAddOn = adminAction(async (admin, id: string) => {

@@ -253,4 +253,69 @@ describe.skipIf(!hasTestDb)("configurable add-ons end to end", () => {
     const product = (await loadConfigurableProduct({ id: seeded.product.id }))!;
     expect(product.addOns.find((a) => a.name === "Matching Bench")).toMatchObject({ optionGroups: [], quantityEnabled: true, quantityStep: 1, maxQuantity: 2 });
   });
+  it("duplicates an add-on with its configuration, unassigned, leaving the original and saved quotes alone", async () => {
+    await addOnActions.updateAddOnOptionGroup(chairsId, ids["Chair Style"]!, form({ displayNameOverride: "Choose Your Chair Style", requiredOverride: "required", setsUnitPrice: "on" }));
+    const quote = await createConfigurationQuote({ name: "Jamie Rivers", email: "jamie@example.com", phone: null, zipCode: "43215", timeline: null, notes: null, productId: seeded.product.id, selection: selection(2) });
+    const savedSnapshot = (await prisma.quoteRequest.findUniqueOrThrow({ where: { id: quote.id } })).configuration;
+    const originalBefore = await prisma.addOn.findUniqueOrThrow({ where: { id: chairsId }, include: { optionGroups: true, products: true } });
+    const [groupsBefore, valuesBefore] = [await prisma.optionGroup.count(), await prisma.optionValue.count()];
+
+    const res = await addOnActions.duplicateAddOn(chairsId);
+    expect(res).toMatchObject({ ok: true, id: expect.any(String) });
+    const copy = await prisma.addOn.findUniqueOrThrow({ where: { id: res.id! }, include: { optionGroups: { orderBy: { displayOrder: "asc" } }, products: true } });
+    expect(copy).toMatchObject({
+      name: "Copy of Dining Chairs",
+      displayName: "Add Dining Chairs",
+      description: "Add matching dining chairs to complete your table set.",
+      priceCents: 19250,
+      scope: "REUSABLE",
+      minQuantity: 2,
+      maxQuantity: 12,
+      quantityEnabled: true,
+      quantityStep: 1,
+      defaultQuantity: 4,
+      active: true,
+      archivedAt: null,
+    });
+    expect(copy.displayOrder).toBeGreaterThan(originalBefore.displayOrder);
+    // Same library groups (shared, not copied), same order and per-add-on settings.
+    expect(copy.optionGroups.map((g) => [g.optionGroupId, g.displayNameOverride, g.requiredOverride, g.setsUnitPrice])).toEqual([
+      [ids["Chair Style"], "Choose Your Chair Style", true, true],
+      [ids["Chair Wood Species"], null, null, false],
+      [ids["Chair Finish"], null, null, false],
+      [ids["Seat Finish"], null, null, false],
+    ]);
+    expect([await prisma.optionGroup.count(), await prisma.optionValue.count()]).toEqual([groupsBefore, valuesBefore]);
+    // Not assigned anywhere: the product page is unchanged.
+    expect(copy.products).toEqual([]);
+    expect((await loadConfigurableProduct({ id: seeded.product.id }))!.addOns.map((a) => a.id)).not.toContain(copy.id);
+    // It prices exactly like the original once previewed.
+    const [orig, dup] = [(await loadAddOnPreview(chairsId))!, (await loadAddOnPreview(copy.id))!];
+    const picks = Object.fromEntries(orig.optionGroups.map((g) => [g.id, g.values[0]!.id]));
+    expect(configuredAddOnUnitPrice(dup, picks).unitCents).toBe(configuredAddOnUnitPrice(orig, picks).unitCents);
+
+    // The original and the saved quote are untouched; editing the copy doesn't touch the original.
+    const originalAfter = await prisma.addOn.findUniqueOrThrow({ where: { id: chairsId }, include: { optionGroups: true, products: true } });
+    expect(originalAfter).toEqual(originalBefore);
+    expect((await prisma.quoteRequest.findUniqueOrThrow({ where: { id: quote.id } })).configuration).toEqual(savedSnapshot);
+    await addOnActions.detachAddOnOptionGroup(copy.id, ids["Seat Finish"]!);
+    expect(await prisma.addOnOptionGroup.count({ where: { addOnId: chairsId } })).toBe(4);
+
+    // Names stay unique; an archived add-on can be duplicated too (the copy isn't archived).
+    expect((await addOnActions.duplicateAddOn(chairsId)).id).toBeTruthy();
+    expect(await prisma.addOn.findFirst({ where: { name: "Copy of Dining Chairs (2)" } })).not.toBeNull();
+    await addOnActions.archiveAddOn(chairsId);
+    const fromArchived = await addOnActions.duplicateAddOn(chairsId);
+    expect(await prisma.addOn.findUniqueOrThrow({ where: { id: fromArchived.id! } })).toMatchObject({ name: "Copy of Dining Chairs (3)", archivedAt: null });
+    expect(await addOnActions.duplicateAddOn("missing")).toMatchObject({ ok: false });
+    expect(await prisma.activityLog.count({ where: { type: "addon.updated", message: { contains: "duplicated add-on" } } })).toBe(3);
+  });
+
+  it("only admins can duplicate add-ons", async () => {
+    resetRequest();
+    await createSignedInAdmin({ role: "EDITOR", email: "editor@example.com" });
+    const before = await prisma.addOn.count();
+    expect(await addOnActions.duplicateAddOn(chairsId)).toMatchObject({ ok: false });
+    expect(await prisma.addOn.count()).toBe(before);
+  });
 });

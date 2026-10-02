@@ -5,12 +5,14 @@ import { prisma } from "@/lib/db";
 import { centsToDollarInput } from "@/lib/money";
 import { Badge, Card, PageHeader, formatDate } from "@/components/admin/ui";
 import { ActionButton, ConfirmAction } from "@/components/admin/forms";
+import { RunActionButton } from "@/components/admin/catalog/RunActionButton";
 import { toImageValue } from "../../products/_lib/media";
 import {
   archiveAddOn,
   assignAddOnToProduct,
   attachAddOnOptionGroup,
   deleteAddOn,
+  duplicateAddOn,
   detachAddOnOptionGroup,
   removeAddOnFromProduct,
   reorderAddOnOptionGroups,
@@ -134,6 +136,18 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
         <aside className="grid content-start gap-6">
           <Card title="Manage">
             <div className="grid gap-3">
+              <RunActionButton
+                action={duplicateAddOn.bind(null, addOn.id)}
+                navigatePrefix="/admin/add-ons/"
+                confirm={{
+                  title: `Duplicate “${addOn.name}”?`,
+                  body: `Creates “Copy of ${addOn.name}” with the same price, image, quantity rules${addOn.optionGroups.length ? ` and its ${addOn.optionGroups.length} configuration group${addOn.optionGroups.length === 1 ? "" : "s"}` : ""}. It isn't assigned to any product, so the site doesn't change until you assign it. Unsaved edits on this page are not copied.`,
+                  confirmLabel: "Duplicate",
+                }}
+                pendingLabel="Duplicating…"
+              >
+                Duplicate add-on
+              </RunActionButton>
               {archived ? (
                 <ActionButton action={restoreAddOn.bind(null, addOn.id)} pendingLabel="Restoring…">
                   Restore add-on
