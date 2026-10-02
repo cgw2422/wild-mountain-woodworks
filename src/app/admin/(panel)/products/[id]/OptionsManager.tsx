@@ -6,6 +6,8 @@ import { cn } from "@/lib/cn";
 import { centsToDollarInput, formatModifier, parseDollarsToCents } from "@/lib/money";
 import { MoveButtons, SortableList } from "@/components/admin/Sortable";
 import { Badge, adminButton } from "@/components/admin/ui";
+import { DeleteCatalogButton } from "@/components/admin/catalog/DeleteCatalogButton";
+import type { ActionResult } from "@/lib/admin/types";
 import type { OptionGroupState, OptionValueState, RequiredOverride } from "../_lib/payloads";
 
 export type LibraryOptionValue = {
@@ -48,9 +50,21 @@ const inputCls =
  * Per-product option configuration. State is submitted with the product
  * form as JSON (`optionsJson`) and saved with the main Save button.
  */
-export function OptionsManager({ library, initial }: { library: LibraryOptionGroup[]; initial: OptionGroupState[] }) {
+export function OptionsManager({
+  library,
+  initial,
+  deleteGroup,
+  deleteValue,
+}: {
+  library: LibraryOptionGroup[];
+  initial: OptionGroupState[];
+  /** Delete a group from the library (everywhere) — after a confirmation showing where it's used. */
+  deleteGroup: (groupId: string) => Promise<ActionResult>;
+  /** Delete one value from a library group (everywhere). */
+  deleteValue: (groupId: string, valueId: string) => Promise<ActionResult>;
+}) {
   const libById = new Map(library.map((g) => [g.id, g]));
-  const [groups, setGroups] = useState<GroupState[]>(() =>
+  const [rawGroups, setGroups] = useState<GroupState[]>(() =>
     initial
       .filter((g) => libById.has(g.optionGroupId))
       .map((g) => ({
@@ -60,6 +74,8 @@ export function OptionsManager({ library, initial }: { library: LibraryOptionGro
         values: Object.fromEntries(g.values.map((v) => [v.optionValueId, v])),
       })),
   );
+  // A group deleted from the library (here or elsewhere) simply drops out.
+  const groups = rawGroups.filter((g) => libById.has(g.id));
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [toAttach, setToAttach] = useState("");
   const selectId = useId();
@@ -68,7 +84,7 @@ export function OptionsManager({ library, initial }: { library: LibraryOptionGro
     optionGroupId: g.id,
     requiredOverride: g.requiredOverride,
     displayNameOverride: g.displayNameOverride,
-    values: Object.values(g.values).filter((v) => !isInherited(v)),
+    values: Object.values(g.values).filter((v) => !isInherited(v) && libById.get(g.id)!.values.some((lv) => lv.id === v.optionValueId)),
   }));
   const attachable = library.filter((g) => !groups.some((s) => s.id === g.id));
 
@@ -167,12 +183,22 @@ export function OptionsManager({ library, initial }: { library: LibraryOptionGro
                   <MoveButtons moveUp={moveUp} moveDown={moveDown} labelUp={`Move ${lib.name} up`} labelDown={`Move ${lib.name} down`} />
                   <button
                     type="button"
-                    className={cn(adminButton.small, "text-red-700")}
+                    className={adminButton.small}
                     onClick={() => setGroups((prev) => prev.filter((x) => x.id !== g.id))}
-                    aria-label={`Detach ${lib.name} from this product`}
+                    aria-label={`Remove ${lib.name} from this product (applied when you save)`}
+                    title="Removes it from this product only when you save. It stays in the option library."
                   >
-                    Detach
+                    Remove from product
                   </button>
+                  <DeleteCatalogButton
+                    kind="optionGroup"
+                    id={g.id}
+                    noun="option group"
+                    name={lib.name}
+                    action={() => deleteGroup(g.id)}
+                    onDeleted={() => setGroups((prev) => prev.filter((x) => x.id !== g.id))}
+                    hideHint="To keep it but stop offering it here, use “Remove from product” instead."
+                  />
                 </div>
 
                 {open ? (
@@ -222,6 +248,9 @@ export function OptionsManager({ library, initial }: { library: LibraryOptionGro
                             <th scope="col" className="px-3 py-2">Price (blank = library)</th>
                             <th scope="col" className="px-3 py-2">Order</th>
                             <th scope="col" className="px-3 py-2">Default</th>
+                            <th scope="col" className="px-3 py-2">
+                              <span className="sr-only">Delete</span>
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-neutral-100">
@@ -289,6 +318,27 @@ export function OptionsManager({ library, initial }: { library: LibraryOptionGro
                                     disabled={!s.enabled || !v.active}
                                     aria-label={`Make ${v.displayName} the default selection`}
                                     className="h-4 w-4 accent-neutral-900"
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <DeleteCatalogButton
+                                    kind="optionValue"
+                                    id={v.id}
+                                    noun="option value"
+                                    name={v.displayName}
+                                    iconOnly
+                                    action={() => deleteValue(g.id, v.id)}
+                                    onDeleted={() =>
+                                      setGroups((prev) =>
+                                        prev.map((x) => {
+                                          if (x.id !== g.id) return x;
+                                          const rest = { ...x.values };
+                                          delete rest[v.id];
+                                          return { ...x, values: rest };
+                                        }),
+                                      )
+                                    }
+                                    hideHint="To keep it but not offer it on this product, untick “Offer” instead."
                                   />
                                 </td>
                               </tr>

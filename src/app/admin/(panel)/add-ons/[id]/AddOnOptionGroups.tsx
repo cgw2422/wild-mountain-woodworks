@@ -5,6 +5,8 @@ import type { ActionResult } from "@/lib/admin/types";
 import { ActionForm, ConfirmAction, Select, SubmitButton, TextInput, Toggle } from "@/components/admin/forms";
 import { Badge } from "@/components/admin/ui";
 import { SortableRows } from "@/components/admin/catalog/SortableRows";
+import { DeleteCatalogButton } from "@/components/admin/catalog/DeleteCatalogButton";
+import { formatCents, formatModifier } from "@/lib/money";
 
 export type AttachedGroup = {
   optionGroupId: string;
@@ -17,6 +19,8 @@ export type AttachedGroup = {
   displayNameOverride: string;
   requiredOverride: "inherit" | "required" | "optional";
   setsUnitPrice: boolean;
+  /** The group's choices (library values), e.g. the chair styles. */
+  values: Array<{ id: string; displayName: string; active: boolean; priceModifierCents: number }>;
 };
 
 const INPUT_LABELS: Record<string, string> = { IMAGE: "Image cards", SWATCH: "Swatches", BUTTONS: "Buttons", DROPDOWN: "Dropdown", RADIO: "Radio buttons" };
@@ -34,8 +38,11 @@ export function AddOnOptionGroups({
   update,
   detach,
   reorder,
+  deleteChoice,
 }: {
   groups: AttachedGroup[];
+  /** Delete one choice (library value) of a group, e.g. a chair style — everywhere the group is used. */
+  deleteChoice: (groupId: string, valueId: string) => Promise<ActionResult>;
   available: Array<{ id: string; name: string; displayName: string; active: boolean }>;
   attach: (data: FormData) => Promise<ActionResult>;
   update: (optionGroupId: string, data: FormData) => Promise<ActionResult>;
@@ -87,6 +94,36 @@ export function AddOnOptionGroups({
                   description="Each value's price is the full price of one unit (e.g. X Back = $192.50 per chair). The add-on base price is then not added."
                   className="w-full pb-1"
                 />
+                {g.values.length ? (
+                  <details className="w-full rounded border border-neutral-100 px-3 py-2 text-sm">
+                    <summary className="cursor-pointer text-neutral-700">
+                      Choices ({g.values.length}) — edit prices and images in{" "}
+                      <Link href={`/admin/options/${g.optionGroupId}`} className="underline">
+                        Options
+                      </Link>
+                    </summary>
+                    <ul className="mt-2 divide-y divide-neutral-100">
+                      {g.values.map((v) => (
+                        <li key={v.id} className="flex items-center justify-between gap-2 py-1">
+                          <span className={v.active ? "text-neutral-800" : "text-neutral-400"}>
+                            {v.displayName}
+                            <span className="ml-2 text-xs text-neutral-500">{g.setsUnitPrice ? `${formatCents(v.priceModifierCents)} each` : formatModifier(v.priceModifierCents) || "No price change"}</span>
+                            {!v.active ? <span className="ml-2 text-xs">(inactive)</span> : null}
+                          </span>
+                          <DeleteCatalogButton
+                            kind="optionValue"
+                            id={v.id}
+                            noun="choice"
+                            name={v.displayName}
+                            iconOnly
+                            action={() => deleteChoice(g.optionGroupId, v.id)}
+                            hideHint="To hide it for now, make it inactive in Options instead."
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
                 <div className="flex gap-2 pb-0.5">
                   <SubmitButton variant="small">Save</SubmitButton>
                   <ConfirmAction

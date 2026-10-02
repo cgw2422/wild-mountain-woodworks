@@ -88,8 +88,10 @@ describe.skipIf(!hasTestDb)("configurable add-ons end to end", () => {
 
     // Bad settings are refused.
     expect(await addOnActions.updateAddOn(chairsId, form({ name: "Dining Chairs", price: "192.50", minQuantity: "2", maxQuantity: "12", quantityEnabled: "on", quantityStep: "2", defaultQuantity: "5", active: "on" }))).toMatchObject({ ok: false });
-    // Library groups used by an add-on can't be deleted out from under it.
-    expect(await optionActions.deleteOptionGroup(ids["Chair Style"]!)).toMatchObject({ ok: false, message: expect.stringMatching(/configurable add-on/) });
+    // Deleting a library group an add-on uses (after a confirmation listing the add-on) removes it from the add-on.
+    expect(await optionActions.deleteOptionGroup(ids["Chair Style"]!)).toMatchObject({ ok: true, message: expect.stringMatching(/1 add-on/) });
+    const after = (await loadConfigurableProduct({ id: seeded.product.id }))!.addOns.find((a) => a.id === chairsId)!;
+    expect(after.optionGroups.map((g) => g.name)).toEqual(["Chair Wood Species", "Chair Finish", "Seat Finish"]);
   });
 
   it("a quote request keeps the chairs grouped under the table through quote, order and invoice", async () => {

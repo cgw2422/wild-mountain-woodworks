@@ -7,6 +7,8 @@ import { centsToDollarInput, formatCents, parseDollarsToCents } from "@/lib/mone
 import { MoveButtons, SortableList } from "@/components/admin/Sortable";
 import { Badge, adminButton } from "@/components/admin/ui";
 import type { AddOnState, RequiredOverride } from "../_lib/payloads";
+import { DeleteCatalogButton } from "@/components/admin/catalog/DeleteCatalogButton";
+import type { ActionResult } from "@/lib/admin/types";
 
 export type LibraryAddOn = {
   id: string;
@@ -18,6 +20,8 @@ export type LibraryAddOn = {
   active: boolean;
   archived: boolean;
   scope: string;
+  /** Configurable add-ons: their option groups (from the library) and each group's choices, e.g. Chair Style → X Back. */
+  groups: Array<{ id: string; name: string; values: Array<{ id: string; displayName: string; active: boolean }> }>;
 };
 
 type Row = AddOnState & { id: string };
@@ -29,9 +33,23 @@ const inputCls =
  * Per-product add-on configuration, submitted with the product form as JSON
  * (`addOnsJson`) and saved with the main Save button.
  */
-export function AddOnsManager({ library, initial }: { library: LibraryAddOn[]; initial: AddOnState[] }) {
+export function AddOnsManager({
+  library,
+  initial,
+  deleteAddOn,
+  deleteChoice,
+}: {
+  library: LibraryAddOn[];
+  initial: AddOnState[];
+  /** Delete an add-on everywhere — after a confirmation showing which products use it. */
+  deleteAddOn: (addOnId: string) => Promise<ActionResult>;
+  /** Delete one choice (an option value) of a configurable add-on's group, e.g. one chair style. */
+  deleteChoice: (groupId: string, valueId: string) => Promise<ActionResult>;
+}) {
   const libById = new Map(library.map((a) => [a.id, a]));
-  const [rows, setRows] = useState<Row[]>(() => initial.filter((r) => libById.has(r.addOnId)).map((r) => ({ ...r, id: r.addOnId })));
+  const [rawRows, setRows] = useState<Row[]>(() => initial.filter((r) => libById.has(r.addOnId)).map((r) => ({ ...r, id: r.addOnId })));
+  // An add-on deleted from the library (here or elsewhere) simply drops out.
+  const rows = rawRows.filter((r) => libById.has(r.id));
   const [toAttach, setToAttach] = useState("");
   const selectId = useId();
 
@@ -102,10 +120,58 @@ export function AddOnsManager({ library, initial }: { library: LibraryAddOn[]; i
                   <Link href={`/admin/add-ons/${lib.id}`} target="_blank" className={adminButton.small} aria-label={`Edit ${lib.name} in the library (opens in a new tab)`}>
                     Edit ↗
                   </Link>
-                  <button type="button" className={cn(adminButton.small, "text-red-700")} onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))} aria-label={`Detach ${lib.name}`}>
-                    Detach
+                  <button
+                    type="button"
+                    className={adminButton.small}
+                    onClick={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
+                    aria-label={`Remove ${lib.name} from this product (applied when you save)`}
+                    title="Removes it from this product only when you save. It stays in the add-on library."
+                  >
+                    Remove from product
                   </button>
+                  <DeleteCatalogButton
+                    kind="addOn"
+                    id={lib.id}
+                    noun="add-on"
+                    name={lib.name}
+                    action={() => deleteAddOn(lib.id)}
+                    onDeleted={() => setRows((prev) => prev.filter((x) => x.id !== r.id))}
+                    hideHint="To keep it but stop offering it here, use “Remove from product”, or archive it in Add-ons."
+                  />
                 </div>
+                {lib.groups.length ? (
+                  <details className="mt-2 rounded border border-neutral-100 px-3 py-2 text-sm">
+                    <summary className="cursor-pointer text-neutral-700">
+                      Choices ({lib.groups.map((g) => `${g.name}: ${g.values.length}`).join(" · ")})
+                    </summary>
+                    <div className="mt-2 grid gap-3">
+                      {lib.groups.map((g) => (
+                        <div key={g.id}>
+                          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">{g.name}</p>
+                          <ul className="divide-y divide-neutral-100">
+                            {g.values.map((v) => (
+                              <li key={v.id} className="flex items-center justify-between gap-2 py-1">
+                                <span className={cn(!v.active && "text-neutral-400")}>
+                                  {v.displayName}
+                                  {!v.active ? " (inactive)" : ""}
+                                </span>
+                                <DeleteCatalogButton
+                                  kind="optionValue"
+                                  id={v.id}
+                                  noun="choice"
+                                  name={v.displayName}
+                                  iconOnly
+                                  action={() => deleteChoice(g.id, v.id)}
+                                  hideHint="To hide it for now, make it inactive in Options instead."
+                                />
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
                 <div className="mt-2 grid grid-cols-2 gap-3 px-1 pb-1 sm:grid-cols-4">
                   <div>
                     <label htmlFor={`${base}-price`} className="mb-1 block text-xs font-medium text-neutral-700">

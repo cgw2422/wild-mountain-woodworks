@@ -28,6 +28,8 @@ import {
   unpublishProduct,
   updateProductVideoTitle,
 } from "../actions";
+import { deleteOptionGroup, deleteOptionValue } from "../../options/actions";
+import { deleteAddOn } from "../../add-ons/actions";
 import { AddOnsManager } from "./AddOnsManager";
 import { ImagesManager } from "./ImagesManager";
 import { OptionsManager } from "./OptionsManager";
@@ -79,7 +81,15 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
       include: { values: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }], include: { _count: { select: { priceRules: true } } } } },
     }),
-    prisma.addOn.findMany({ orderBy: [{ displayOrder: "asc" }, { name: "asc" }] }),
+    prisma.addOn.findMany({
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      include: {
+        optionGroups: {
+          orderBy: { displayOrder: "asc" },
+          select: { optionGroup: { select: { id: true, name: true, values: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }], select: { id: true, displayName: true, active: true } } } } },
+        },
+      },
+    }),
     getSettings(),
     loadConfigurableProduct({ id }, { activeOnly: false }),
   ]);
@@ -267,6 +277,8 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
                     conditionalPrices: v._count.priceRules,
                   })),
                 }))}
+                deleteGroup={deleteOptionGroup}
+                deleteValue={deleteOptionValue}
                 initial={product.optionGroups.map((pog) => ({
                   optionGroupId: pog.optionGroupId,
                   requiredOverride: fromRequiredOverride(pog.requiredOverride),
@@ -294,7 +306,10 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
                   active: a.active,
                   archived: Boolean(a.archivedAt),
                   scope: a.scope,
+                  groups: a.optionGroups.map((g) => g.optionGroup),
                 }))}
+                deleteAddOn={deleteAddOn}
+                deleteChoice={deleteOptionValue}
                 initial={product.addOns.map((pa) => ({
                   addOnId: pa.addOnId,
                   enabled: pa.enabled,

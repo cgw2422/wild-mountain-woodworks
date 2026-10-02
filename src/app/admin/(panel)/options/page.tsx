@@ -5,7 +5,8 @@ import { prisma } from "@/lib/db";
 import { AdminLinkButton, Badge, EmptyState, PageHeader } from "@/components/admin/ui";
 import { SortableRows } from "@/components/admin/catalog/SortableRows";
 import { RunActionButton } from "@/components/admin/catalog/RunActionButton";
-import { duplicateOptionGroup, reorderOptionGroups } from "./actions";
+import { DeleteCatalogButton } from "@/components/admin/catalog/DeleteCatalogButton";
+import { deleteOptionGroup, duplicateOptionGroup, reorderOptionGroups } from "./actions";
 import { inputTypeLabel } from "./input-types";
 
 export const metadata: Metadata = { title: "Options" };
@@ -69,6 +70,7 @@ export default async function OptionsPage() {
                   >
                     Duplicate
                   </RunActionButton>
+                  <DeleteCatalogButton kind="optionGroup" id={g.id} noun="option group" name={g.name} iconOnly action={deleteOptionGroup.bind(null, g.id)} hideHint="To hide it for now, deactivate it instead." />
                 </div>
               </div>
             ),

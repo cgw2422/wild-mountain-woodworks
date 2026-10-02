@@ -6,6 +6,7 @@ import { centsToDollarInput } from "@/lib/money";
 import { Badge, Card, PageHeader, formatDate } from "@/components/admin/ui";
 import { ActionButton, ConfirmAction } from "@/components/admin/forms";
 import { RunActionButton } from "@/components/admin/catalog/RunActionButton";
+import { DeleteCatalogButton } from "@/components/admin/catalog/DeleteCatalogButton";
 import { toImageValue } from "../../products/_lib/media";
 import {
   archiveAddOn,
@@ -22,6 +23,7 @@ import {
   updateAddOnOptionGroup,
 } from "../actions";
 import { AddOnOptionGroups } from "./AddOnOptionGroups";
+import { deleteOptionValue } from "../../options/actions";
 import { configuredAddOnUnitPrice } from "@/lib/pricing/engine";
 import { loadAddOnPreview } from "@/lib/pricing/load";
 import { formatCents } from "@/lib/money";
@@ -40,7 +42,17 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
     include: {
       image: true,
       products: { include: { product: { select: { id: true, name: true, status: true } } }, orderBy: { product: { name: "asc" } } },
-      optionGroups: { orderBy: { displayOrder: "asc" }, include: { optionGroup: { include: { _count: { select: { values: true } } } } } },
+      optionGroups: {
+        orderBy: { displayOrder: "asc" },
+        include: {
+          optionGroup: {
+            include: {
+              _count: { select: { values: true } },
+              values: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }], select: { id: true, displayName: true, active: true, priceModifierCents: true } },
+            },
+          },
+        },
+      },
     },
   });
   if (!addOn) notFound();
@@ -95,6 +107,7 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
             description="Make this a configurable add-on (e.g. Dining Chairs: Chair Style, Wood Species, Chair Finish, Seat Finish). Groups come from the option library (Options), where you manage each value's name, price adjustment, image or swatch, order and active state. They belong to this add-on only — not to the main product."
           >
             <AddOnOptionGroups
+              deleteChoice={deleteOptionValue}
               groups={addOn.optionGroups.map((g) => ({
                 optionGroupId: g.optionGroupId,
                 name: g.optionGroup.name,
@@ -102,6 +115,7 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
                 inputType: g.optionGroup.inputType,
                 active: g.optionGroup.active,
                 required: g.optionGroup.required,
+                values: g.optionGroup.values,
                 valueCount: g.optionGroup._count.values,
                 displayNameOverride: g.displayNameOverride ?? "",
                 requiredOverride: g.requiredOverride == null ? "inherit" : g.requiredOverride ? "required" : "optional",
@@ -162,21 +176,16 @@ export default async function AddOnPage({ params }: { params: Promise<{ id: stri
                   successMessage="Add-on archived."
                 />
               )}
-              {count === 0 ? (
-                <ConfirmAction
-                  action={deleteAddOn.bind(null, addOn.id)}
-                  label="Delete permanently"
-                  variant="danger"
-                  title={`Delete “${addOn.name}”?`}
-                  body="This permanently deletes the add-on. Existing quote requests keep their saved configuration."
-                  confirmLabel="Delete"
-                  redirectTo="/admin/add-ons"
-                />
-              ) : (
-                <p className="text-xs text-neutral-500">
-                  Assigned to {count} product{count === 1 ? "" : "s"}, so it can&apos;t be deleted. Remove it from those products first, or archive it.
-                </p>
-              )}
+              <DeleteCatalogButton
+                kind="addOn"
+                id={addOn.id}
+                noun="add-on"
+                name={addOn.name}
+                action={deleteAddOn.bind(null, addOn.id)}
+                redirectTo="/admin/add-ons"
+                className="h-10 justify-center text-sm"
+                hideHint="To hide it for now and keep product assignments, archive it instead."
+              />
             </div>
           </Card>
         </aside>

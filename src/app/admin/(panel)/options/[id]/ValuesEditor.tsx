@@ -4,11 +4,12 @@ import { useState } from "react";
 import Image from "next/image";
 import type { ActionResult } from "@/lib/admin/types";
 import { centsToDollarInput, formatCents, formatModifier } from "@/lib/money";
-import { ActionButton, ActionForm, ConfirmAction, Dialog, MoneyInput, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
+import { ActionButton, ActionForm, Dialog, MoneyInput, SubmitButton, TextArea, TextInput, Toggle } from "@/components/admin/forms";
 import { Badge, EmptyState, adminButton } from "@/components/admin/ui";
 import { ImageField, type ImageValue } from "@/components/admin/media/ImageField";
 import { ColorField } from "@/components/admin/catalog/ColorField";
 import { SortableRows } from "@/components/admin/catalog/SortableRows";
+import { DeleteCatalogButton } from "@/components/admin/catalog/DeleteCatalogButton";
 import { PriceRulesEditor, type RuleGroup, type RuleRow } from "./PriceRulesEditor";
 
 export type ValueRow = {
@@ -115,20 +116,13 @@ export function ValuesEditor({
                   <ActionButton action={() => duplicate(v.id)} variant="small" pendingLabel="Duplicating…" title={`Duplicate “${v.displayName}”`}>
                     Duplicate
                   </ActionButton>
-                  <ConfirmAction
+                  <DeleteCatalogButton
+                    kind="optionValue"
+                    id={v.id}
+                    noun="option value"
+                    name={v.displayName}
                     action={() => remove(v.id)}
-                    label="Delete"
-                    variant="small"
-                    title={`Delete “${v.displayName}”?`}
-                    body={
-                      <div className="space-y-2">
-                        <p>This removes the value from the library{v.overrideCount ? ` and its per-product settings on ${v.overrideCount} product${v.overrideCount === 1 ? "" : "s"}` : ""}.</p>
-                        <p>Existing quote requests keep their saved configuration snapshot, so past quotes still show this choice.</p>
-                        <p className="text-neutral-500">Tip: set the value to inactive instead if you may offer it again.</p>
-                      </div>
-                    }
-                    confirmLabel="Delete value"
-                    successMessage="Value deleted."
+                    hideHint="Tip: set it to inactive instead if you may offer it again."
                   />
                 </div>
               </div>

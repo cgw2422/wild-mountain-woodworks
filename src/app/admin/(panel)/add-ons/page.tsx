@@ -8,7 +8,8 @@ import { ActionButton } from "@/components/admin/forms";
 import { CatalogThumb } from "@/components/admin/catalog/CatalogThumb";
 import { SortableRows } from "@/components/admin/catalog/SortableRows";
 import { RunActionButton } from "@/components/admin/catalog/RunActionButton";
-import { duplicateAddOn, reorderAddOns, restoreAddOn } from "./actions";
+import { DeleteCatalogButton } from "@/components/admin/catalog/DeleteCatalogButton";
+import { deleteAddOn, duplicateAddOn, reorderAddOns, restoreAddOn } from "./actions";
 
 export const metadata: Metadata = { title: "Add-ons" };
 export const dynamic = "force-dynamic";
@@ -76,6 +77,7 @@ export default async function AddOnsPage() {
                       >
                         Duplicate
                       </RunActionButton>
+                      <DeleteCatalogButton kind="addOn" id={a.id} noun="add-on" name={a.name} iconOnly action={deleteAddOn.bind(null, a.id)} hideHint="To hide it for now, archive it instead." />
                     </div>
                   </div>
                 ),
@@ -100,6 +102,7 @@ export default async function AddOnsPage() {
                     <ActionButton action={restoreAddOn.bind(null, a.id)} variant="small" pendingLabel="Restoring…">
                       Restore
                     </ActionButton>
+                    <DeleteCatalogButton kind="addOn" id={a.id} noun="add-on" name={a.name} iconOnly action={deleteAddOn.bind(null, a.id)} />
                   </li>
                 ))}
               </ul>

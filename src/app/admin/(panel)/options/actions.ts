@@ -71,21 +71,31 @@ export const setOptionGroupActive = adminAction(async (admin, id: string, active
   return { ok: true, message: active ? "Option group activated." : "Option group deactivated. It is hidden from every product." };
 });
 
+/**
+ * Delete an option group from the library — also when products or
+ * configurable add-ons use it: it is removed from them in the same
+ * transaction (with its values, per-product settings and conditional price
+ * rules), so it can't be chosen on new configurations. Saved quotes, orders
+ * and invoices are untouched: they keep their own snapshot (names, choices,
+ * quantities and prices) and never read the library.
+ */
 export const deleteOptionGroup = adminAction(async (admin, id: string) => {
-  const group = await prisma.optionGroup.findUnique({ where: { id }, include: { _count: { select: { products: true, addOns: true } } } });
+  const group = await prisma.optionGroup.findUnique({ where: { id }, include: { _count: { select: { products: true, addOns: true, values: true } } } });
   if (!group) throw new AdminError("That option group no longer exists.");
-  if (group._count.products > 0) {
-    throw new AdminError(
-      `“${group.name}” is attached to ${group._count.products} product${group._count.products === 1 ? "" : "s"}. Detach it from those products first, or deactivate it instead.`,
-    );
-  }
-  if (group._count.addOns > 0) {
-    throw new AdminError(`“${group.name}” is part of ${group._count.addOns} configurable add-on${group._count.addOns === 1 ? "" : "s"}. Remove it from those add-ons first, or deactivate it instead.`);
-  }
-  await prisma.optionGroup.delete({ where: { id } });
-  await logActivity("option.updated", `${admin.name} deleted option group "${group.name}"`, { actorId: admin.id, entityType: "optionGroup", entityId: id });
+  await prisma.$transaction([
+    prisma.productOptionGroup.deleteMany({ where: { optionGroupId: id } }),
+    prisma.addOnOptionGroup.deleteMany({ where: { optionGroupId: id } }),
+    prisma.optionGroup.delete({ where: { id } }),
+  ]);
+  const { products, addOns, values } = group._count;
+  const usage = [products ? `removed from ${products} product${products === 1 ? "" : "s"}` : "", addOns ? `${addOns} add-on${addOns === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+  await logActivity("option.updated", `${admin.name} deleted option group "${group.name}" (${values} value${values === 1 ? "" : "s"}${usage ? `; ${usage}` : ""})`, {
+    actorId: admin.id,
+    entityType: "optionGroup",
+    entityId: id,
+  });
   revalidateSite();
-  return { ok: true, message: "Option group deleted." };
+  return { ok: true, message: `“${group.name}” deleted${usage ? ` and ${usage}` : ""}. Saved quotes, orders and invoices keep their configuration.` };
 });
 
 /* ------------------------------------------------------------------------ */
@@ -232,17 +242,26 @@ export const saveOptionValue = adminAction(async (admin, groupId: string, valueI
   return { ok: true, id: id ?? undefined, message: valueId ? "Value saved." : "Value added." };
 });
 
+/**
+ * Delete one value from a library group (e.g. Walnut from Table Top Wood,
+ * or a chair style from an add-on's Chair Style group). It disappears from
+ * every product and add-on that uses the group, with its per-product
+ * settings and any conditional price rules on or depending on it. Saved
+ * quotes, orders and invoices keep their snapshot.
+ */
 export const deleteOptionValue = adminAction(async (admin, groupId: string, valueId: string) => {
-  const value = await prisma.optionValue.findFirst({ where: { id: valueId, groupId }, include: { group: { select: { name: true } } } });
+  const value = await prisma.optionValue.findFirst({ where: { id: valueId, groupId }, include: { group: { select: { name: true, _count: { select: { products: true, addOns: true } } } } } });
   if (!value) throw new AdminError("That value no longer exists.");
   await prisma.optionValue.delete({ where: { id: valueId } });
-  await logActivity("option.updated", `${admin.name} deleted value "${value.displayName}" from "${value.group.name}"`, {
+  const { products, addOns } = value.group._count;
+  const usage = [products ? `${products} product${products === 1 ? "" : "s"}` : "", addOns ? `${addOns} add-on${addOns === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+  await logActivity("option.updated", `${admin.name} deleted value "${value.displayName}" from "${value.group.name}"${usage ? ` (group used by ${usage})` : ""}`, {
     actorId: admin.id,
     entityType: "optionGroup",
     entityId: groupId,
   });
   revalidateSite();
-  return { ok: true, message: "Value deleted." };
+  return { ok: true, message: `“${value.displayName}” deleted. Saved quotes, orders and invoices keep their configuration.` };
 });
 
 export const reorderOptionValues = adminAction(async (admin, groupId: string, ids: string[]) => {

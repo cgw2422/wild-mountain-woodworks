@@ -7,6 +7,7 @@ import { Badge, Card, PageHeader, StatusBadge, formatDate } from "@/components/a
 import { ActionButton, ConfirmAction } from "@/components/admin/forms";
 import { toImageValue } from "../../products/_lib/media";
 import { RunActionButton } from "@/components/admin/catalog/RunActionButton";
+import { DeleteCatalogButton } from "@/components/admin/catalog/DeleteCatalogButton";
 import {
   deleteOptionGroup,
   deleteOptionValue,
@@ -151,21 +152,16 @@ export default async function OptionGroupPage({ params }: { params: Promise<{ id
                   Activate
                 </ActionButton>
               )}
-              {usedBy === 0 ? (
-                <ConfirmAction
-                  action={deleteOptionGroup.bind(null, group.id)}
-                  label="Delete permanently"
-                  variant="danger"
-                  title={`Delete “${group.name}”?`}
-                  body="This permanently deletes the group and all of its values. Existing quote requests keep their saved configuration snapshots."
-                  confirmLabel="Delete"
-                  redirectTo="/admin/options"
-                />
-              ) : (
-                <p className="text-xs text-neutral-500">
-                  This group can&apos;t be deleted while it&apos;s attached to {usedBy} product{usedBy === 1 ? "" : "s"}. Deactivate it instead, or detach it from those products first.
-                </p>
-              )}
+              <DeleteCatalogButton
+                kind="optionGroup"
+                id={group.id}
+                noun="option group"
+                name={group.name}
+                action={deleteOptionGroup.bind(null, group.id)}
+                redirectTo="/admin/options"
+                className="h-10 justify-center text-sm"
+                hideHint="To hide it for now and keep product settings, deactivate it instead."
+              />
             </div>
           </Card>
         </aside>

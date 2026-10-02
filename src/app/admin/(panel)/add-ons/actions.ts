@@ -156,16 +156,22 @@ export const restoreAddOn = adminAction(async (admin, id: string) => {
   return { ok: true, message: "Add-on restored." };
 });
 
+/**
+ * Delete an add-on — also when products use it: it is removed from them
+ * (and its configuration links dropped; the option groups stay in the
+ * library) in one transaction, so it can't be added to new configurations.
+ * Saved quotes, orders and invoices keep their own add-on lines and
+ * snapshots (name, choices, quantity, price) and are never affected.
+ */
 export const deleteAddOn = adminAction(async (admin, id: string) => {
   const a = await prisma.addOn.findUnique({ where: { id }, include: { _count: { select: { products: true } } } });
   if (!a) throw new AdminError("That add-on no longer exists.");
-  if (a._count.products > 0) {
-    throw new AdminError(`“${a.name}” is assigned to ${a._count.products} product${a._count.products === 1 ? "" : "s"}. Remove it from those products first, or archive it instead.`);
-  }
-  await prisma.addOn.delete({ where: { id } });
-  await logActivity("addon.updated", `${admin.name} deleted add-on "${a.name}"`, { actorId: admin.id, entityType: "addOn", entityId: id });
+  await prisma.$transaction([prisma.productAddOn.deleteMany({ where: { addOnId: id } }), prisma.addOn.delete({ where: { id } })]);
+  const n = a._count.products;
+  const usage = n ? `removed from ${n} product${n === 1 ? "" : "s"}` : "";
+  await logActivity("addon.updated", `${admin.name} deleted add-on "${a.name}"${usage ? ` (${usage})` : ""}`, { actorId: admin.id, entityType: "addOn", entityId: id });
   revalidateSite();
-  return { ok: true, message: "Add-on deleted." };
+  return { ok: true, message: `“${a.name}” deleted${usage ? ` and ${usage}` : ""}. Saved quotes, orders and invoices keep their add-on lines.` };
 });
 
 /* ------------------------------------------------------------------------ */
