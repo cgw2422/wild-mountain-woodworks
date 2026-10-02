@@ -49,7 +49,7 @@ export default async function OptionsPage() {
                     Customers see “{g.displayName}” · {inputTypeLabel(g.inputType)} · {g.required ? "Required" : "Optional"}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   {!g.active ? <Badge tone="amber">Inactive</Badge> : null}
                   <span className="w-20 text-right text-sm tabular-nums text-neutral-600">
                     {g._count.values} value{g._count.values === 1 ? "" : "s"}

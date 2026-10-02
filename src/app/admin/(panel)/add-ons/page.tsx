@@ -58,7 +58,7 @@ export default async function AddOnsPage() {
                         {a.required ? " · Required" : ""}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       {a.scope === "PRODUCT_SPECIFIC" ? <Badge tone="violet">Product-specific</Badge> : null}
                       {!a.active ? <Badge tone="amber">Inactive</Badge> : null}
                       <span className="w-28 text-right text-sm tabular-nums text-neutral-600">
