@@ -18,6 +18,8 @@ export type LibraryOptionValue = {
   isCustom: boolean;
   /** Quantity-based value: the price (and any override here) is per unit. */
   quantityEnabled?: boolean;
+  /** How many conditional pricing rules the value has (they win over the price here when they match). */
+  conditionalPrices?: number;
 };
 export type LibraryOptionGroup = {
   id: string;
@@ -260,6 +262,11 @@ export function OptionsManager({ library, initial }: { library: LibraryOptionGro
                                     />
                                   </div>
                                   {priceInvalid ? <span className="text-xs text-red-600">Enter an amount like 150 or -50</span> : null}
+                                  {v.conditionalPrices ? (
+                                    <span className="mt-0.5 block text-xs text-neutral-500" title="Set in Options → this group → the value's conditional pricing rules. A matching rule replaces this price.">
+                                      + {v.conditionalPrices} conditional price{v.conditionalPrices === 1 ? "" : "s"}
+                                    </span>
+                                  ) : null}
                                 </td>
                                 <td className="w-24 px-3 py-2">
                                   <input

@@ -68,7 +68,10 @@ export function AdminBar({
     <div
       role="region"
       aria-label="Admin toolbar"
-      className="relative z-[60] bg-[#18191b] font-[system-ui,-apple-system,'Segoe_UI',sans-serif] text-[13px] leading-none text-neutral-200"
+      data-admin-bar=""
+      // Sticky at the very top, above the site header (z-40) and preview banner (z-50); the site
+      // offsets its own sticky elements by --admin-bar-h (globals.css) so nothing hides under it.
+      className="sticky top-0 z-[60] bg-[#18191b] font-[system-ui,-apple-system,'Segoe_UI',sans-serif] text-[13px] leading-none text-neutral-200"
     >
       <div className="flex h-10 items-center gap-1 whitespace-nowrap px-2 sm:px-3">
         <Link href="/admin" className="mr-1 flex h-8 shrink-0 items-center rounded px-2 font-semibold text-white hover:bg-white/10">

@@ -1,5 +1,5 @@
 import { activeSale } from "./sale";
-import type { ConfigImage, ConfigOptionGroup, ConfigOptionValue, ConfigurableProduct, OptionInputType, OptionQuantitySpec } from "./types";
+import type { ConfigImage, ConfigOptionGroup, ConfigOptionValue, ConfigurableProduct, OptionInputType, OptionPriceRule, OptionQuantitySpec } from "./types";
 
 /**
  * Structural shapes of the database records needed to build a configurable
@@ -57,6 +57,8 @@ export interface ProductConfigRecord {
         active: boolean;
         swatchColor: string | null;
         image: MediaLike | null;
+        /** Conditional prices (absent on records loaded without them). */
+        priceRules?: Array<{ dependsOnValueId: string; priceModifierCents: number; displayOrder: number; dependsOnValue: { groupId: string } }>;
       }>;
     };
     valueOverrides: Array<{
@@ -114,6 +116,13 @@ function toImage(m: MediaLike | null, fallbackAlt: string): ConfigImage | null {
   };
 }
 
+/** A value's conditional prices in rule order (empty when it has none). */
+export function priceRulesOf(v: { priceRules?: NonNullable<ProductConfigRecord["optionGroups"][number]["optionGroup"]["values"][number]["priceRules"]> }): OptionPriceRule[] {
+  return [...(v.priceRules ?? [])]
+    .sort((a, b) => a.displayOrder - b.displayOrder)
+    .map((r) => ({ dependsOnGroupId: r.dependsOnValue.groupId, dependsOnValueId: r.dependsOnValueId, priceModifierCents: r.priceModifierCents }));
+}
+
 /** A sane quantity range for a quantity-based value (null for ordinary values). */
 export function quantitySpec(v: { quantityEnabled?: boolean; quantityMin?: number; quantityMax?: number; quantityStep?: number; quantityDefault?: number }): OptionQuantitySpec | null {
   if (!v.quantityEnabled) return null;
@@ -148,6 +157,7 @@ function resolveAddOnGroups(groups: NonNullable<ProductConfigRecord["addOns"][nu
           displayName: v.displayName,
           description: v.description,
           priceModifierCents: v.priceModifierCents,
+          priceRules: priceRulesOf(v),
           quantity: null,
           isCustom: false,
           isDefault: false,
@@ -194,7 +204,9 @@ export function resolveConfigurableProduct(record: ProductConfigRecord, now: Dat
               name: v.name,
               displayName: v.displayName,
               description: v.description,
+              // A product override changes the DEFAULT price; a matching conditional rule still wins.
               priceModifierCents: o?.priceModifierOverrideCents ?? v.priceModifierCents,
+              priceRules: priceRulesOf(v),
               quantity: quantitySpec(v),
               isCustom: v.isCustom,
               isDefault: o?.isDefault ?? false,

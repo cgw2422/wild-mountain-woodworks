@@ -31,7 +31,7 @@ export async function SiteChrome({ children, banner }: { children: React.ReactNo
     <>
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:bg-charcoal focus:px-4 focus:py-3 focus:text-sm focus:text-ivory"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-[calc(1rem+var(--admin-bar-h))] focus:z-[70] focus:bg-charcoal focus:px-4 focus:py-3 focus:text-sm focus:text-ivory"
       >
         Skip to content
       </a>

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { formatCents, formatModifier } from "@/lib/money";
-import { addOnFieldKey, cheapestAddOnUnitPrice, chosenQuantity, defaultAddOnChoices, defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
+import { addOnFieldKey, applyConditionalPrices, cheapestAddOnUnitPrice, chosenQuantity, defaultAddOnChoices, defaultSelection, priceConfiguration } from "@/lib/pricing/engine";
 import type { ConfigAddOn, ConfigOptionGroup, ConfigOptionValue, ConfigurableProduct, ConfigurationSelection, OptionQuantitySpec, PriceLine } from "@/lib/pricing/types";
 import { TIMELINE_OPTIONS, clientRules } from "@/lib/validation/shared";
 import { submitConfigurationQuote } from "@/app/(site)/actions";
@@ -51,6 +51,9 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
   const [ctaVisible, setCtaVisible] = useState(true);
 
   const pricing = useMemo(() => priceConfiguration(product, selection), [product, selection]);
+  // Every value priced for the current selection (conditional prices): what's shown beside each choice
+  // is exactly what priceConfiguration charges, and it updates as soon as a controlling choice changes.
+  const shown = useMemo(() => applyConditionalPrices(product, selection), [product, selection]);
   const errors = showErrors ? { ...pricing.errors, ...serverErrors } : serverErrors;
 
   useEffect(() => {
@@ -138,7 +141,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
 
   return (
     <div className="space-y-10">
-      {product.optionGroups.map((group) => (
+      {shown.optionGroups.map((group) => (
         <OptionGroupField
           key={group.id}
           group={group}
@@ -153,7 +156,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
         />
       ))}
 
-      {product.addOns
+      {shown.addOns
         .filter((a) => a.optionGroups.length)
         .map((a) => (
           <ConfigurableAddOnField
@@ -168,6 +171,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
             errors={errors}
             pricesVisible={pricesVisible}
             productTotal={showTotal ? total : null}
+            productOptions={selection.options}
           />
         ))}
 
@@ -277,7 +281,7 @@ export function Configurator({ product, pricesVisible, priceDisclaimer, mode, re
       </div>
 
       {panelOpen && mode === "quote" ? (
-        <div ref={panelRef} id="request-panel" className="scroll-mt-28">
+        <div ref={panelRef} id="request-panel" className="scroll-mt-[calc(7rem+var(--admin-bar-h))]">
           <RequestPanel
             product={product}
             selection={selection}
@@ -532,7 +536,7 @@ function OptionGroupField({
   }
 
   return (
-    <fieldset id={`cfg-${fieldId ?? group.id}`} className="scroll-mt-32" aria-invalid={error ? true : undefined}>
+    <fieldset id={`cfg-${fieldId ?? group.id}`} className="scroll-mt-[calc(8rem+var(--admin-bar-h))]" aria-invalid={error ? true : undefined}>
       <GroupLegend
         group={group}
         error={error}
@@ -604,6 +608,7 @@ function ConfigurableAddOnField({
   errors,
   pricesVisible,
   productTotal,
+  productOptions,
 }: {
   addOn: ConfigAddOn;
   quantity: number;
@@ -615,8 +620,11 @@ function ConfigurableAddOnField({
   errors: Record<string, string>;
   pricesVisible: boolean;
   productTotal: number | null;
+  /** The main product's choices — conditional add-on prices can depend on them. */
+  productOptions: Record<string, string>;
 }) {
   const id = useId();
+  const fromPrice = cheapestAddOnUnitPrice(addOn, productOptions);
   const added = addOn.required || quantity > 0;
   const lowest = Math.max(1, addOn.minQuantity);
   const [first, ...rest] = addOn.optionGroups;
@@ -641,7 +649,7 @@ function ConfigurableAddOnField({
   );
 
   return (
-    <section id={`cfg-${addOn.id}`} aria-labelledby={`${id}-h`} className={cn("scroll-mt-32 border bg-paper", added ? "border-charcoal" : "border-stone")}>
+    <section id={`cfg-${addOn.id}`} aria-labelledby={`${id}-h`} className={cn("scroll-mt-[calc(8rem+var(--admin-bar-h))] border bg-paper", added ? "border-charcoal" : "border-stone")}>
       <div className="flex gap-4 p-5 sm:p-6">
         {addOn.image ? (
           <span className="relative hidden h-20 w-20 shrink-0 overflow-hidden bg-stone-light sm:block">
@@ -654,9 +662,9 @@ function ConfigurableAddOnField({
             {!addOn.required ? <span className="ml-2 font-normal normal-case tracking-normal text-muted">(optional)</span> : null}
           </h3>
           {addOn.description ? <p className="mt-2 text-sm leading-relaxed text-muted">{addOn.description}</p> : null}
-          {pricesVisible && cheapestAddOnUnitPrice(addOn) ? (
+          {pricesVisible && fromPrice ? (
             <p className="mt-1 text-sm text-muted">
-              From <span className="nums">{formatCents(cheapestAddOnUnitPrice(addOn))}</span> each
+              From <span className="nums">{formatCents(fromPrice)}</span> each
             </p>
           ) : null}
         </div>

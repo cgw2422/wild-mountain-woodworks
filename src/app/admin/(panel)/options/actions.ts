@@ -124,6 +124,51 @@ const quantitySchema = z
 const QUANTITY_FIELDS = { min: "quantityMin", max: "quantityMax", step: "quantityStep", default: "quantityDefault" } as const;
 
 /** Create (valueId null) or update a value in a group. */
+const MAX_PRICE_RULES = 100;
+const ruleMoney = moneyText({ required: true, allowNegative: true });
+
+/**
+ * Conditional pricing rules from the value form (JSON in `priceRules`, in
+ * order): each is "while <value of another group> is selected, this value
+ * costs <amount>". Returns null when the form didn't send the field (leave
+ * the rules alone). Throws field errors for anything invalid — a rule must
+ * depend on an existing value of a DIFFERENT group, at most once.
+ */
+async function readPriceRules(data: FormData, groupId: string) {
+  if (!data.has("priceRules")) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fd.str(data, "priceRules") || "[]");
+  } catch {
+    throw new AdminError("The conditional pricing rules couldn't be read. Reload the page and try again.", { priceRules: "Couldn't read the rules." });
+  }
+  const parsed = z
+    .array(z.object({ dependsOnValueId: z.string().trim().max(64), price: z.string().max(40) }))
+    .max(MAX_PRICE_RULES, `At most ${MAX_PRICE_RULES} rules per value.`)
+    .safeParse(raw);
+  if (!parsed.success) throw new AdminError("Check the conditional pricing rules.", { priceRules: parsed.error.issues[0]?.message ?? "Invalid rules." });
+  const rules = parsed.data;
+  const fail = (i: number, message: string) => {
+    throw new AdminError(`Conditional pricing rule ${i + 1}: ${message}`, { priceRules: `Rule ${i + 1}: ${message}` });
+  };
+  const ids = rules.map((r) => r.dependsOnValueId).filter(Boolean);
+  const targets = new Map(
+    (await prisma.optionValue.findMany({ where: { id: { in: ids } }, select: { id: true, groupId: true } })).map((v) => [v.id, v]),
+  );
+  const seen = new Set<string>();
+  return rules.map((r, i) => {
+    if (!r.dependsOnValueId) fail(i, "choose the option and value it depends on.");
+    const target = targets.get(r.dependsOnValueId);
+    if (!target) fail(i, "that value no longer exists.");
+    if (target!.groupId === groupId) fail(i, "a value can't depend on another value of its own option.");
+    if (seen.has(r.dependsOnValueId)) fail(i, "there's already a rule for that value.");
+    seen.add(r.dependsOnValueId);
+    const price = ruleMoney.safeParse(r.price);
+    if (!price.success || price.data == null) fail(i, price.success ? "enter a price adjustment." : (price.error.issues[0]?.message ?? "enter a price adjustment."));
+    return { dependsOnValueId: r.dependsOnValueId, priceModifierCents: (price as { data: number }).data, displayOrder: i };
+  });
+}
+
 export const saveOptionValue = adminAction(async (admin, groupId: string, valueId: string | null, data: FormData) => {
   const displayName = fd.str(data, "displayName");
   const input = valueSchema.parse({
@@ -156,20 +201,29 @@ export const saveOptionValue = adminAction(async (admin, groupId: string, valueI
     quantity = { quantityEnabled: true, quantityMin: q.min, quantityMax: q.max, quantityStep: q.step, quantityDefault: q.default };
   }
 
+  const priceRules = await readPriceRules(data, groupId);
   const { priceModifier, ...rest } = input;
   const payload = { ...rest, priceModifierCents: priceModifier ?? 0, ...quantity };
   const group = await prisma.optionGroup.findUnique({ where: { id: groupId }, select: { name: true } });
   if (!group) throw new AdminError("That option group no longer exists.");
 
-  let id = valueId;
-  if (valueId) {
-    await prisma.optionValue.update({ where: { id: valueId, groupId }, data: payload });
-  } else {
-    const last = await prisma.optionValue.aggregate({ where: { groupId }, _max: { displayOrder: true } });
-    const created = await prisma.optionValue.create({ data: { ...payload, groupId, displayOrder: (last._max.displayOrder ?? -1) + 1 } });
-    id = created.id;
-  }
-  await logActivity("option.updated", `${admin.name} ${valueId ? "updated" : "added"} value "${input.displayName}" in "${group.name}"`, {
+  const id = await prisma.$transaction(async (tx) => {
+    let saved: string;
+    if (valueId) {
+      saved = (await tx.optionValue.update({ where: { id: valueId, groupId }, data: payload, select: { id: true } })).id;
+    } else {
+      const last = await tx.optionValue.aggregate({ where: { groupId }, _max: { displayOrder: true } });
+      saved = (await tx.optionValue.create({ data: { ...payload, groupId, displayOrder: (last._max.displayOrder ?? -1) + 1 }, select: { id: true } })).id;
+    }
+    // Rules are configuration (saved quotes keep their own prices), so they're replaced as a set.
+    if (priceRules) {
+      await tx.optionValuePriceRule.deleteMany({ where: { optionValueId: saved } });
+      if (priceRules.length) await tx.optionValuePriceRule.createMany({ data: priceRules.map((r) => ({ ...r, optionValueId: saved })) });
+    }
+    return saved;
+  });
+  const ruleNote = priceRules?.length ? ` with ${priceRules.length} conditional price${priceRules.length === 1 ? "" : "s"}` : "";
+  await logActivity("option.updated", `${admin.name} ${valueId ? "updated" : "added"} value "${input.displayName}" in "${group.name}"${ruleNote}`, {
     actorId: admin.id,
     entityType: "optionGroup",
     entityId: groupId,
@@ -209,7 +263,7 @@ export const reorderOptionValues = adminAction(async (admin, groupId: string, id
  * product, so nothing changes on the public site until you attach it.
  */
 export const duplicateOptionGroup = adminAction(async (admin, id: string) => {
-  const src = await prisma.optionGroup.findUnique({ where: { id }, include: { values: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }] } } });
+  const src = await prisma.optionGroup.findUnique({ where: { id }, include: { values: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }], include: { priceRules: true } } } });
   if (!src) throw new AdminError("That option group no longer exists.");
   const similar = await prisma.optionGroup.findMany({ where: { name: { startsWith: `Copy of ${src.name}`.slice(0, 110), mode: "insensitive" } }, select: { name: true } });
   const name = nextFreeName(`Copy of ${src.name}`, similar.map((g) => g.name));
@@ -239,6 +293,7 @@ export const duplicateOptionGroup = adminAction(async (admin, id: string) => {
           quantityDefault: v.quantityDefault,
           active: v.active,
           displayOrder: i,
+          priceRules: { create: v.priceRules.map((r) => ({ dependsOnValueId: r.dependsOnValueId, priceModifierCents: r.priceModifierCents, displayOrder: r.displayOrder })) },
         })),
       },
     },
@@ -254,7 +309,7 @@ export const duplicateOptionGroup = adminAction(async (admin, id: string) => {
  * identical second choice shouldn't appear there before it's edited.
  */
 export const duplicateOptionValue = adminAction(async (admin, groupId: string, valueId: string) => {
-  const src = await prisma.optionValue.findFirst({ where: { id: valueId, groupId }, include: { group: { select: { name: true } } } });
+  const src = await prisma.optionValue.findFirst({ where: { id: valueId, groupId }, include: { group: { select: { name: true } }, priceRules: true } });
   if (!src) throw new AdminError("That value no longer exists.");
   const siblings = await prisma.optionValue.findMany({ where: { groupId }, orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }], select: { id: true, name: true } });
   const name = nextFreeName(`${src.name} (copy)`, siblings.map((s) => s.name));
@@ -275,6 +330,7 @@ export const duplicateOptionValue = adminAction(async (admin, groupId: string, v
         quantityStep: src.quantityStep,
         quantityDefault: src.quantityDefault,
         active: false,
+        priceRules: { create: src.priceRules.map((r) => ({ dependsOnValueId: r.dependsOnValueId, priceModifierCents: r.priceModifierCents, displayOrder: r.displayOrder })) },
       },
     });
     // Renumber so the copy sits right after the original.

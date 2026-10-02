@@ -60,6 +60,11 @@ export function SnapshotView({
                         <Badge tone="violet">Custom</Badge>
                       </span>
                     ) : null}
+                    {o.priceCondition ? (
+                      <p className="mt-0.5 text-xs text-neutral-500">
+                        Conditional price with {o.priceCondition.dependsOnGroupName}: {o.priceCondition.dependsOnValueName} (default {formatModifier(o.priceCondition.defaultPriceModifierCents) || "$0"})
+                      </p>
+                    ) : null}
                     {o.customDetails ? <p className="mt-1 whitespace-pre-wrap text-xs text-neutral-700">Details: {o.customDetails}</p> : null}
                   </td>
                   <td className="py-2 text-right align-top tabular-nums text-neutral-700">{formatModifier(snapshotOptionTotal(o)) || "Included"}</td>
@@ -97,6 +102,7 @@ export function SnapshotView({
                             <dd>
                               {c.value}
                               {c.priceModifierCents ? ` (${formatModifier(c.priceModifierCents)})` : ""}
+                              {c.priceCondition ? ` — with ${c.priceCondition.dependsOnValueName}` : ""}
                             </dd>
                           </div>
                         ))}

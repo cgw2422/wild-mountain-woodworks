@@ -110,7 +110,7 @@ export default async function HomePage() {
                 eyebrow={categoriesSection.eyebrow}
                 heading={categoriesSection.heading}
                 subheading={categoriesSection.subheading}
-                className="[&_h2]:scroll-mt-24"
+                className="[&_h2]:scroll-mt-[calc(6rem+var(--admin-bar-h))]"
                 action={
                   <IfPublic path="/furniture">
                     <Link href="/furniture" className="inline-flex min-h-11 items-center gap-3 text-[0.74rem] font-semibold uppercase tracking-[0.16em]">

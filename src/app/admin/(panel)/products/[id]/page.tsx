@@ -77,7 +77,7 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
     }),
     prisma.optionGroup.findMany({
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
-      include: { values: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }] } },
+      include: { values: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }], include: { _count: { select: { priceRules: true } } } } },
     }),
     prisma.addOn.findMany({ orderBy: [{ displayOrder: "asc" }, { name: "asc" }] }),
     getSettings(),
@@ -264,6 +264,7 @@ export default async function ProductEditorPage({ params }: { params: Promise<{ 
                     active: v.active,
                     isCustom: v.isCustom,
                     quantityEnabled: v.quantityEnabled,
+                    conditionalPrices: v._count.priceRules,
                   })),
                 }))}
                 initial={product.optionGroups.map((pog) => ({

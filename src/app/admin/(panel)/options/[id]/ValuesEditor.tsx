@@ -9,6 +9,7 @@ import { Badge, EmptyState, adminButton } from "@/components/admin/ui";
 import { ImageField, type ImageValue } from "@/components/admin/media/ImageField";
 import { ColorField } from "@/components/admin/catalog/ColorField";
 import { SortableRows } from "@/components/admin/catalog/SortableRows";
+import { PriceRulesEditor, type RuleGroup, type RuleRow } from "./PriceRulesEditor";
 
 export type ValueRow = {
   id: string;
@@ -27,6 +28,8 @@ export type ValueRow = {
   swatchColor: string;
   image: ImageValue | null;
   overrideCount: number;
+  /** Conditional prices, in order. */
+  priceRules: RuleRow[];
 };
 
 export function ValuesEditor({
@@ -36,9 +39,12 @@ export function ValuesEditor({
   remove,
   duplicate,
   reorder,
+  ruleGroups,
 }: {
   inputType: string;
   values: ValueRow[];
+  /** Other option groups (with values) a conditional price can depend on. */
+  ruleGroups: RuleGroup[];
   save: (valueId: string | null, data: FormData) => Promise<ActionResult>;
   remove: (valueId: string) => Promise<ActionResult>;
   duplicate: (valueId: string) => Promise<ActionResult>;
@@ -93,6 +99,7 @@ export function ValuesEditor({
                       : v.priceModifierCents
                         ? formatModifier(v.priceModifierCents)
                         : "No price change"}
+                    {v.priceRules.length ? ` · ${v.priceRules.length} conditional price${v.priceRules.length === 1 ? "" : "s"}` : ""}
                     {v.overrideCount ? ` · customized on ${v.overrideCount} product${v.overrideCount === 1 ? "" : "s"}` : ""}
                   </p>
                 </div>
@@ -153,7 +160,7 @@ export function ValuesEditor({
               label="Price modifier / price per unit"
               name="priceModifier"
               defaultValue={centsToDollarInput(current?.priceModifierCents ?? 0)}
-              help="Added to the base price. For a quantity-based value this is the price of ONE (e.g. 192.50 per chair) and is multiplied by the quantity chosen. Use a negative amount for a discount. 0 = no change."
+              help="The default, added to the base price. For a quantity-based value this is the price of ONE (e.g. 192.50 per chair) and is multiplied by the quantity chosen. Use a negative amount for a discount. 0 = no change. Conditional pricing rules below can replace it depending on other choices."
             />
             <ColorField name="swatchColor" label="Swatch color" defaultValue={current?.swatchColor} help={inputType === "SWATCH" ? "Shown as the swatch for this value." : "Used when the group displays color swatches."} />
             <ImageField
@@ -175,6 +182,7 @@ export function ValuesEditor({
               <Toggle label="Active" name="active" defaultChecked={current?.active ?? true} description="Inactive values are hidden on every product." />
             </div>
             <QuantitySettings current={current} />
+            <PriceRulesEditor groups={ruleGroups} initial={current?.priceRules ?? []} perUnit={current?.quantityEnabled ?? false} />
             <div className="flex justify-end gap-2 border-t border-neutral-200 pt-4 sm:col-span-2">
               <button type="button" className={adminButton.secondary} onClick={() => setEditing(null)}>
                 Cancel

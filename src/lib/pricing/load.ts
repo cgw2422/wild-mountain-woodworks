@@ -9,11 +9,19 @@ const mediaSelect = {
   select: { url: true, alt: true, width: true, height: true, focalX: true, focalY: true, blurDataUrl: true },
 } as const;
 
+/** Option values with their image and conditional prices (controlling value's group included). */
+const valuesInclude = {
+  include: {
+    image: mediaSelect,
+    priceRules: { orderBy: { displayOrder: "asc" }, select: { dependsOnValueId: true, priceModifierCents: true, displayOrder: true, dependsOnValue: { select: { groupId: true } } } },
+  },
+} as const;
+
 /** Prisma include producing a `ProductConfigRecord` (see ./resolve.ts). */
 export const configurableProductInclude = {
   optionGroups: {
     include: {
-      optionGroup: { include: { values: { include: { image: mediaSelect } } } },
+      optionGroup: { include: { values: valuesInclude } },
       valueOverrides: true,
     },
   },
@@ -22,7 +30,7 @@ export const configurableProductInclude = {
       addOn: {
         include: {
           image: mediaSelect,
-          optionGroups: { include: { optionGroup: { include: { values: { include: { image: mediaSelect } } } } } },
+          optionGroups: { include: { optionGroup: { include: { values: valuesInclude } } } },
         },
       },
     },

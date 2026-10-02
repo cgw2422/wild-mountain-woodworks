@@ -152,11 +152,11 @@ export default async function CustomFurniturePage() {
       ) : null}
 
       {/* Form */}
-      <section id="custom-build-form" aria-labelledby="form-heading" className="scroll-mt-24 border-t border-stone bg-paper py-24 md:py-32">
+      <section id="custom-build-form" aria-labelledby="form-heading" className="scroll-mt-[calc(6rem+var(--admin-bar-h))] border-t border-stone bg-paper py-24 md:py-32">
         <Container size="wide">
           <div className="grid gap-14 lg:grid-cols-12 lg:gap-20">
             <div className="lg:col-span-4">
-              <div className="lg:sticky lg:top-32">
+              <div className="lg:sticky lg:top-[calc(8rem+var(--admin-bar-h))]">
                 {form.eyebrow ? <Eyebrow className="mb-6">{form.eyebrow}</Eyebrow> : null}
                 <h2 id="form-heading" className="display-lg">
                   {form.heading || "Tell us about your piece."}

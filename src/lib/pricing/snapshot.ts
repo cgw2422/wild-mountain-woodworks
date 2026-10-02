@@ -1,5 +1,18 @@
-import { chosenQuantity } from "./engine";
-import type { ConfigurableProduct, ConfigurationSelection, PricingResult } from "./types";
+import { applyConditionalPrices, chosenQuantity } from "./engine";
+import type { ConfigurableProduct, ConfigurationSelection, OptionPriceRule, PricingResult } from "./types";
+
+/**
+ * When a conditional rule set a price: the controlling choice (names copied)
+ * and the value's default price at the time. Absent = the default price
+ * applied (and on snapshots from before conditional pricing).
+ */
+export interface SnapshotPriceCondition {
+  dependsOnGroupId: string;
+  dependsOnGroupName: string;
+  dependsOnValueId: string;
+  dependsOnValueName: string;
+  defaultPriceModifierCents: number;
+}
 
 /**
  * An immutable record of exactly what a customer configured, captured at the
@@ -34,6 +47,8 @@ export interface ConfigurationSnapshot {
     quantity?: number;
     unitPriceCents?: number;
     totalCents?: number;
+    /** Set when a conditional price applied (e.g. Match Tabletop +$750 because Walnut was chosen). */
+    priceCondition?: SnapshotPriceCondition;
   }>;
   addOns: Array<{
     addOnId: string;
@@ -44,7 +59,7 @@ export interface ConfigurationSnapshot {
     totalCents: number;
     /** Configurable add-ons only (absent on simple add-ons and older snapshots). */
     basePriceCents?: number;
-    choices?: Array<{ groupId: string; groupName: string; label: string; valueId: string; value: string; priceModifierCents: number }>;
+    choices?: Array<{ groupId: string; groupName: string; label: string; valueId: string; value: string; priceModifierCents: number; priceCondition?: SnapshotPriceCondition }>;
   }>;
   totalCents: number | null;
   requiresCustomQuote: boolean;
@@ -59,9 +74,25 @@ export function buildConfigurationSnapshot(
   opts: { priceShownToCustomer: boolean; now?: Date },
 ): ConfigurationSnapshot {
   if (!pricing.valid) throw new Error("Cannot snapshot an invalid configuration");
+  // Prices in effect for this selection — the same numbers priceConfiguration charged.
+  const priced = applyConditionalPrices(product, selection);
+  const condition = (rule: OptionPriceRule | null | undefined, defaultCents: number | undefined, extraGroups: ConfigurableProduct["optionGroups"] = []): { priceCondition?: SnapshotPriceCondition } => {
+    if (!rule) return {};
+    const group = [...extraGroups, ...priced.optionGroups].find((g) => g.id === rule.dependsOnGroupId);
+    const value = group?.values.find((v) => v.id === rule.dependsOnValueId);
+    return {
+      priceCondition: {
+        dependsOnGroupId: rule.dependsOnGroupId,
+        dependsOnGroupName: group?.displayName ?? "",
+        dependsOnValueId: rule.dependsOnValueId,
+        dependsOnValueName: value?.displayName ?? "",
+        defaultPriceModifierCents: defaultCents ?? 0,
+      },
+    };
+  };
 
   const options: ConfigurationSnapshot["options"] = [];
-  for (const group of product.optionGroups) {
+  for (const group of priced.optionGroups) {
     const valueId = selection.options[group.id];
     const value = valueId ? group.values.find((v) => v.id === valueId) : undefined;
     if (!value) continue;
@@ -79,11 +110,12 @@ export function buildConfigurationSnapshot(
       isCustom: value.isCustom,
       customDetails: value.isCustom ? (selection.customDetails?.[group.id]?.trim() || null) : null,
       ...(qty != null ? { quantity: qty, unitPriceCents: value.priceModifierCents, totalCents: value.priceModifierCents * qty } : {}),
+      ...condition(value.appliedRule, value.defaultPriceModifierCents),
     });
   }
 
   const addOns: ConfigurationSnapshot["addOns"] = [];
-  for (const addOn of product.addOns) {
+  for (const addOn of priced.addOns) {
     const qty = Math.trunc(selection.addOns[addOn.id] ?? 0);
     if (qty <= 0) continue;
     // Configurable add-ons: copy the priced line (configured unit price + each choice) from the engine.
@@ -97,14 +129,19 @@ export function buildConfigurationSnapshot(
         quantity: qty,
         totalCents: line.amountCents,
         basePriceCents: line.addOn.basePriceCents,
-        choices: line.addOn.choices.map((c) => ({
-          groupId: c.groupId,
-          groupName: groups.get(c.groupId)?.name ?? c.label,
-          label: c.label,
-          valueId: selection.addOnOptions?.[addOn.id]?.[c.groupId] ?? "",
-          value: c.value,
-          priceModifierCents: c.priceModifierCents,
-        })),
+        choices: line.addOn.choices.map((c) => {
+          const valueId = selection.addOnOptions?.[addOn.id]?.[c.groupId] ?? "";
+          const chosen = groups.get(c.groupId)?.values.find((v) => v.id === valueId);
+          return {
+            groupId: c.groupId,
+            groupName: groups.get(c.groupId)?.name ?? c.label,
+            label: c.label,
+            valueId,
+            value: c.value,
+            priceModifierCents: c.priceModifierCents,
+            ...condition(c.conditional, chosen?.defaultPriceModifierCents, addOn.optionGroups),
+          };
+        }),
       });
       continue;
     }

@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export function PreviewBanner({ status, editHref, liveHref }: { status: string; editHref: string; liveHref?: string | null }) {
   return (
-    <div className="sticky top-0 z-50 bg-bronze-text text-ivory" role="status">
+    <div className="sticky top-[var(--admin-bar-h)] z-50 bg-bronze-text text-ivory" role="status">
       <div className="mx-auto flex max-w-[96rem] flex-wrap items-center justify-between gap-3 px-5 py-2.5 text-sm sm:px-8 lg:px-12">
         <p>
           <strong className="font-semibold">Preview</strong> — status: {status.toLowerCase()}. Only signed-in admins can see this page.

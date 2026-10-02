@@ -103,7 +103,7 @@ export async function ProductView({ data }: { data: Data }) {
         <Breadcrumbs items={crumbs} className="mb-6 md:mb-10" />
         <div className="grid gap-10 lg:grid-cols-12 lg:gap-14 xl:gap-20">
           <div className="lg:col-span-7">
-            <div className="relative lg:sticky lg:top-28">
+            <div className="relative lg:sticky lg:top-[calc(7rem+var(--admin-bar-h))]">
               {sale ? <SaleBadge label={sale.label} percentOff={sale.percentOff} size="hero" className="-left-2 sm:-left-4 lg:left-5" /> : null}
               <ProductGallery
                 images={images.map((img, i) => ({ ...img, id: `${img.id}-${i}` }))}

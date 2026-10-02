@@ -430,9 +430,37 @@ model OptionValue {
   updatedAt          DateTime    @updatedAt
 
   productOverrides ProductOptionValue[]
+  /// Conditional prices for THIS value ("Match Tabletop costs +$150 when Red Oak is chosen").
+  priceRules       OptionValuePriceRule[] @relation("PriceRuleTarget")
+  /// Rules on other values that depend on this one being chosen.
+  priceConditions  OptionValuePriceRule[] @relation("PriceRuleCondition")
 
   @@unique([groupId, name])
   @@index([groupId, displayOrder])
+}
+
+/// Conditional option pricing: while `dependsOnValue` (a value of another
+/// option group, e.g. Table Top Wood = Walnut) is selected, `optionValue`
+/// (e.g. Base Finish = Match Tabletop) uses `priceModifierCents` instead of
+/// its default price. Rules are checked in `displayOrder`; the first match
+/// wins; no match = the value's normal (or per-product) price. Evaluated only
+/// by src/lib/pricing/engine.ts (applyConditionalPrices), never stored in
+/// history: quotes/orders/invoices keep the price from their snapshot.
+model OptionValuePriceRule {
+  id                 String      @id @default(cuid())
+  optionValueId      String
+  optionValue        OptionValue @relation("PriceRuleTarget", fields: [optionValueId], references: [id], onDelete: Cascade)
+  dependsOnValueId   String
+  dependsOnValue     OptionValue @relation("PriceRuleCondition", fields: [dependsOnValueId], references: [id], onDelete: Cascade)
+  /// Per unit for quantity-based values, like the value's own price.
+  priceModifierCents Int
+  displayOrder       Int         @default(0)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@unique([optionValueId, dependsOnValueId])
+  @@index([optionValueId, displayOrder])
+  @@index([dependsOnValueId])
 }
 
 model ProductOptionGroup {

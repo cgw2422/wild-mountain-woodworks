@@ -72,7 +72,7 @@ async function PolicyPage({ visible: { page } }: { visible: VisiblePage }) {
           </article>
           {links.length ? (
             <aside className="lg:col-span-3 lg:col-start-10" aria-label={care.title || "Customer Care"}>
-              <div className="lg:sticky lg:top-32">
+              <div className="lg:sticky lg:top-[calc(8rem+var(--admin-bar-h))]">
                 <p className="eyebrow text-bronze-text">{care.title || "Customer Care"}</p>
                 <ul className="mt-5 space-y-3 border-l border-stone pl-5">
                   {links.map((l) => {

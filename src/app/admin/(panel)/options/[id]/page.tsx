@@ -32,7 +32,7 @@ export default async function OptionGroupPage({ params }: { params: Promise<{ id
     include: {
       values: {
         orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
-        include: { image: true, _count: { select: { productOverrides: true } } },
+        include: { image: true, _count: { select: { productOverrides: true } }, priceRules: { orderBy: { displayOrder: "asc" }, select: { dependsOnValueId: true, priceModifierCents: true } } },
       },
       products: {
         include: { product: { select: { id: true, name: true, status: true } } },
@@ -42,6 +42,12 @@ export default async function OptionGroupPage({ params }: { params: Promise<{ id
   });
   if (!group) notFound();
   const usedBy = group.products.length;
+  // Conditional prices can depend on a value of any OTHER option group.
+  const ruleGroups = await prisma.optionGroup.findMany({
+    where: { id: { not: group.id } },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, values: { orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }], select: { id: true, displayName: true, active: true } } },
+  });
 
   return (
     <>
@@ -71,13 +77,14 @@ export default async function OptionGroupPage({ params }: { params: Promise<{ id
               active: group.active,
             }}
           />
-          <Card title={`Values (${group.values.length})`} description="Price modifiers here are the defaults. Each product can disable values or override their price.">
+          <Card title={`Values (${group.values.length})`} description="Price modifiers here are the defaults. Each product can disable values or override their price, and a value can have conditional prices that depend on another option (e.g. Match Tabletop priced by the tabletop wood).">
             <ValuesEditor
               inputType={group.inputType}
               save={saveOptionValue.bind(null, group.id)}
               remove={deleteOptionValue.bind(null, group.id)}
               duplicate={duplicateOptionValue.bind(null, group.id)}
               reorder={reorderOptionValues.bind(null, group.id)}
+              ruleGroups={ruleGroups.filter((g) => g.values.length)}
               values={group.values.map((v) => ({
                 id: v.id,
                 name: v.name,
@@ -94,6 +101,7 @@ export default async function OptionGroupPage({ params }: { params: Promise<{ id
                 swatchColor: v.swatchColor ?? "",
                 image: toImageValue(v.image),
                 overrideCount: v._count.productOverrides,
+                priceRules: v.priceRules,
               }))}
             />
           </Card>

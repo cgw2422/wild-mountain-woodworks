@@ -19,7 +19,7 @@ export function HeaderShell({ children }: { children: React.ReactNode }) {
   return (
     <header
       className={cn(
-        "sticky top-0 z-40 h-[4.5rem] bg-ivory/95 backdrop-blur-sm transition-[box-shadow,border-color] duration-300 lg:h-20",
+        "sticky top-[var(--admin-bar-h)] z-40 h-[4.5rem] bg-ivory/95 backdrop-blur-sm transition-[box-shadow,border-color] duration-300 lg:h-20",
         "border-b",
         scrolled ? "border-stone" : "border-transparent",
       )}

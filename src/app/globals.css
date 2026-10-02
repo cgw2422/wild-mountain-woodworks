@@ -71,6 +71,11 @@
   html {
     -webkit-text-size-adjust: 100%;
     text-rendering: optimizeLegibility;
+    /* Height of the sticky front-end admin bar (h-10) while it's on the page; 0 for visitors. */
+    --admin-bar-h: 0px;
+  }
+  html:has([data-admin-bar]) {
+    --admin-bar-h: 2.5rem;
   }
   body {
     background: var(--color-ivory);

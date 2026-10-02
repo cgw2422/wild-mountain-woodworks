@@ -18,7 +18,7 @@ export default async function DocumentsLayout({ children }: { children: React.Re
   const settings = await getSettings();
   return (
     <div className="min-h-dvh bg-ivory print:bg-white">
-      <div className="print:hidden">
+      <div className="sticky top-0 z-[60] print:hidden">
         <SiteAdminBar />
       </div>
       <header className="border-b border-stone print:border-none">
