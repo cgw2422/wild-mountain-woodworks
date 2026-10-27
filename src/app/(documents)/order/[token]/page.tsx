@@ -8,7 +8,7 @@ import { customerOrderView } from "@/lib/sales/views";
 import { siteDateLong } from "@/lib/site-time";
 import { buttonClasses } from "@/components/ui/Button";
 import { AutoRefresh } from "@/components/documents/AutoRefresh";
-import { AddOnChoices, DocHeading, Facts, Files, Prose, Section, statusPill } from "@/components/documents/parts";
+import { AddOnChoices, DocHeading, LineNotes, Facts, Files, Prose, Section, statusPill } from "@/components/documents/parts";
 import { DepositMethodsNote, FinanceFullPurchase } from "@/components/payments/PaymentOptions";
 
 type Props = { params: Promise<{ token: string }>; searchParams: Promise<{ payment?: string }> };
@@ -183,7 +183,7 @@ export default async function CustomerOrderPage({ params, searchParams }: Props)
                     </p>
                   </>
                 ) : i.notes ? (
-                  <p className="mt-1 whitespace-pre-line text-sm text-muted">{i.notes}</p>
+                  <LineNotes notes={i.notes} />
                 ) : null}
               </div>
               <p className="tabular-nums">{i.lineTotalCents < 0 ? `−${formatCents(-i.lineTotalCents)}` : formatCents(i.lineTotalCents)}</p>

@@ -65,6 +65,18 @@ export interface ConfigurationSnapshot {
   requiresCustomQuote: boolean;
   /** Whether the price was visible to the customer when they submitted. */
   priceShownToCustomer: boolean;
+  /**
+   * The exact selection (ids only) that produced this snapshot, so a quote's
+   * "Edit configuration" can reopen it. Absent on older snapshots (see
+   * selectionFromSnapshot).
+   */
+  selection?: ConfigurationSelection;
+  /**
+   * Admin quotes: the configured total per piece as calculated by the
+   * pricing engine, and the manual override that replaced it (null = none).
+   * Internal only — never shown to customers.
+   */
+  quotePricing?: { calculatedTotalCents: number | null; overrideTotalCents: number | null };
 }
 
 export function buildConfigurationSnapshot(
@@ -168,6 +180,30 @@ export function buildConfigurationSnapshot(
     totalCents: pricing.totalCents,
     requiresCustomQuote: pricing.requiresCustomQuote,
     priceShownToCustomer: opts.priceShownToCustomer,
+    selection: cleanSelection(selection),
+  };
+}
+
+/** A selection reduced to plain ids, quantities and custom text (safe to store). */
+export function cleanSelection(sel: ConfigurationSelection): ConfigurationSelection {
+  return {
+    options: { ...sel.options },
+    optionQuantities: { ...sel.optionQuantities },
+    addOns: Object.fromEntries(Object.entries(sel.addOns ?? {}).filter(([, q]) => Number(q) > 0)),
+    addOnOptions: Object.fromEntries(Object.entries(sel.addOnOptions ?? {}).map(([k, v]) => [k, { ...v }])),
+    customDetails: { ...sel.customDetails },
+  };
+}
+
+/** The selection behind a snapshot — stored on newer ones, rebuilt from the saved choices on older ones. */
+export function selectionFromSnapshot(s: ConfigurationSnapshot): ConfigurationSelection {
+  if (s.selection) return cleanSelection(s.selection);
+  return {
+    options: Object.fromEntries(s.options.map((o) => [o.groupId, o.valueId])),
+    optionQuantities: Object.fromEntries(s.options.filter((o) => o.quantity != null).map((o) => [o.groupId, o.quantity!])),
+    addOns: Object.fromEntries(s.addOns.map((a) => [a.addOnId, a.quantity])),
+    addOnOptions: Object.fromEntries(s.addOns.filter((a) => a.choices?.length).map((a) => [a.addOnId, Object.fromEntries(a.choices!.map((c) => [c.groupId, c.valueId]))])),
+    customDetails: Object.fromEntries(s.options.filter((o) => o.customDetails).map((o) => [o.groupId, o.customDetails!])),
   };
 }
 

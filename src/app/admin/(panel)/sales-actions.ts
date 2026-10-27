@@ -1,6 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireStaff } from "@/lib/auth/session";
+import { can } from "@/lib/auth/permissions";
+import { loadConfigurableProduct } from "@/lib/pricing/load";
+import type { ConfigurableProduct } from "@/lib/pricing/types";
+import { defaultSelection } from "@/lib/pricing/engine";
+import { configuredProductLines } from "@/lib/sales/configured-lines";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
@@ -25,6 +31,7 @@ import {
   reopenQuote,
   resendQuote,
   saveRevision,
+  newConfigGroup,
   sendQuote,
   setQuoteArchived,
   setQuoteStatus,
@@ -74,6 +81,20 @@ const moneyCents = (label: string, allowNegative = false) =>
     .min(allowNegative ? -MAX_UNIT_PRICE_CENTS : 0, "That amount is out of range.")
     .max(MAX_UNIT_PRICE_CENTS, "That amount is out of range.");
 
+/** A configured catalog product: ids, quantities and custom text only — the server prices it. */
+const idKey = z.string().max(40);
+const configuredSchema = z.object({
+  selection: z.object({
+    options: z.record(idKey, idKey).default({}),
+    optionQuantities: z.record(idKey, z.number().int().min(0).max(999)).optional(),
+    addOns: z.record(idKey, z.number().int().min(0).max(999)).default({}),
+    addOnOptions: z.record(idKey, z.record(idKey, idKey)).optional(),
+    customDetails: z.record(idKey, z.string().max(2000)).optional(),
+  }),
+  overrideTotalCents: z.number().int().min(0).max(MAX_UNIT_PRICE_CENTS).nullable(),
+  changed: z.boolean(),
+});
+
 const lineSchema = z.object({
   sourceId: z.string().max(40).nullable().optional().transform((v) => v ?? null),
   kind: z.enum(LINE_KINDS),
@@ -83,6 +104,7 @@ const lineSchema = z.object({
   unitPriceCents: moneyCents("each line", true),
   taxable: z.boolean().default(true),
   productId: z.string().max(40).nullable().optional().transform((v) => v ?? null),
+  configured: configuredSchema.nullable().optional(),
 });
 
 function dayInput(value: string | null | undefined, field: string): Date | null {
@@ -237,13 +259,18 @@ export const createManualQuoteAction = permittedAction(PRICING, async (admin, da
   });
   const productId = fd.opt(data, "productId");
   const product = productId ? await prisma.product.findUnique({ where: { id: productId }, select: { id: true, name: true, basePriceCents: true } }) : null;
+  // Start from the product page's default configuration (an editable configured product); plain base-price line if that isn't complete.
+  const config = product ? await loadConfigurableProduct({ id: product.id }, { activeOnly: false }) : null;
+  const configured = config ? configuredProductLines(config, defaultSelection(config), { quantity: 1, configGroup: newConfigGroup() }) : null;
   const quote = await createManualQuote(admin, {
     ...input,
     productId: product?.id ?? null,
     productName: product?.name ?? null,
-    lines: product
-      ? [{ kind: "PRODUCT", description: product.name, notes: null, quantity: 1, unitPriceCents: product.basePriceCents ?? 0, taxable: true, productId: product.id, configuration: null }]
-      : undefined,
+    lines: configured?.ok
+      ? configured.lines
+      : product
+        ? [{ kind: "PRODUCT", description: product.name, notes: null, quantity: 1, unitPriceCents: product.basePriceCents ?? 0, taxable: true, productId: product.id, configuration: null }]
+        : undefined,
   });
   refreshSales("/admin/quotes");
   return { ok: true, id: quote.id, message: `Quote ${quote.number} created.` };
@@ -605,3 +632,17 @@ export const saveEmailTemplateAction = permittedAction("settings", async (admin,
   revalidatePath("/admin/settings/emails");
   return { ok: true, message: "Email template saved." };
 });
+
+/**
+ * A catalog product's live configuration (options, values, prices, conditional
+ * prices, add-ons, active sale) for the quote editor's configurator — the same
+ * data the product page uses. Staff who can edit quote pricing only. Drafts can
+ * be quoted too; the server re-prices whatever is chosen when the quote is saved.
+ */
+export async function quoteProductConfigAction(productId: string): Promise<ConfigurableProduct | null> {
+  const admin = await requireStaff();
+  if (!PRICING.every((p) => can(admin.role, p))) return null;
+  const id = idSchema.safeParse(productId);
+  if (!id.success) return null;
+  return loadConfigurableProduct({ id: id.data }, { activeOnly: false });
+}

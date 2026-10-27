@@ -830,6 +830,10 @@ model QuoteLineItem {
   configuration  Json?
   /// Configured add-on details (AddOnLineDetails) when this line is an add-on of the product above it.
   addOn          Json?
+  /// Lines generated from ONE configured catalog product (the piece, its sale discount, its add-ons)
+  /// share this id, so "Edit configuration" can rebuild them together. The PRODUCT line of the group
+  /// carries the ConfigurationSnapshot (with the selection and any price override). Null = a plain line.
+  configGroup    String?
 
   @@index([revisionId, position])
 }

@@ -84,6 +84,29 @@ export function AddOnChoices({ addOn, className }: { addOn: CustomerAddOn; class
   );
 }
 
+/**
+ * A line's details: "Label: value" lines (a configured product's choices —
+ * Size: 96 × 40, Top: Red Oak…) as a tidy two-column list; anything else as
+ * the text it is.
+ */
+export function LineNotes({ notes, className }: { notes: string; className?: string }) {
+  const rows = notes.split("\n").map((r) => r.trim()).filter(Boolean);
+  const specs = rows.map((r) => /^([^:]{1,60}):\s+(.+)$/.exec(r));
+  if (rows.length && specs.every(Boolean)) {
+    return (
+      <dl className={cn("mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm", className)}>
+        {specs.map((m, i) => (
+          <div key={i} className="contents">
+            <dt className="text-muted">{m![1]}</dt>
+            <dd>{m![2]}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <p className={cn("mt-1 whitespace-pre-line text-sm text-muted", className)}>{notes}</p>;
+}
+
 function sameAsChoices(notes: string, addOn: CustomerAddOn) {
   return notes.trim() === addOn.choices.map((c) => `${c.label}: ${c.value}`).join("\n");
 }
@@ -126,11 +149,7 @@ export function LinesTable({
               </p>
             ) : null}
             {l.addOn ? <AddOnChoices addOn={l.addOn} /> : null}
-            {l.notes && !(l.addOn && sameAsChoices(l.notes, l.addOn)) ? (
-              <p className="mt-1 whitespace-pre-line text-sm text-muted">
-                {l.notes}
-              </p>
-            ) : null}
+            {l.notes && !(l.addOn && sameAsChoices(l.notes, l.addOn)) ? <LineNotes notes={l.notes} /> : null}
           </li>
         ))}
       </ul>
@@ -176,11 +195,7 @@ export function LinesTable({
                       {l.description}
                     </p>
                     {l.addOn ? <AddOnChoices addOn={l.addOn} /> : null}
-                    {l.notes && !(l.addOn && sameAsChoices(l.notes, l.addOn)) ? (
-                      <p className="mt-1 whitespace-pre-line text-sm text-muted">
-                        {l.notes}
-                      </p>
-                    ) : null}
+                    {l.notes && !(l.addOn && sameAsChoices(l.notes, l.addOn)) ? <LineNotes notes={l.notes} /> : null}
                   </div>
                 </td>
                 <td className="py-4 pr-4 text-right tabular-nums">

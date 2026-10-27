@@ -5,7 +5,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { can } from "@/lib/auth/permissions";
-import { parseSnapshot } from "@/lib/pricing/snapshot";
+import { parseSnapshot, selectionFromSnapshot } from "@/lib/pricing/snapshot";
+import type { EditableLine } from "@/components/admin/sales/LineItemsEditor";
 import { centsToDollarInput } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { siteDateInput } from "@/lib/site-time";
@@ -204,6 +205,7 @@ export default async function QuoteDetailPage({ params }: Props) {
 
           {editable ? (
             <QuoteEditor
+              version={`${current.id}-${current.updatedAt.getTime()}`}
               action={saveQuoteRevisionAction.bind(null, quote.id)}
               taxEnabled={settings.taxEnabled}
               products={products}
@@ -222,18 +224,7 @@ export default async function QuoteDetailPage({ params }: Props) {
                 depositPercent: current.depositPercentBps != null ? formatBps(current.depositPercentBps).replace("%", "") : "50",
                 depositAmount: centsToDollarInput(current.depositAmountCents),
                 tax: centsToDollarInput(current.taxCents || null),
-                lines: current.lineItems.map((l) => ({
-                  key: l.id,
-                  sourceId: l.id,
-                  kind: l.kind as LineKind,
-                  description: l.description,
-                  notes: l.notes ?? "",
-                  quantity: String(l.quantity),
-                  price: centsToDollarInput(Math.abs(l.unitPriceCents)),
-                  taxable: l.taxable,
-                  productId: l.productId,
-                  addOnSummary: addOnSummary(l.addOn),
-                })),
+                lines: editorLines(current.lineItems),
               }}
             />
           ) : !accepted ? (
@@ -482,6 +473,66 @@ export default async function QuoteDetailPage({ params }: Props) {
 }
 
 /** "Add-on of The Ridge Dining Table — Style: X Back · Wood Species: Oak" */
+type LineRow = { id: string; position: number; kind: string; description: string; notes: string | null; quantity: number; unitPriceCents: number; taxable: boolean; productId: string | null; addOn: unknown; configuration: unknown; configGroup: string | null };
+
+/**
+ * Editor lines for the draft: the lines of one configured product (piece,
+ * sale discount, add-ons — same configGroup) become ONE configured line
+ * whose choices reopen in the configurator. Everything else stays a plain
+ * line; older product lines with a snapshot can still be configured.
+ */
+function editorLines(items: LineRow[]): EditableLine[] {
+  const sorted = [...items].sort((a, b) => a.position - b.position);
+  const done = new Set<string>();
+  const out: EditableLine[] = [];
+  for (const l of sorted) {
+    if (l.configGroup && done.has(l.configGroup)) continue;
+    if (l.configGroup) {
+      const group = sorted.filter((x) => x.configGroup === l.configGroup);
+      const head = group.find((x) => x.kind === "PRODUCT" && x.productId && parseSnapshot(x.configuration));
+      if (head) {
+        done.add(l.configGroup);
+        const snap = parseSnapshot(head.configuration)!;
+        out.push({
+          key: head.id,
+          sourceId: head.id,
+          kind: "PRODUCT",
+          description: head.description,
+          notes: "",
+          quantity: String(head.quantity),
+          price: "0",
+          taxable: head.taxable,
+          productId: head.productId,
+          config: {
+            productId: head.productId!,
+            selection: selectionFromSnapshot(snap),
+            overrideTotalCents: snap.quotePricing?.overrideTotalCents ?? null,
+            calculatedTotalCents: snap.quotePricing?.calculatedTotalCents ?? snap.totalCents,
+            changed: false,
+            lines: group.map((x) => ({ kind: x.kind as LineKind, description: x.description, notes: x.notes, quantity: x.quantity, unitPriceCents: x.unitPriceCents })),
+          },
+        });
+        continue;
+      }
+    }
+    const snap = l.kind === "PRODUCT" && l.productId ? parseSnapshot(l.configuration) : null;
+    out.push({
+      key: l.id,
+      sourceId: l.id,
+      kind: l.kind as LineKind,
+      description: l.description,
+      notes: l.notes ?? "",
+      quantity: String(l.quantity),
+      price: centsToDollarInput(Math.abs(l.unitPriceCents)),
+      taxable: l.taxable,
+      productId: l.productId,
+      addOnSummary: addOnSummary(l.addOn),
+      legacySelection: snap ? selectionFromSnapshot(snap) : null,
+    });
+  }
+  return out;
+}
+
 function addOnSummary(value: unknown): string | null {
   const a = parseAddOnLine(value);
   return a ? `of ${a.parentProduct.name}: ${a.choices.map((c) => `${c.label}: ${c.value}`).join(" · ") || "no options"}` : null;

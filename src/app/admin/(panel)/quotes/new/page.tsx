@@ -25,7 +25,7 @@ export default async function NewQuotePage({ searchParams }: { searchParams: Pro
             <TextInput label="ZIP code" name="zipCode" maxLength={10} />
           </div>
           <TextInput label="Delivery address" name="address" maxLength={300} />
-          <Select label="Start from a product (optional)" name="productId" defaultValue={preselected} placeholder="— None —" options={products.map((p) => ({ value: p.id, label: p.name }))} help="Adds the product at its current base price as the first line." />
+          <Select label="Start from a product (optional)" name="productId" defaultValue={preselected} placeholder="— None —" options={products.map((p) => ({ value: p.id, label: p.name }))} help="Adds the product with its default options as the first line — use “Edit configuration” in the quote to choose size, wood, base, chairs and more." />
           <TextArea label="Request notes" name="notes" rows={3} maxLength={4000} help="What the customer asked for. Internal." />
           <div className="flex justify-end border-t border-neutral-100 pt-4">
             <SubmitButton>Create quote</SubmitButton>

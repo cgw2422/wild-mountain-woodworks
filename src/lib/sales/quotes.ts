@@ -3,7 +3,7 @@ import type { Prisma, QuoteSource, QuoteStatus } from "@/generated/prisma/client
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { formatCents } from "@/lib/money";
-import { addOnChoicesText, addOnLineDetails, parseAddOnLine, snapshotOptionTotal, type AddOnLineDetails, type ConfigurationSnapshot } from "@/lib/pricing/snapshot";
+import { parseAddOnLine, type AddOnLineDetails, type ConfigurationSnapshot } from "@/lib/pricing/snapshot";
 import { adminRecipient, sendTemplateEmail, type SendResult } from "@/lib/email/send";
 import { getSettings, salesFlags } from "@/lib/settings";
 import { siteDateLong } from "@/lib/site-time";
@@ -19,6 +19,9 @@ import { createOrderFromRevision, type Actor } from "./orders";
 import { QUOTE_STATUS_LABELS } from "./status";
 import { newCustomerToken } from "./tokens";
 import { computeTotals, formatBps, lineTotal, normalizeUnitPrice, type DepositType, type LineInput, type LineKind, type Totals } from "./totals";
+import { configuredProductLines, linesFromSnapshot, type DraftLine } from "./configured-lines";
+import { loadConfigurableProduct } from "@/lib/pricing/load";
+import type { ConfigurationSelection } from "@/lib/pricing/types";
 
 type Db = Prisma.TransactionClient;
 const DAY = 86_400_000;
@@ -32,78 +35,7 @@ export interface CustomerMeta {
 
 /* ------------------------------------------------------------------ lines */
 
-export interface DraftLine {
-  kind: LineKind;
-  description: string;
-  notes: string | null;
-  quantity: number;
-  unitPriceCents: number;
-  taxable: boolean;
-  productId: string | null;
-  configuration: ConfigurationSnapshot | null;
-  /** A configured add-on of the product line above it (e.g. Dining Chairs with their choices). */
-  addOn?: AddOnLineDetails | null;
-}
-
-/**
- * The starting lines for a configured request: the piece at its REGULAR
- * price (base + ordinary options), a separate sale discount line when a sale
- * applied, one line per quantity-based option (e.g. "Dining Chairs — Cross
- * Back Chair", 4 × $192.50) and one per add-on. Their total equals the
- * snapshot's total.
- */
-export function linesFromSnapshot(s: ConfigurationSnapshot, quantity = 1): DraftLine[] {
-  const qty = Math.max(1, Math.trunc(quantity));
-  const perPiece = s.options.filter((o) => o.quantity == null);
-  const counted = s.options.filter((o) => o.quantity != null && o.quantity > 0);
-  const optionsCents = perPiece.reduce((sum, o) => sum + snapshotOptionTotal(o), 0);
-  const regularBase = s.sale?.regularBasePriceCents ?? s.basePriceCents ?? 0;
-  const notes = perPiece.map((o) => `${o.groupDisplayName}: ${o.valueDisplayName}${o.customDetails ? ` (${o.customDetails})` : ""}`).join("\n");
-  const lines: DraftLine[] = [
-    {
-      kind: "PRODUCT",
-      description: s.product.name,
-      notes: notes || null,
-      quantity: qty,
-      unitPriceCents: s.basePriceCents == null ? 0 : regularBase + optionsCents,
-      taxable: true,
-      productId: s.product.id,
-      configuration: s,
-    },
-  ];
-  if (s.sale && s.sale.savingsCents > 0) {
-    const pct = s.sale.percent != null ? ` (${s.sale.percent}% off)` : "";
-    lines.push({ kind: "DISCOUNT", description: `${s.sale.label || "Sale"}${pct} — ${s.product.name}`, notes: null, quantity: qty, unitPriceCents: -s.sale.savingsCents, taxable: true, productId: null, configuration: null });
-  }
-  for (const o of counted) {
-    lines.push({
-      kind: "ADDON",
-      description: `${o.groupDisplayName} — ${o.valueDisplayName}`,
-      notes: o.customDetails,
-      quantity: o.quantity! * qty,
-      unitPriceCents: o.unitPriceCents ?? o.priceModifierCents,
-      taxable: true,
-      productId: null,
-      configuration: null,
-    });
-  }
-  for (const a of s.addOns) {
-    // Configured add-ons keep every choice (style, wood, finishes…) on their own line, grouped under the piece.
-    const details = addOnLineDetails(s, a);
-    lines.push({
-      kind: "ADDON",
-      description: a.name,
-      notes: details ? addOnChoicesText(details.choices) : null,
-      quantity: a.quantity * qty,
-      unitPriceCents: a.unitPriceCents,
-      taxable: true,
-      productId: null,
-      configuration: null,
-      addOn: details,
-    });
-  }
-  return lines;
-}
+export { linesFromSnapshot, type DraftLine } from "./configured-lines";
 
 function lineCreates(lines: DraftLine[]) {
   return lines.map((l, i) => {
@@ -120,9 +52,13 @@ function lineCreates(lines: DraftLine[]) {
       productId: l.productId,
       configuration: (l.configuration ?? undefined) as Prisma.InputJsonValue | undefined,
       addOn: (l.addOn ?? undefined) as Prisma.InputJsonValue | undefined,
+      configGroup: l.configGroup ?? null,
     };
   });
 }
+
+/** A new id for the lines of one configured product. */
+export const newConfigGroup = () => `cfg_${crypto.randomUUID()}`;
 
 function totalsFields(t: Totals) {
   return {
@@ -199,7 +135,7 @@ export async function createQuoteRecord(tx: Db, input: NewQuoteInput) {
       statusEvents: { create: { toStatus: status, authorId: input.createdById ?? null } },
     },
   });
-  const lines = input.lines ?? (input.configuration ? linesFromSnapshot(input.configuration, quantity) : []);
+  const lines = input.lines ?? (input.configuration ? linesFromSnapshot(input.configuration, quantity, newConfigGroup()) : []);
   const deposit = input.deposit ?? { depositType: (settings?.defaultDepositType ?? "PERCENTAGE") as DepositType, depositPercentBps: settings?.defaultDepositPercentBps ?? 5000, depositAmountCents: settings?.defaultDepositAmountCents ?? null };
   const revision = await tx.quoteRevision.create({
     data: {
@@ -265,7 +201,7 @@ export async function ensureQuoteReady(quoteId: string) {
         data.currentRevision = { connect: { id: existing.id } };
       } else {
         const snap = q.configuration as ConfigurationSnapshot | null;
-        const lines = snap && typeof snap === "object" && "product" in snap ? linesFromSnapshot(snap, q.quantity) : [];
+        const lines = snap && typeof snap === "object" && "product" in snap ? linesFromSnapshot(snap, q.quantity, newConfigGroup()) : [];
         const deposit = { depositType: (settings?.defaultDepositType ?? "PERCENTAGE") as DepositType, depositPercentBps: settings?.defaultDepositPercentBps ?? 5000, depositAmountCents: settings?.defaultDepositAmountCents ?? null };
         const rev = await tx.quoteRevision.create({
           data: {
@@ -301,6 +237,13 @@ export interface RevisionLineInput {
   unitPriceCents: number;
   taxable: boolean;
   productId: string | null;
+  /**
+   * A configured catalog product (kind PRODUCT): the choices, not prices.
+   * `changed` = re-price with the current catalog (the server runs the
+   * product page's pricing engine); unchanged = keep its saved lines as-is.
+   * `overrideTotalCents` (per piece) replaces the calculated total.
+   */
+  configured?: { selection: ConfigurationSelection; overrideTotalCents: number | null; changed: boolean } | null;
 }
 
 export interface RevisionInput {
@@ -343,10 +286,52 @@ export async function saveRevision(actor: Actor, quoteId: string, input: Revisio
   const productIds = [...new Set(input.lines.map((l) => l.productId).filter((x): x is string => Boolean(x)))];
   const validProducts = new Set((productIds.length ? await prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true } }) : []).map((p) => p.id));
 
-  const lines: DraftLine[] = input.lines.map((l) => {
+  // Saved lines of each configured product group referenced by a source line (kept as-is when unchanged).
+  const groupIds = [...new Set(sources.map((x) => x.configGroup).filter((x): x is string => Boolean(x)))];
+  const groupLines = groupIds.length ? await prisma.quoteLineItem.findMany({ where: { configGroup: { in: groupIds }, revisionId: { in: revisionIds } }, orderBy: { position: "asc" } }) : [];
+
+  const lines: DraftLine[] = [];
+  const configChanges: string[] = [];
+  const keptGroupLineIds = new Set<string>();
+  for (const l of input.lines) {
     const src = l.sourceId ? sourceById.get(l.sourceId) : undefined;
     const productId = l.productId && validProducts.has(l.productId) ? l.productId : (src?.productId ?? null);
-    return {
+
+    if (l.configured && l.kind === "PRODUCT" && productId) {
+      const group = src?.configGroup && src.productId === productId ? src.configGroup : null;
+      if (!l.configured.changed && group && src && src.quantity === l.quantity) {
+        // Unchanged configuration: keep exactly what was priced (no silent re-pricing).
+        for (const g of groupLines.filter((x) => x.configGroup === group && x.revisionId === src.revisionId)) {
+          keptGroupLineIds.add(g.id);
+          lines.push({
+            kind: g.kind as LineKind,
+            description: g.id === src.id ? l.description : g.description,
+            notes: g.notes,
+            quantity: g.quantity,
+            unitPriceCents: g.unitPriceCents,
+            taxable: l.taxable,
+            productId: g.productId,
+            configuration: g.configuration as ConfigurationSnapshot | null,
+            addOn: parseAddOnLine(g.addOn),
+            configGroup: group,
+          });
+        }
+        continue;
+      }
+      // New or changed configuration: priced by the server with the product page's engine — never browser prices.
+      const product = await loadConfigurableProduct({ id: productId }, { activeOnly: false });
+      if (!product) throw new SalesError(`“${l.description}” is no longer in the catalog. Remove the line or add it as a custom line.`);
+      const priced = configuredProductLines(product, l.configured.selection, { quantity: l.quantity, overrideTotalCents: l.configured.overrideTotalCents, configGroup: group ?? newConfigGroup() });
+      if (!priced.ok) throw new SalesError(`${l.description}: ${priced.message}`);
+      if (src) for (const g of groupLines.filter((x) => x.configGroup === group)) keptGroupLineIds.add(g.id);
+      for (const d of priced.lines) lines.push(d.kind === "PRODUCT" ? { ...d, description: l.description, taxable: l.taxable } : { ...d, taxable: l.taxable });
+      configChanges.push(
+        `configured ${l.description} × ${l.quantity}: ${formatCents(priced.calculatedTotalCents ?? 0)} each${l.configured.overrideTotalCents != null ? ` → override ${formatCents(l.configured.overrideTotalCents)} each` : ""}`,
+      );
+      continue;
+    }
+
+    lines.push({
       kind: l.kind,
       description: l.description,
       notes: l.notes,
@@ -357,16 +342,17 @@ export async function saveRevision(actor: Actor, quoteId: string, input: Revisio
       configuration: src && src.productId === productId ? (src.configuration as ConfigurationSnapshot | null) : null,
       // A configured add-on's details stay with its line while it remains an add-on line.
       addOn: src && l.kind === "ADDON" ? parseAddOnLine(src.addOn) : null,
-    };
-  });
+    });
+  }
   const deposit = { depositType: input.depositType, depositPercentBps: input.depositType === "PERCENTAGE" ? input.depositPercentBps : null, depositAmountCents: input.depositType === "FIXED_AMOUNT" ? input.depositAmountCents : null };
   const totals = computeTotals(lines, deposit, settings.taxEnabled ? input.taxCents : 0);
   if (totals.totalCents < 0) throw new SalesError("Discounts can't be larger than the quote total.");
 
   // Audit manual price changes line by line (description + unit price).
-  const changes: string[] = [];
+  const changes: string[] = [...configChanges];
   const prevById = new Map(rev.lineItems.map((l) => [l.id, l]));
   for (const l of input.lines) {
+    if (l.configured) continue; // logged above
     const prev = l.sourceId ? prevById.get(l.sourceId) : undefined;
     const unit = normalizeUnitPrice(l.kind, l.unitPriceCents);
     if (prev && (prev.unitPriceCents !== unit || prev.quantity !== l.quantity)) {
@@ -375,7 +361,7 @@ export async function saveRevision(actor: Actor, quoteId: string, input: Revisio
       changes.push(`added ${l.description} ${l.quantity} × ${formatCents(unit)}`);
     }
   }
-  const keptIds = new Set(input.lines.map((l) => l.sourceId));
+  const keptIds = new Set<string | null>([...input.lines.map((l) => l.sourceId), ...keptGroupLineIds]);
   for (const prev of rev.lineItems) if (!keptIds.has(prev.id)) changes.push(`removed ${prev.description}`);
 
   await prisma.$transaction(async (tx) => {
@@ -462,6 +448,7 @@ export async function createRevision(actor: Actor, quoteId: string) {
             productId: l.productId,
             configuration: (l.configuration ?? undefined) as Prisma.InputJsonValue | undefined,
             addOn: (l.addOn ?? undefined) as Prisma.InputJsonValue | undefined,
+            configGroup: l.configGroup,
           })),
         },
       },
@@ -867,6 +854,7 @@ export async function duplicateQuote(actor: Actor, quoteId: string) {
     productId: l.productId,
     configuration: l.configuration as ConfigurationSnapshot | null,
     addOn: parseAddOnLine(l.addOn),
+    configGroup: l.configGroup,
   }));
   const copy = await prisma.$transaction(async (tx) => {
     const q = await createQuoteRecord(tx, {
